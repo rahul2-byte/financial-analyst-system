@@ -5,8 +5,21 @@ from backend.agents.base import BaseAgent
 from backend.app.models.response_models import ToolStatus, StreamEvent
 
 
-class MockLLMService:
-    pass
+from backend.app.services.llm_interface import LLMServiceInterface
+
+
+class MockLLMService(LLMServiceInterface):
+    def generate_stream(self, *args, **kwargs):
+        pass
+
+    async def generate(self, *args, **kwargs):
+        pass
+
+    async def generate_message(self, *args, **kwargs):
+        pass
+
+    async def check_health(self):
+        return True
 
 
 def test_tool_status_model():

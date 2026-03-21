@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, Any
+from typing import Optional, Any, Literal, Union, Dict
 
 
 class ChatResponse(BaseModel):
@@ -14,7 +14,7 @@ class ToolStatus(BaseModel):
     step_number: int
     agent: str
     tool_name: str
-    status: str  # running, completed, error
+    status: Literal["running", "completed", "error"]
     input: str
     output: Optional[str] = None
 
@@ -25,5 +25,5 @@ class StreamEvent(BaseModel):
     Can be 'token', 'error', 'done', 'tool_call', or 'tool_status'.
     """
 
-    event: str
-    data: Any  # The actual payload
+    event: Literal["token", "error", "done", "tool_call", "tool_status"]
+    data: Union[ToolStatus, ChatResponse, str, Dict[str, Any]]
