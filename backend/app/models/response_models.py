@@ -9,11 +9,21 @@ class ChatResponse(BaseModel):
     total_duration: Optional[int] = None
 
 
+class ToolStatus(BaseModel):
+    tool_id: str
+    step_number: int
+    agent: str
+    tool_name: str
+    status: str  # running, completed, error
+    input: str
+    output: Optional[str] = None
+
+
 class StreamEvent(BaseModel):
     """
     Structure for SSE events.
-    Can be 'token', 'error', 'done', or 'tool_call'.
+    Can be 'token', 'error', 'done', 'tool_call', or 'tool_status'.
     """
 
-    event: str  # token, done, error
+    event: str
     data: Any  # The actual payload
