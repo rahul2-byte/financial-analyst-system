@@ -1,0 +1,49 @@
+version: '3.8'
+
+services:
+  postgres:
+    image: docker.io/library/postgres:15
+    container_name: fin_postgres
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-fin_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-fin_password}
+      POSTGRES_DB: ${POSTGRES_DB:-fin_db}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fin_user} -d ${POSTGRES_DB:-fin_db}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  qdrant:
+    image: docker.io/qdrant/qdrant:latest
+    container_name: fin_qdrant
+    ports:
+      - "6333:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:6333/readyz || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Arize Phoenix - Lightweight Observability (OTel Native)
+  phoenix:
+    image: docker.io/arizephoenix/phoenix:latest
+    container_name: fin_phoenix
+    ports:
+      - "6006:6006" # UI
+      - "4317:4317" # OTLP gRPC
+      - "4318:4318" # OTLP HTTP
+    environment:
+      - PHOENIX_PORT=6006
+      - PHOENIX_HOST=0.0.0.0
+    restart: always
+
+volumes:
+  postgres_data:
+  qdrant_data:

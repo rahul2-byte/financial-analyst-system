@@ -1,0 +1,40 @@
+# Llama.cpp Server Configuration
+
+# The paths in this file are relative to the 'backend' directory.
+# The application will resolve these to absolute paths at runtime.
+
+llama_server:
+  # Path to the llama-server executable, relative to the 'backend' directory.
+  binary_path: "llama.cpp/build/bin/llama-server"
+
+  # Path to the GGUF model file, relative to the 'backend' directory.
+  model_path: "ai-lab/models/mistral/Ministral-3-8B-Instruct-2512-Q4_K_M.gguf"
+
+  # Host and port for the server.
+  host: "127.0.0.1"
+  port: 8080
+
+  # Server arguments. Refer to llama.cpp documentation for all options.
+  # Adjust n_gpu_layers based on your available VRAM. 0 means CPU only.
+  args:
+    -c: 8192
+    -ngl: 32
+    -np: 1
+    --flash-attn: "on"
+    --cache-type-k: "q4_0"
+    --cache-type-v: "q4_0"
+
+# API and Application Settings
+api:
+  # Base URL for the llama.cpp server.
+  base_url: "http://127.0.0.1:8080"
+  timeout: 120.0
+
+# LLM Model Settings
+model:
+  default_model: "mistral-8b"
+  max_output_tokens: 2048
+
+# Log file for the llama.cpp server's output.
+# This path is relative to the 'backend' directory.
+server_logfile: "logs/llama_server.log"
