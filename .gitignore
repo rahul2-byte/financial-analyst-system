@@ -70,3 +70,5 @@ storage/vector/data/
 
 # Environment
 .env
+
+.worktrees/
