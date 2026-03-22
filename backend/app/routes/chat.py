@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from app.models.request_models import ChatRequest
+from app.models.response_models import StreamEvent
 from app.core.orchestrator import PipelineOrchestrator
 import json
 import logging
@@ -33,23 +34,40 @@ async def chat_endpoint(request: ChatRequest):
         logger.info(f"Processing query via Orchestrator: {user_query}")
 
         async def event_generator():
+            # Send a 1KB preamble to bypass browser buffering (e.g. Chrome)
+            yield f": {' ' * 1024}\n\n"
+            
             try:
                 async for event in orchestrator.execute_query(user_query):
+                    # LOG the event to server console for debugging
+                    event_type = event.get("event") or event.get("type")
+                    if event_type != "token":
+                        logger.info(f"SSE Yielding event: {event_type}")
                     yield f"data: {json.dumps(event)}\n\n"
-
-                yield "data: [DONE]\n\n"
             except Exception as e_inner:
                 logger.error(f"Error in event generator: {e_inner}", exc_info=True)
-                yield f"data: {json.dumps({'type': 'error', 'content': str(e_inner)})}\n\n"
+                err_event = StreamEvent(event="error", data=str(e_inner))
+                yield f"data: {json.dumps(err_event.model_dump())}\n\n"
+            finally:
                 yield "data: [DONE]\n\n"
 
-        return StreamingResponse(event_generator(), media_type="text/event-stream")
+        return StreamingResponse(
+            event_generator(), 
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",  # Disable buffering for Nginx
+            }
+        )
 
     except Exception as e:
         logger.error(f"Error in chat endpoint: {e}", exc_info=True)
+        err_msg = str(e)
 
         async def error_generator():
-            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
+            err_event = StreamEvent(event="error", data=err_msg)
+            yield f"data: {json.dumps(err_event.model_dump())}\n\n"
             yield "data: [DONE]\n\n"
 
         return StreamingResponse(error_generator(), media_type="text/event-stream")

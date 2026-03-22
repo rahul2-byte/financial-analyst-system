@@ -6,9 +6,10 @@ from app.services.llm_interface import LLMServiceInterface
 from app.models.request_models import Message
 from agents.analysis.schemas import AgentResponse
 from quant.fundamentals import FundamentalScanner
+from agents.base import BaseAgent
 
 
-class FundamentalAnalysisAgent:
+class FundamentalAnalysisAgent(BaseAgent):
     """
     Agent responsible for analyzing structured financial data.
     It strictly uses the FundamentalScanner to perform quantitative evaluations
@@ -27,8 +28,7 @@ CRITICAL RULES:
     """
 
     def __init__(self, llm_service: LLMServiceInterface, model: str = "mistral-8b"):
-        self.llm = llm_service
-        self.model = model
+        super().__init__(llm_service, model)
         self.scanner = FundamentalScanner()
 
     def _get_tools(self) -> list:
@@ -74,7 +74,10 @@ CRITICAL RULES:
 
     @observe(name="Agent:Fundamental:Execute")
     async def execute(
-        self, user_query: str, raw_fundamental_data: Optional[Dict[str, Any]] = None
+        self,
+        user_query: str,
+        step_number: int = 0,
+        raw_fundamental_data: Optional[Dict[str, Any]] = None,
     ) -> AgentResponse:
         """
         Executes the agent loop.
@@ -90,8 +93,14 @@ CRITICAL RULES:
         ]
 
         try:
-            response_msg = await self.llm.generate_message(
+            tid_strat = await self.emit_status(
+                step_number, self.agent_name, "Generating analysis strategy...", status="running"
+            )
+            response_msg = await self.llm_service.generate_message(
                 messages=messages, model=self.model, tools=self._get_tools()
+            )
+            await self.emit_status(
+                step_number, self.agent_name, "Generating analysis strategy...", "Strategy generated.", status="completed", tool_id=tid_strat
             )
 
             messages.append(response_msg)
@@ -110,7 +119,18 @@ CRITICAL RULES:
                     else:
                         arguments = arguments_str
 
+                    tid = await self.emit_status(
+                        step_number, tool_name, "Processing raw financial data...", status="running"
+                    )
                     tool_result = self._execute_tool(tool_name, arguments)
+                    await self.emit_status(
+                        step_number,
+                        tool_name,
+                        "Processing raw financial data...",
+                        "Scan complete.",
+                        status="completed",
+                        tool_id=tid,
+                    )
 
                     langfuse_context.update_current_observation(
                         metadata={
@@ -129,8 +149,22 @@ CRITICAL RULES:
                         )
                     )
 
-                final_response_msg = await self.llm.generate_message(
+                tid_synth = await self.emit_status(
+                    step_number,
+                    self.agent_name,
+                    "Synthesizing investment thesis...",
+                    status="running",
+                )
+                final_response_msg = await self.llm_service.generate_message(
                     messages=messages, model=self.model
+                )
+                await self.emit_status(
+                    step_number,
+                    self.agent_name,
+                    "Synthesizing investment thesis...",
+                    "Synthesis complete.",
+                    status="completed",
+                    tool_id=tid_synth
                 )
                 final_content = final_response_msg.content
             else:

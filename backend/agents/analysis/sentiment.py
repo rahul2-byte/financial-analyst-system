@@ -7,9 +7,10 @@ from app.models.request_models import Message
 from agents.analysis.schemas import AgentResponse, QualitativeInsights
 from quant.nlp_scorer import NLPScorer
 from app.core.utils import clean_json_string
+from agents.base import BaseAgent
 
 
-class SentimentAnalysisAgent:
+class SentimentAnalysisAgent(BaseAgent):
     """
     Hybrid Agent combining deterministic FinBERT scoring (via Python)
     with LLM-based reasoning to extract actionable insights from unstructured text.
@@ -27,8 +28,7 @@ CRITICAL RULES:
     """
 
     def __init__(self, llm_service: LLMServiceInterface, model: str = "mistral-8b"):
-        self.llm = llm_service
-        self.model = model
+        super().__init__(llm_service, model)
         self.scorer = NLPScorer()
 
     def _get_tools(self) -> list:
@@ -70,7 +70,7 @@ CRITICAL RULES:
 
     @observe(name="Agent:Sentiment:Execute")
     async def execute(
-        self, user_query: str, raw_text_data: Optional[str] = None
+        self, user_query: str, step_number: int = 0, raw_text_data: Optional[str] = None
     ) -> AgentResponse:
         """
         Executes the agent loop.
@@ -90,8 +90,14 @@ CRITICAL RULES:
 
         try:
             # Step 1: The LLM should decide to call the FinBERT tool to get the mathematical scores
-            response_msg = await self.llm.generate_message(
+            tid_strat = await self.emit_status(
+                step_number, self.agent_name, "Analyzing sentiment markers...", status="running"
+            )
+            response_msg = await self.llm_service.generate_message(
                 messages=messages, model=self.model, tools=self._get_tools()
+            )
+            await self.emit_status(
+                step_number, self.agent_name, "Analyzing sentiment markers...", "Strategy generated.", status="completed", tool_id=tid_strat
             )
 
             messages.append(response_msg)
@@ -111,7 +117,18 @@ CRITICAL RULES:
                     else:
                         arguments = arguments_str
 
+                    tid = await self.emit_status(
+                        step_number, tool_name, "Running FinBERT NLP scan...", status="running"
+                    )
                     tool_result = self._execute_tool(tool_name, arguments)
+                    await self.emit_status(
+                        step_number,
+                        tool_name,
+                        "Running FinBERT NLP scan...",
+                        "NLP scan complete.",
+                        status="completed",
+                        tool_id=tid,
+                    )
 
                     langfuse_context.update_current_observation(
                         metadata={
@@ -131,6 +148,9 @@ CRITICAL RULES:
                     )
 
                 # Step 3: LLM Synthesizes the final output in the strict QualitativeInsights schema
+                tid_synth = await self.emit_status(
+                    step_number, self.agent_name, "Synthesizing qualitative insights...", status="running"
+                )
                 # We add the schema to the prompt for the final turn and ensure role alternation
                 messages.append(
                     Message(
@@ -138,24 +158,33 @@ CRITICAL RULES:
                         content=f"Based on the analysis results above, synthesize the final qualitative analysis into a JSON object matching this schema: {json.dumps(QualitativeInsights.model_json_schema())}",
                     )
                 )
-                final_response_msg = await self.llm.generate_message(
+                final_response_msg = await self.llm_service.generate_message(
                     messages=messages,
                     model=self.model,
                     response_format={"type": "json_object"},
                 )
+                await self.emit_status(
+                    step_number, self.agent_name, "Synthesizing qualitative insights...", "Synthesis complete.", status="completed", tool_id=tid_synth
+                )
                 final_content = final_response_msg.content
             else:
                 # Fallback if it didn't call the tool (rare but possible)
+                tid_fb = await self.emit_status(
+                    step_number, self.agent_name, "Synthesizing insights...", status="running"
+                )
                 messages.append(
                     Message(
                         role="user",
                         content=f"Please synthesize your findings into a JSON object matching this schema: {json.dumps(QualitativeInsights.model_json_schema())}",
                     )
                 )
-                final_response_msg = await self.llm.generate_message(
+                final_response_msg = await self.llm_service.generate_message(
                     messages=messages,
                     model=self.model,
                     response_format={"type": "json_object"},
+                )
+                await self.emit_status(
+                    step_number, self.agent_name, "Synthesizing insights...", "Synthesis complete.", status="completed", tool_id=tid_fb
                 )
                 final_content = final_response_msg.content
 

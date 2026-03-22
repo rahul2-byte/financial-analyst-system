@@ -90,6 +90,11 @@ export const MarkdownRenderer = memo(({ content, isStreaming, ref }: MarkdownRen
           <span className="typing-dot h-1.5 w-1.5 rounded-full bg-text-secondary"></span>
           <span className="typing-dot h-1.5 w-1.5 rounded-full bg-text-secondary"></span>
         </div>
+      ) : isStreaming ? (
+        <div className="whitespace-pre-wrap break-words leading-7 text-text-primary">
+          {content}
+          <span className="inline-block w-1.5 h-4 ml-1 bg-accent/50 animate-pulse align-middle" />
+        </div>
       ) : (
         <ReactMarkdown
           remarkPlugins={REMARK_PLUGINS}
@@ -97,9 +102,6 @@ export const MarkdownRenderer = memo(({ content, isStreaming, ref }: MarkdownRen
         >
           {content}
         </ReactMarkdown>
-      )}
-      {isStreaming && content !== "" && (
-        <span className="inline-block w-1.5 h-4 ml-1 bg-accent/50 animate-pulse align-middle" />
       )}
     </div>
   );

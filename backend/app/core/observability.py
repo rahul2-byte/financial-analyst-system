@@ -62,31 +62,31 @@ def observe(name: Optional[Any] = None, as_type: str = "span", **outer_kwargs):
                 span_name = func.__name__
 
         @functools.wraps(func)
+        async def async_generator_wrapper(*args, **kwargs):
+            with tracer.start_as_current_span(span_name) as span:
+                span.set_attribute("observation.type", as_type)
+                for k, v in outer_kwargs.items():
+                    span.set_attribute(f"meta.{k}", str(v))
+                
+                try:
+                    async for item in func(*args, **kwargs):
+                        yield item
+                except Exception as e:
+                    span.record_exception(e)
+                    span.set_status(Status(StatusCode.ERROR, str(e)))
+                    raise
+
+        @functools.wraps(func)
         async def async_wrapper(*args, **kwargs):
             with tracer.start_as_current_span(span_name) as span:
-                # Add metadata as attributes
                 span.set_attribute("observation.type", as_type)
                 for k, v in outer_kwargs.items():
                     span.set_attribute(f"meta.{k}", str(v))
 
-                # Attempt to capture input arguments (sanitized)
-                try:
-                    # Capture first few args if useful, or named kwargs
-                    if kwargs:
-                        span.set_attribute(
-                            "input.kwargs", json.dumps(kwargs, default=str)
-                        )
-                except Exception:
-                    pass
-
                 try:
                     result = await func(*args, **kwargs)
-                    # Capture output
-                    try:
-                        if result is not None:
-                            span.set_attribute("output.value", str(result))
-                    except Exception:
-                        pass
+                    if result is not None:
+                        span.set_attribute("output.value", str(result))
                     return result
                 except Exception as e:
                     span.record_exception(e)
@@ -110,6 +110,8 @@ def observe(name: Optional[Any] = None, as_type: str = "span", **outer_kwargs):
                     span.set_status(Status(StatusCode.ERROR, str(e)))
                     raise
 
+        if inspect.isasyncgenfunction(func):
+            return async_generator_wrapper
         return async_wrapper if inspect.iscoroutinefunction(func) else sync_wrapper
 
     return decorator

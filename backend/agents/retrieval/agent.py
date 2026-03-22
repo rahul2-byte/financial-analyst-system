@@ -7,9 +7,10 @@ from app.models.request_models import Message
 from agents.retrieval.schemas import AgentResponse
 from storage.vector.client import QdrantStorage
 from app.services.embedding_service import EmbeddingService
+from agents.base import BaseAgent
 
 
-class RetrievalAgent:
+class RetrievalAgent(BaseAgent):
     """
     Agent responsible for translating user queries into vector embeddings,
     searching the Qdrant database for relevant textual context (like news),
@@ -35,10 +36,9 @@ CRITICAL RULES:
         qdrant_client: QdrantStorage,
         model: str = "mistral-8b",
     ):
-        self.llm = llm_service
+        super().__init__(llm_service, model)
         self.db = qdrant_client
         self.embed_service = EmbeddingService()
-        self.model = model
 
     def _get_tools(self) -> list:
         return [
@@ -115,7 +115,7 @@ CRITICAL RULES:
             return json.dumps({"error": str(e)})
 
     @observe(name="Agent:Retrieval:Execute")
-    async def execute(self, user_query: str) -> AgentResponse:
+    async def execute(self, user_query: str, step_number: int = 0) -> AgentResponse:
         """
         Executes the agent loop with a self-correction retry if results are insufficient.
         """
@@ -126,8 +126,14 @@ CRITICAL RULES:
 
         try:
             # Attempt 1: Standard retrieval
-            response_msg = await self.llm.generate_message(
+            tid_gen = await self.emit_status(
+                step_number, self.agent_name, "Generating search query...", status="running"
+            )
+            response_msg = await self.llm_service.generate_message(
                 messages=messages, model=self.model, tools=self._get_tools()
+            )
+            await self.emit_status(
+                step_number, self.agent_name, "Generating search query...", "Search query generated.", status="completed", tool_id=tid_gen
             )
 
             messages.append(response_msg)
@@ -144,8 +150,19 @@ CRITICAL RULES:
                     json.loads(raw_args) if isinstance(raw_args, str) else raw_args
                 )
 
+                tid = await self.emit_status(
+                    step_number, tool_name, json.dumps(arguments), status="running"
+                )
                 tool_result_str = self._execute_tool(tool_name, arguments)
                 tool_result = json.loads(tool_result_str)
+                await self.emit_status(
+                    step_number,
+                    tool_name,
+                    json.dumps(arguments),
+                    tool_result_str[:500] + "..." if len(tool_result_str) > 500 else tool_result_str,
+                    status="completed",
+                    tool_id=tid,
+                )
 
                 # SELF-CORRECTION: If no results, retry with a broader query
                 if (
@@ -168,8 +185,14 @@ CRITICAL RULES:
                     )
                     messages.append(Message(role="user", content=retry_prompt))
 
-                    response_msg = await self.llm.generate_message(
+                    tid_retry = await self.emit_status(
+                        step_number, self.agent_name, "Retrying search with broader query...", status="running"
+                    )
+                    response_msg = await self.llm_service.generate_message(
                         messages=messages, model=self.model, tools=self._get_tools()
+                    )
+                    await self.emit_status(
+                        step_number, self.agent_name, "Retrying search with broader query...", "Retry query generated.", status="completed", tool_id=tid_retry
                     )
                     messages.append(response_msg)
 
@@ -182,8 +205,20 @@ CRITICAL RULES:
                             if isinstance(raw_args, str)
                             else raw_args
                         )
+                        
+                        tid = await self.emit_status(
+                            step_number, tool_call.get("function", {}).get("name"), json.dumps(arguments), status="running"
+                        )
                         tool_result_str = self._execute_tool(
                             function_call.get("name"), arguments
+                        )
+                        await self.emit_status(
+                            step_number,
+                            tool_call.get("function", {}).get("name"),
+                            json.dumps(arguments),
+                            tool_result_str[:500] + "..." if len(tool_result_str) > 500 else tool_result_str,
+                            status="completed",
+                            tool_id=tid,
                         )
 
                 messages.append(
@@ -203,8 +238,14 @@ CRITICAL RULES:
                     )
                 )
 
-                final_response_msg = await self.llm.generate_message(
+                tid_synth = await self.emit_status(
+                    step_number, self.agent_name, "Synthesizing retrieved information...", status="running"
+                )
+                final_response_msg = await self.llm_service.generate_message(
                     messages=messages, model=self.model
+                )
+                await self.emit_status(
+                    step_number, self.agent_name, "Synthesizing retrieved information...", "Synthesis complete.", status="completed", tool_id=tid_synth
                 )
                 final_content = final_response_msg.content
             else:
@@ -215,4 +256,5 @@ CRITICAL RULES:
             )
 
         except Exception as e:
+            # We could add an error status here if we have a tid
             return AgentResponse(status="failure", data={}, errors=[str(e)])

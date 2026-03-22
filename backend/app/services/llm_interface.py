@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import AsyncGenerator, List, Dict, Any
-from backend.app.models.request_models import Message
+from app.models.request_models import Message
 
 
 class LLMServiceInterface(ABC):

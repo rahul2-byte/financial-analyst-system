@@ -2,18 +2,21 @@ import re
 import logging
 from typing import List, Optional
 from common.state import ToolResult
-from common.schemas import VerificationResponse
+from agents.base import BaseAgent
+from app.services.llm_interface import LLMServiceInterface
+from agents.data_access.schemas import AgentResponse
 
 logger = logging.getLogger(__name__)
 
 
-class VerificationAgent:
+class VerificationAgent(BaseAgent):
     """
     Deterministic agent that cross-checks all numbers in a draft report
     against the extracted metrics from the tool registry.
     """
 
-    def __init__(self):
+    def __init__(self, llm_service: LLMServiceInterface, model: str = "mistral-8b"):
+        super().__init__(llm_service, model)
         # Regex to find numbers, currency, and percentages (supporting negatives and Indian suffixes)
         # E.g., $1,234.56, ₹500 Cr, -45%, -1000, 1.2
         self.number_regex = re.compile(r"-?[\$₹]?\d+(?:,\d+)*(?:\.\d+)?(?:%|Cr|L|x)?\b")
@@ -41,12 +44,15 @@ class VerificationAgent:
         except ValueError:
             return None
 
-    def verify(
-        self, user_query: str, draft_report: str, tool_registry: List[ToolResult]
-    ) -> VerificationResponse:
+    async def execute(
+        self, user_query: str, step_number: int = 0, draft_report: str = "", tool_registry: List[ToolResult] = []
+    ) -> AgentResponse:
         """
         Extracts all numbers from the draft report and verifies them against the tool registry.
+        Returns an AgentResponse containing the verification results.
         """
+        tid = await self.emit_status(step_number, self.agent_name, "Verifying numeric accuracy...", status="running")
+
         try:
             # 1. Flatten all metrics from tool_registry into a single lookup set
             valid_source_values = set()
@@ -102,25 +108,33 @@ class VerificationAgent:
                     hallucinations.add(num_str)
 
             if not hallucinations:
-                return VerificationResponse(
-                    status="success",
-                    is_valid=True,
-                    feedback="All numeric values in the report were verified against source data.",
-                )
+                is_valid = True
+                feedback = "All numeric values in the report were verified against source data."
             else:
+                is_valid = False
                 hallucination_list = ", ".join(list(hallucinations))
                 feedback = (
                     f"Numeric Consistency Error: The following values could not be verified: {hallucination_list}. "
                     "You must only use numbers found in the tool results. "
                     "Do not estimate, hallucinate, or use external knowledge for numeric data."
                 )
-                return VerificationResponse(
-                    status="success", is_valid=False, feedback=feedback
-                )
+            
+            await self.emit_status(step_number, self.agent_name, "Verifying numeric accuracy...", feedback, status="completed", tool_id=tid)
+                
+            return AgentResponse(
+                status="success",
+                data={
+                    "is_valid": is_valid,
+                    "feedback": feedback
+                },
+                errors=None
+            )
+
         except Exception as e:
             logger.error(f"VerificationAgent error: {e}", exc_info=True)
-            return VerificationResponse(
+            await self.emit_status(step_number, self.agent_name, "Verifying numeric accuracy...", str(e), status="error", tool_id=tid)
+            return AgentResponse(
                 status="failure",
-                is_valid=False,
-                feedback=f"Verification system error: {str(e)}",
+                data={},
+                errors=[f"Verification system error: {str(e)}"]
             )

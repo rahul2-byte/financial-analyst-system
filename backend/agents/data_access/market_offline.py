@@ -6,9 +6,10 @@ from app.services.llm_interface import LLMServiceInterface
 from app.models.request_models import Message
 from agents.data_access.schemas import AgentResponse
 from storage.sql.client import PostgresClient
+from agents.base import BaseAgent
 
 
-class MarketOfflineAgent:
+class MarketOfflineAgent(BaseAgent):
     """
     Agent responsible for querying the local PostgreSQL database
     to determine what market data is already available offline.
@@ -31,9 +32,8 @@ CRITICAL RULES:
         db_client: PostgresClient,
         model: str = "mistral-8b",
     ):
-        self.llm = llm_service
+        super().__init__(llm_service, model)
         self.db = db_client
-        self.model = model
 
     def _get_tools(self) -> list:
         return [
@@ -129,7 +129,7 @@ CRITICAL RULES:
             return json.dumps({"error": str(e)})
 
     @observe(name="Agent:MarketOffline:Execute")
-    async def execute(self, user_query: str) -> AgentResponse:
+    async def execute(self, user_query: str, step_number: int = 0) -> AgentResponse:
         """
         Executes the agent loop:
         1. Sends query to LLM with tools
@@ -144,8 +144,14 @@ CRITICAL RULES:
 
         try:
             # 1. First LLM call, providing tools
-            response_msg = await self.llm.generate_message(
+            tid_gen = await self.emit_status(
+                step_number, self.agent_name, "Generating tool calls...", status="running"
+            )
+            response_msg = await self.llm_service.generate_message(
                 messages=messages, model=self.model, tools=self._get_tools()
+            )
+            await self.emit_status(
+                step_number, self.agent_name, "Generating tool calls...", "Tool calls generated.", status="completed", tool_id=tid_gen
             )
 
             messages.append(response_msg)
@@ -166,7 +172,18 @@ CRITICAL RULES:
                         arguments = arguments_str
 
                     # 3. Execute tool
+                    tid = await self.emit_status(
+                        step_number, tool_name, json.dumps(arguments), status="running"
+                    )
                     tool_result = self._execute_tool(tool_name, arguments)
+                    await self.emit_status(
+                        step_number,
+                        tool_name,
+                        json.dumps(arguments),
+                        tool_result[:500] + "..." if len(tool_result) > 500 else tool_result,
+                        status="completed",
+                        tool_id=tid,
+                    )
 
                     langfuse_context.update_current_observation(
                         metadata={
@@ -187,8 +204,14 @@ CRITICAL RULES:
                     )
 
                 # 4. LLM formulates final answer
-                final_response_msg = await self.llm.generate_message(
+                tid_synth = await self.emit_status(
+                    step_number, self.agent_name, "Synthesizing final answer...", status="running"
+                )
+                final_response_msg = await self.llm_service.generate_message(
                     messages=messages, model=self.model
+                )
+                await self.emit_status(
+                    step_number, self.agent_name, "Synthesizing final answer...", "Synthesis complete.", status="completed", tool_id=tid_synth
                 )
                 final_content = final_response_msg.content
             else:

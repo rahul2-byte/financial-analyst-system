@@ -5,9 +5,10 @@ from app.core.observability import observe
 from app.services.llm_interface import LLMServiceInterface
 from app.models.request_models import Message
 from agents.analysis.schemas import AgentResponse, MacroInsights
+from agents.base import BaseAgent
 
 
-class MacroAnalysisAgent:
+class MacroAnalysisAgent(BaseAgent):
     """
     Agent responsible for analyzing broad economic trends, global events,
     and their impacts on the financial markets.
@@ -24,12 +25,11 @@ CRITICAL RULES:
     """
 
     def __init__(self, llm_service: LLMServiceInterface, model: str = "mistral-8b"):
-        self.llm = llm_service
-        self.model = model
+        super().__init__(llm_service, model)
 
     @observe(name="Agent:Macro:Execute")
     async def execute(
-        self, user_query: str, context_data: Optional[str] = None
+        self, user_query: str, step_number: int = 0, context_data: Optional[str] = None
     ) -> AgentResponse:
         """
         Executes the macro analysis loop.
@@ -45,16 +45,26 @@ CRITICAL RULES:
             Message(role="user", content=prompt),
         ]
 
+        tid = None
         try:
             # Macro agent usually does a single direct synthesis turn based on provided context
-            messages.append(
-                Message(
-                    role="user",
-                    content=f"Synthesize your findings into a JSON object matching this schema: {json.dumps(MacroInsights.model_json_schema())}",
-                )
+            tid = await self.emit_status(
+                step_number, self.agent_name, "Analyzing global macro factors...", status="running"
             )
+            
+            # Combine the schema instructions into the prompt to avoid User -> User alternation bug
+            final_prompt = (
+                f"{prompt}\n\n"
+                f"Synthesize your findings into a JSON object matching this schema: {json.dumps(MacroInsights.model_json_schema())}"
+            )
+            
+            # Re-construct messages with combined prompt
+            messages = [
+                Message(role="system", content=self.SYSTEM_PROMPT),
+                Message(role="user", content=final_prompt),
+            ]
 
-            response_msg = await self.llm.generate_message(
+            response_msg = await self.llm_service.generate_message(
                 messages=messages,
                 model=self.model,
                 response_format={"type": "json_object"},
@@ -72,7 +82,14 @@ CRITICAL RULES:
 
                 parsed_insights = json.loads(clean_json_string(final_content))
 
+            await self.emit_status(
+                step_number, self.agent_name, "Analyzing global macro factors...", "Macro analysis complete.", status="completed", tool_id=tid
+            )
             return AgentResponse(status="success", data=parsed_insights, errors=None)
 
         except Exception as e:
+            if tid:
+                await self.emit_status(
+                    step_number, self.agent_name, "Analyzing global macro factors...", str(e), status="error", tool_id=tid
+                )
             return AgentResponse(status="failure", data={}, errors=[str(e)])

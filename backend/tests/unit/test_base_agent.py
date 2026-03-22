@@ -1,11 +1,11 @@
 import asyncio
 import uuid
 import pytest
-from backend.agents.base import BaseAgent
-from backend.app.models.response_models import ToolStatus, StreamEvent
+from agents.base import BaseAgent
+from app.models.response_models import ToolStatus, StreamEvent
 
 
-from backend.app.services.llm_interface import LLMServiceInterface
+from app.services.llm_interface import LLMServiceInterface
 
 
 class MockLLMService(LLMServiceInterface):

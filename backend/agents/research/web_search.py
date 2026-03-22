@@ -7,9 +7,10 @@ from app.models.request_models import Message
 from agents.research.schemas import AgentResponse, WebResearchResult
 from data.providers.web_search import WebSearchProvider
 from app.core.utils import clean_json_string
+from agents.base import BaseAgent
 
 
-class WebSearchAgent:
+class WebSearchAgent(BaseAgent):
     """
     Agent responsible for browsing the internet dynamically using DuckDuckGo
     to answer highly specific, real-time, or niche contextual questions.
@@ -32,8 +33,7 @@ CRITICAL RULES:
         model: str = "mistral-8b",
         provider: Optional[WebSearchProvider] = None,
     ):
-        self.llm = llm_service
-        self.model = model
+        super().__init__(llm_service, model)
         self.provider = provider if provider else WebSearchProvider()
 
     def _get_tools(self) -> list:
@@ -132,7 +132,7 @@ CRITICAL RULES:
             return json.dumps({"error": str(e)})
 
     @observe(name="Agent:WebSearch:Execute")
-    async def execute(self, user_query: str) -> AgentResponse:
+    async def execute(self, user_query: str, step_number: int = 0) -> AgentResponse:
         """
         Executes the agent loop. Allows multiple tool calls in sequence if the LLM
         decides it needs to refine its search before giving a final answer.
@@ -148,10 +148,16 @@ CRITICAL RULES:
 
         try:
             while current_turn < max_turns:
+                tid_turn = await self.emit_status(
+                    step_number, self.agent_name, f"Search turn {current_turn+1}...", status="running"
+                )
                 # In the last turn, or if we want to force JSON, we can pass response_format.
                 # However, if the LLM wants to call a tool, it can't return structured JSON at the same time usually.
-                response_msg = await self.llm.generate_message(
+                response_msg = await self.llm_service.generate_message(
                     messages=messages, model=self.model, tools=self._get_tools()
+                )
+                await self.emit_status(
+                    step_number, self.agent_name, f"Search turn {current_turn+1}...", "LLM processing search turn.", status="completed", tool_id=tid_turn
                 )
 
                 if not response_msg.content:
@@ -178,7 +184,18 @@ CRITICAL RULES:
                     else:
                         arguments = arguments_str
 
+                    tid = await self.emit_status(
+                        step_number, tool_name, json.dumps(arguments), status="running"
+                    )
                     tool_result = self._execute_tool(tool_name, arguments)
+                    await self.emit_status(
+                        step_number,
+                        tool_name,
+                        json.dumps(arguments),
+                        tool_result[:500] + "..." if len(tool_result) > 500 else tool_result,
+                        status="completed",
+                        tool_id=tid,
+                    )
 
                     langfuse_context.update_current_observation(
                         metadata={
@@ -202,14 +219,23 @@ CRITICAL RULES:
             # Now we have all the information in the messages history.
             # Perform the final synthesis step enforcing the JSON schema.
             if messages[-1].role == "tool":
+                tid_proc = await self.emit_status(
+                    step_number, self.agent_name, "Processing search results...", status="running"
+                )
                 # Let the assistant process the tool results before we ask for the final JSON
-                intermediate_msg = await self.llm.generate_message(
+                intermediate_msg = await self.llm_service.generate_message(
                     messages=messages, model=self.model
                 )
                 if not intermediate_msg.content:
                     intermediate_msg.content = "Processed tool results."
+                await self.emit_status(
+                    step_number, self.agent_name, "Processing search results...", "Results processed.", status="completed", tool_id=tid_proc
+                )
                 messages.append(intermediate_msg)
 
+            tid_synth = await self.emit_status(
+                step_number, self.agent_name, "Synthesizing final research report...", status="running"
+            )
             schema_str = json.dumps(WebResearchResult.model_json_schema())
             final_prompt = (
                 f"Based on all the research findings above, synthesize the results into a final JSON object matching this schema: {schema_str}\n\n"
@@ -217,10 +243,13 @@ CRITICAL RULES:
                 "Do not include any conversational text or explanations."
             )
             messages.append(Message(role="user", content=final_prompt))
-            final_response_msg = await self.llm.generate_message(
+            final_response_msg = await self.llm_service.generate_message(
                 messages=messages,
                 model=self.model,
                 response_format={"type": "json_object"},
+            )
+            await self.emit_status(
+                step_number, self.agent_name, "Synthesizing final research report...", "Synthesis complete.", status="completed", tool_id=tid_synth
             )
             final_content = final_response_msg.content
 

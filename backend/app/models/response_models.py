@@ -22,8 +22,8 @@ class ToolStatus(BaseModel):
 class StreamEvent(BaseModel):
     """
     Structure for SSE events.
-    Can be 'token', 'error', 'done', 'tool_call', or 'tool_status'.
+    Can be 'token', 'error', 'done', 'tool_call', 'tool_status', or 'status'.
     """
 
-    event: Literal["token", "error", "done", "tool_call", "tool_status"]
+    event: Literal["token", "error", "done", "tool_call", "tool_status", "status"]
     data: Union[ToolStatus, ChatResponse, str, Dict[str, Any]]

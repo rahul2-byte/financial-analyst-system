@@ -11,9 +11,10 @@ from storage.sql.client import PostgresClient
 from storage.vector.client import QdrantStorage
 from data.processors.text import TextProcessor
 from data.schemas.market import OHLCVData
+from agents.base import BaseAgent
 
 
-class MarketOnlineAgent:
+class MarketOnlineAgent(BaseAgent):
     """
     Agent responsible for fetching real-time and historical market data,
     fundamentals, and news from the internet (focusing on Indian markets).
@@ -41,13 +42,12 @@ CRITICAL RULES:
         vector_db: QdrantStorage,
         model: str = "mistral-8b",
     ):
-        self.llm = llm_service
+        super().__init__(llm_service, model)
         self.yf = yf_fetcher
         self.rss = rss_fetcher
         self.sql_db = sql_db
         self.vector_db = vector_db
         self.text_processor = TextProcessor()
-        self.model = model
 
     def _get_tools(self) -> list:
         return [
@@ -256,15 +256,21 @@ CRITICAL RULES:
             return json.dumps({"error": str(e)})
 
     @observe(name="Agent:MarketOnline:Execute")
-    async def execute(self, user_query: str) -> AgentResponse:
+    async def execute(self, user_query: str, step_number: int = 0) -> AgentResponse:
         messages = [
             Message(role="system", content=self.SYSTEM_PROMPT),
             Message(role="user", content=user_query),
         ]
 
         try:
-            response_msg = await self.llm.generate_message(
+            tid_gen = await self.emit_status(
+                step_number, self.agent_name, "Generating tool calls...", status="running"
+            )
+            response_msg = await self.llm_service.generate_message(
                 messages=messages, model=self.model, tools=self._get_tools()
+            )
+            await self.emit_status(
+                step_number, self.agent_name, "Generating tool calls...", "Tool calls generated.", status="completed", tool_id=tid_gen
             )
 
             messages.append(response_msg)
@@ -283,7 +289,18 @@ CRITICAL RULES:
                     else:
                         arguments = arguments_str
 
+                    tid = await self.emit_status(
+                        step_number, tool_name, json.dumps(arguments), status="running"
+                    )
                     tool_result = self._execute_tool(tool_name, arguments)
+                    await self.emit_status(
+                        step_number,
+                        tool_name,
+                        json.dumps(arguments),
+                        tool_result[:500] + "..." if len(tool_result) > 500 else tool_result,
+                        status="completed",
+                        tool_id=tid,
+                    )
 
                     langfuse_context.update_current_observation(
                         metadata={
@@ -302,8 +319,14 @@ CRITICAL RULES:
                         )
                     )
 
-                final_response_msg = await self.llm.generate_message(
+                tid_synth = await self.emit_status(
+                    step_number, self.agent_name, "Synthesizing final answer...", status="running"
+                )
+                final_response_msg = await self.llm_service.generate_message(
                     messages=messages, model=self.model
+                )
+                await self.emit_status(
+                    step_number, self.agent_name, "Synthesizing final answer...", "Synthesis complete.", status="completed", tool_id=tid_synth
                 )
                 final_content = final_response_msg.content
             else:

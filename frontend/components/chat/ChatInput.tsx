@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useRef, useState, useEffect, useTransition, startTransition } from "react";
+import React, { useRef, useState, useEffect } from "react";
 import { StopCircle, ArrowUp } from "lucide-react";
 import { Button } from "@/components/ui/Button";
 import { Textarea } from "@/components/ui/Textarea";
@@ -28,10 +28,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSend, isLoading, onStop 
   const handleSend = () => {
     if (!input.trim() || isLoading) return;
     
-    // Fix: React 19 useOptimistic must be wrapped in startTransition
-    startTransition(() => {
-      onSend(input);
-    });
+    onSend(input);
     
     setInput("");
     if (textareaRef.current) {

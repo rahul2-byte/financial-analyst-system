@@ -7,9 +7,10 @@ from app.services.llm_interface import LLMServiceInterface
 from app.models.request_models import Message
 from agents.analysis.schemas import AgentResponse
 from quant.indicators import TechnicalScanner
+from agents.base import BaseAgent
 
 
-class TechnicalAnalysisAgent:
+class TechnicalAnalysisAgent(BaseAgent):
     """
     Agent responsible for performing technical analysis on price data.
     Uses TechnicalScanner for deterministic calculations and LLM for trend reporting.
@@ -27,8 +28,7 @@ CRITICAL RULES:
     """
 
     def __init__(self, llm_service: LLMServiceInterface, model: str = "mistral-8b"):
-        self.llm = llm_service
-        self.model = model
+        super().__init__(llm_service, model)
         self.scanner = TechnicalScanner()
 
     def _get_tools(self) -> list:
@@ -82,7 +82,10 @@ CRITICAL RULES:
 
     @observe(name="Agent:Technical:Execute")
     async def execute(
-        self, user_query: str, ohlcv_data: Optional[List[Dict[str, Any]]] = None
+        self,
+        user_query: str,
+        step_number: int = 0,
+        ohlcv_data: Optional[List[Dict[str, Any]]] = None,
     ) -> AgentResponse:
         """
         Executes the technical analysis loop.
@@ -97,8 +100,14 @@ CRITICAL RULES:
         ]
 
         try:
-            response_msg = await self.llm.generate_message(
+            tid_strat = await self.emit_status(
+                step_number, self.agent_name, "Generating technical report...", status="running"
+            )
+            response_msg = await self.llm_service.generate_message(
                 messages=messages, model=self.model, tools=self._get_tools()
+            )
+            await self.emit_status(
+                step_number, self.agent_name, "Generating technical report...", "Strategy generated.", status="completed", tool_id=tid_strat
             )
 
             if not response_msg.content:
@@ -120,7 +129,18 @@ CRITICAL RULES:
                     else:
                         arguments = arguments_str
 
+                    tid = await self.emit_status(
+                        step_number, tool_name, "Calculating technical indicators...", status="running"
+                    )
                     tool_result = self._execute_tool(tool_name, arguments)
+                    await self.emit_status(
+                        step_number,
+                        tool_name,
+                        "Calculating technical indicators...",
+                        "Scan complete.",
+                        status="completed",
+                        tool_id=tid,
+                    )
 
                     langfuse_context.update_current_observation(
                         metadata={
@@ -140,13 +160,22 @@ CRITICAL RULES:
                     )
 
                 if messages[-1].role == "tool":
-                    intermediate_msg = await self.llm.generate_message(
+                    tid_proc = await self.emit_status(
+                        step_number, self.agent_name, "Processing scan results...", status="running"
+                    )
+                    intermediate_msg = await self.llm_service.generate_message(
                         messages=messages, model=self.model
                     )
                     if not intermediate_msg.content:
                         intermediate_msg.content = "Processed tool results."
+                    await self.emit_status(
+                        step_number, self.agent_name, "Processing scan results...", "Results processed.", status="completed", tool_id=tid_proc
+                    )
                     messages.append(intermediate_msg)
 
+                tid_synth = await self.emit_status(
+                    step_number, self.agent_name, "Synthesizing trend report...", status="running"
+                )
                 schema_str = json.dumps(AgentResponse.model_json_schema())
                 messages.append(
                     Message(
@@ -159,10 +188,13 @@ CRITICAL RULES:
                     )
                 )
 
-                final_response_msg = await self.llm.generate_message(
+                final_response_msg = await self.llm_service.generate_message(
                     messages=messages,
                     model=self.model,
                     response_format={"type": "json_object"},
+                )
+                await self.emit_status(
+                    step_number, self.agent_name, "Synthesizing trend report...", "Synthesis complete.", status="completed", tool_id=tid_synth
                 )
                 final_content = final_response_msg.content
             else:
@@ -182,7 +214,11 @@ CRITICAL RULES:
                 parsed_insights = json.loads(cleaned_content)
 
                 # Check if the LLM returned the outer AgentResponse wrapper or just the inner data
-                if "data" in parsed_insights and "status" in parsed_insights:
+                if (
+                    isinstance(parsed_insights, dict)
+                    and "data" in parsed_insights
+                    and "status" in parsed_insights
+                ):
                     return AgentResponse(**parsed_insights)
                 else:
                     return AgentResponse(

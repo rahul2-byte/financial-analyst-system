@@ -1,91 +1,157 @@
-import { useState, useCallback, useRef, useOptimistic } from "react";
-import { Message, StreamEvent } from "@/types";
+import { useState, useCallback, useRef } from "react";
+import { Message, StreamEvent, ToolStatus } from "@/types";
 import { chatStream } from "@/lib/api";
 
 export function useChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const abortControllerRef = useRef<AbortController | null>(null);
+  const pendingTextRef = useRef("");
+  const flushHandleRef = useRef<number | null>(null);
 
-  /**
-   * React 19 useOptimistic hook to show the user's message immediately.
-   * NOTE: The UI call to sendMessage should be wrapped in startTransition 
-   * (e.g., from React 19's useTransition) to trigger this optimistic update.
-   */
-  const [optimisticMessages, addOptimisticMessage] = useOptimistic<Message[], Message>(
-    messages,
-    (state, newMessage) => [...state, newMessage]
-  );
-
-  // Keep a ref to messages for history construction to avoid recreating sendMessage on every token
+  // Keep a ref to messages for history construction
   const messagesRef = useRef<Message[]>(messages);
   messagesRef.current = messages;
 
   const sendMessage = useCallback(async (content: string) => {
-    console.log("sendMessage called with content:", content);
+    console.log("[useChat] sendMessage called:", content);
     if (!content.trim() || isLoading) return;
 
+    // Use a robust UUID generator fallback for non-secure contexts
+    const generateId = () => {
+      if (typeof crypto !== "undefined" && crypto.randomUUID) {
+        return crypto.randomUUID();
+      }
+      return Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    };
+
     const userMessage: Message = {
-      id: crypto.randomUUID(),
+      id: generateId(),
       role: "user",
       content,
       timestamp: new Date(),
     };
 
-    // Optimistically show the user message
-    addOptimisticMessage(userMessage);
-
-    const assistantMessageId = crypto.randomUUID();
-    console.log("Created assistantMessageId:", assistantMessageId);
+    const assistantMessageId = generateId();
     const assistantMessagePlaceholder: Message = {
       id: assistantMessageId,
       role: "assistant",
       content: "",
       charts: [],
+      reasoning_steps: [],
       timestamp: new Date(),
       isStreaming: true,
     };
 
-    // Update real state immediately with both the user message and assistant placeholder
+    // Update state immediately
     setMessages((prev) => [...prev, userMessage, assistantMessagePlaceholder]);
     setIsLoading(true);
 
     const controller = new AbortController();
     abortControllerRef.current = controller;
 
+    const flushPendingText = () => {
+      const delta = pendingTextRef.current;
+      if (!delta) return;
+
+      pendingTextRef.current = "";
+      setMessages((prev) => {
+        const targetIndex = prev.findIndex((m) => m.id === assistantMessageId);
+        if (targetIndex === -1) return prev;
+
+        const next = [...prev];
+        const updatedMsg = { ...next[targetIndex] };
+        updatedMsg.content = (updatedMsg.content || "") + delta;
+        next[targetIndex] = updatedMsg;
+        return next;
+      });
+    };
+
+    const scheduleFlush = () => {
+      if (flushHandleRef.current !== null) return;
+
+      // Use timer-based batching instead of requestAnimationFrame.
+      // requestAnimationFrame can be heavily throttled in background/inactive tabs,
+      // which makes streamed text appear all at once when focus returns.
+      flushHandleRef.current = window.setTimeout(() => {
+        flushHandleRef.current = null;
+        flushPendingText();
+      }, 16);
+    };
+
+    const cancelScheduledFlush = () => {
+      if (flushHandleRef.current === null) return;
+      clearTimeout(flushHandleRef.current);
+      flushHandleRef.current = null;
+    };
+
     try {
-      // Use messages history from ref at the point of sending
       const historyForApi = [...messagesRef.current, userMessage];
-      
-      console.log("useChat: Starting stream for assistantMessageId:", assistantMessageId);
+      console.log("[useChat] Calling chatStream...");
       
       await chatStream(
         historyForApi,
         (event: StreamEvent) => {
-          console.log("useChat: Received event:", event.type, event.message || "");
+          console.log(`[useChat] Received event: ${event.type}`);
+
+          if (event.type === "text_delta") {
+            pendingTextRef.current += event.content || "";
+            scheduleFlush();
+            return;
+          }
+
+          // Keep text visually smooth by flushing queued deltas before non-text events.
+          flushPendingText();
           
           setMessages((prev) => {
-            // EFFICIENT UPDATE: Check the last message first
-            const lastIndex = prev.length - 1;
-            const targetIndex = (prev[lastIndex]?.id === assistantMessageId) 
-              ? lastIndex 
-              : prev.findIndex((m) => m.id === assistantMessageId);
-
+            const targetIndex = prev.findIndex((m) => m.id === assistantMessageId);
             if (targetIndex === -1) return prev;
 
-            const currentMsg = prev[targetIndex];
-            const updatedMsg = { ...currentMsg };
+            const updatedMsg = { ...prev[targetIndex] };
 
-            if (event.type === "text_delta") {
-              updatedMsg.content = (updatedMsg.content || "") + (event.content || "");
-            } else if (event.type === "chart") {
-              updatedMsg.charts = [...(updatedMsg.charts || []), event.content];
+            if (event.type === "chart") {
+              const chartPayload = {
+                title: event.title,
+                chartType: event.chartType,
+                data: event.data,
+                xAxisKey: event.xAxisKey,
+                seriesKeys: event.seriesKeys,
+              };
+              updatedMsg.charts = [...(updatedMsg.charts || []), chartPayload];
             } else if (event.type === "status") {
-              // Update content with a "status" indicator if it's currently empty
-              if (!updatedMsg.content) {
-                // We'll keep status internal or show it subtly
-                console.log("useChat: Agent Status Update:", event.message);
+              // Add generic status updates to reasoning steps for immediate feedback
+              const steps = [...(updatedMsg.reasoning_steps || [])];
+              // Only add if not already present
+              if (!steps.find(s => s.input === event.message)) {
+                steps.push({
+                  tool_id: `status-${steps.length}`,
+                  step_number: -1, // Use -1 to keep system status at top
+                  agent: "System",
+                  tool_name: "Orchestrator",
+                  status: "completed",
+                  input: event.message,
+                });
+                updatedMsg.reasoning_steps = steps;
               }
+            } else if (event.type === "tool_status") {
+              const stepData: ToolStatus = {
+                tool_id: event.tool_id,
+                step_number: event.step_number,
+                agent: event.agent,
+                tool_name: event.tool_name,
+                status: event.status,
+                input: event.input,
+                output: event.output,
+              };
+              const steps = [...(updatedMsg.reasoning_steps || [])];
+              const existingIndex = steps.findIndex((s) => s.tool_id === stepData.tool_id);
+              
+              if (existingIndex !== -1) {
+                steps[existingIndex] = { ...steps[existingIndex], ...stepData };
+              } else {
+                steps.push(stepData as ToolStatus);
+              }
+              updatedMsg.reasoning_steps = steps.sort((a, b) => a.step_number - b.step_number);
             } else if (event.type === "done") {
               updatedMsg.isStreaming = false;
             } else if (event.type === "error") {
@@ -101,59 +167,37 @@ export function useChat() {
         },
         controller.signal
       );
-      console.log("useChat: Stream completed successfully");
     } catch (error) {
-      console.error("Chat hook error:", error);
+      console.error("[useChat] Stream error:", error);
     } finally {
-      console.log("useChat: In finally block, cleaning up isLoading");
-      if (abortControllerRef.current === controller) {
-        setIsLoading(false);
-        abortControllerRef.current = null;
-        
-        setMessages((prev) => {
-          const lastIndex = prev.length - 1;
-          const targetIndex = (prev[lastIndex]?.id === assistantMessageId) 
-            ? lastIndex 
-            : prev.findIndex((m) => m.id === assistantMessageId);
-
-          if (targetIndex !== -1 && prev[targetIndex].isStreaming) {
-             console.log("useChat: Finalizing isStreaming for assistant message");
-             const next = [...prev];
-             next[targetIndex] = { ...next[targetIndex], isStreaming: false };
-             return next;
-          }
-          return prev;
-        });
-      }
+      cancelScheduledFlush();
+      flushPendingText();
+      setIsLoading(false);
+      abortControllerRef.current = null;
+      setMessages((prev) => {
+        const idx = prev.findIndex((m) => m.id === assistantMessageId);
+        if (idx !== -1) {
+          const next = [...prev];
+          next[idx] = { ...next[idx], isStreaming: false };
+          return next;
+        }
+        return prev;
+      });
     }
-  }, [isLoading, addOptimisticMessage]);
+  }, [isLoading]);
 
   const stopGeneration = useCallback(() => {
     if (abortControllerRef.current) {
       abortControllerRef.current.abort();
       abortControllerRef.current = null;
       setIsLoading(false);
-      
-      // Mark last message as not streaming efficiently
-      setMessages((prev) => {
-        if (prev.length === 0) return prev;
-        const lastIndex = prev.length - 1;
-        const lastMsg = prev[lastIndex];
-        if (lastMsg && lastMsg.role === "assistant" && lastMsg.isStreaming) {
-          const next = [...prev];
-          next[lastIndex] = { ...lastMsg, isStreaming: false };
-          return next;
-        }
-        return prev;
-      });
     }
   }, []);
 
   return {
-    messages: optimisticMessages, // Return optimistic state
+    messages,
     isLoading,
     sendMessage,
     stopGeneration,
   };
 }
-

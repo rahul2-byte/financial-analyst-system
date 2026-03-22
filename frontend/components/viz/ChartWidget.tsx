@@ -25,7 +25,7 @@ interface ChartWidgetProps {
 const COLORS = ["#818cf8", "#34d399", "#fbbf24", "#f472b6", "#60a5fa"];
 
 export const ChartWidget: React.FC<ChartWidgetProps> = ({ payload }) => {
-  const { title, type, data, xAxisKey, seriesKeys } = payload;
+  const { title, chartType: type, data, xAxisKey, seriesKeys } = payload;
 
   const renderChart = () => {
     switch (type) {

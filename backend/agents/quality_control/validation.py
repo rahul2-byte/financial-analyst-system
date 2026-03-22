@@ -7,9 +7,10 @@ from app.models.request_models import Message
 from agents.quality_control.schemas import AgentResponse, ValidationResult
 from quant.validators import ReportValidator
 from app.core.utils import clean_json_string
+from agents.base import BaseAgent
 
 
-class ValidationAgent:
+class ValidationAgent(BaseAgent):
     """
     The final compliance checkpoint. Ensures that the final synthesized report
     does not guarantee returns, leak system data, or hallucinate off-topic.
@@ -27,8 +28,7 @@ CRITICAL RULES:
     """
 
     def __init__(self, llm_service: LLMServiceInterface, model: str = "mistral-8b"):
-        self.llm = llm_service
-        self.model = model
+        super().__init__(llm_service, model)
         self.validator = ReportValidator()
 
     def _get_tools(self) -> list:
@@ -65,7 +65,9 @@ CRITICAL RULES:
             return json.dumps({"error": str(e)})
 
     @observe(name="Agent:Validation:Execute")
-    async def execute(self, user_query: str, draft_report: str) -> AgentResponse:
+    async def execute(
+        self, user_query: str, step_number: int = 0, draft_report: str = ""
+    ) -> AgentResponse:
         """
         Executes the validation loop.
         Forces the LLM to output the ValidationResult schema.
@@ -79,8 +81,14 @@ CRITICAL RULES:
 
         try:
             # Step 1: Tell the LLM to run the deterministic Python checks
-            response_msg = await self.llm.generate_message(
+            tid_checks = await self.emit_status(
+                step_number, self.agent_name, "Running compliance checks...", status="running"
+            )
+            response_msg = await self.llm_service.generate_message(
                 messages=messages, model=self.model, tools=self._get_tools()
+            )
+            await self.emit_status(
+                step_number, self.agent_name, "Running compliance checks...", "Initial checks complete.", status="completed", tool_id=tid_checks
             )
 
             if not response_msg.content:
@@ -103,7 +111,18 @@ CRITICAL RULES:
                     else:
                         arguments = arguments_str
 
+                    tid = await self.emit_status(
+                        step_number, tool_name, "Scanning for regulatory violations...", status="running"
+                    )
                     tool_result = self._execute_tool(tool_name, arguments)
+                    await self.emit_status(
+                        step_number,
+                        tool_name,
+                        "Scanning for regulatory violations...",
+                        "Compliance scan complete.",
+                        status="completed",
+                        tool_id=tid,
+                    )
 
                     langfuse_context.update_current_observation(
                         metadata={
@@ -124,13 +143,22 @@ CRITICAL RULES:
 
                 # Step 3: LLM Synthesizes the final sanitized output
                 if messages[-1].role == "tool":
-                    intermediate_msg = await self.llm.generate_message(
+                    tid_proc = await self.emit_status(
+                        step_number, self.agent_name, "Processing scan results...", status="running"
+                    )
+                    intermediate_msg = await self.llm_service.generate_message(
                         messages=messages, model=self.model
                     )
                     if not intermediate_msg.content:
                         intermediate_msg.content = "Processed tool results."
+                    await self.emit_status(
+                        step_number, self.agent_name, "Processing scan results...", "Results processed.", status="completed", tool_id=tid_proc
+                    )
                     messages.append(intermediate_msg)
 
+                tid_final = await self.emit_status(
+                    step_number, self.agent_name, "Finalizing report validation...", status="running"
+                )
                 schema_str = json.dumps(ValidationResult.model_json_schema())
                 messages.append(
                     Message(
@@ -142,14 +170,20 @@ CRITICAL RULES:
                         ),
                     )
                 )
-                final_response_msg = await self.llm.generate_message(
+                final_response_msg = await self.llm_service.generate_message(
                     messages=messages,
                     model=self.model,
                     response_format={"type": "json_object"},
                 )
+                await self.emit_status(
+                    step_number, self.agent_name, "Finalizing report validation...", "Validation complete.", status="completed", tool_id=tid_final
+                )
                 final_content = final_response_msg.content
             else:
                 # Fallback if it didn't call the tool
+                tid_fallback = await self.emit_status(
+                    step_number, self.agent_name, "Finalizing report validation...", status="running"
+                )
                 schema_str = json.dumps(ValidationResult.model_json_schema())
                 messages.append(
                     Message(
@@ -161,10 +195,13 @@ CRITICAL RULES:
                         ),
                     )
                 )
-                final_response_msg = await self.llm.generate_message(
+                final_response_msg = await self.llm_service.generate_message(
                     messages=messages,
                     model=self.model,
                     response_format={"type": "json_object"},
+                )
+                await self.emit_status(
+                    step_number, self.agent_name, "Finalizing report validation...", "Validation complete.", status="completed", tool_id=tid_fallback
                 )
                 final_content = final_response_msg.content
 

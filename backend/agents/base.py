@@ -1,8 +1,14 @@
 import asyncio
 import uuid
+import contextvars
 from typing import Optional, Any, Literal
-from backend.app.models.response_models import StreamEvent, ToolStatus
-from backend.app.services.llm_interface import LLMServiceInterface
+from app.models.response_models import StreamEvent, ToolStatus
+from app.services.llm_interface import LLMServiceInterface
+
+# ContextVar to store the status queue for the current task/request
+status_queue_var: contextvars.ContextVar[Optional[asyncio.Queue]] = contextvars.ContextVar(
+    "status_queue", default=None
+)
 
 
 class BaseAgent:
@@ -16,7 +22,6 @@ class BaseAgent:
     Attributes:
         llm_service (LLMServiceInterface): The service used to interact with LLMs.
         model (str): The specific model ID to use for generations.
-        status_queue (Optional[asyncio.Queue]): Queue for emitting SSE status events.
         agent_name (str): The name of the agent, derived from the class name.
     """
 
@@ -30,8 +35,18 @@ class BaseAgent:
         """
         self.llm_service = llm_service
         self.model = model
-        self.status_queue: Optional[asyncio.Queue] = None
         self.agent_name = self.__class__.__name__
+
+    @property
+    def status_queue(self) -> Optional[asyncio.Queue]:
+        """Returns the status queue for the current context."""
+        return status_queue_var.get()
+
+    async def execute(self, user_query: str, step_number: int = 0) -> Any:
+        """
+        Executes the agent's core logic. To be implemented by subclasses.
+        """
+        raise NotImplementedError("Subclasses must implement execute()")
 
     async def emit_status(
         self,

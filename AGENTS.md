@@ -16,11 +16,12 @@ LLMs must **NEVER** perform mathematical computations, financial ratio calculati
 
 The repository is structured to separate Logic, Interface, and Governance.
 
-- **`backend/`**: The Core Logic Workspace.
+- **`backend/`**: The Backend Server Root.
   - Contains all Python source code: Quant Engine, Agents, Orchestrator, API.
-  - This is where you will write code.
-- **`frontend/`**: The User Interface.
+  - This is the execution root for the backend server.
+- **`frontend/`**: The Frontend Application Root.
   - Contains React/Next.js application code.
+  - This is the execution root for the frontend application.
 - **`ai_engineering/`**: The "Main Memory" & Governance Layer.
   - Contains all architectural rules, constitutions, and policies.
   - **READ-ONLY**: You must consult these files but never modify them without explicit authorization.
@@ -30,7 +31,7 @@ The repository is structured to separate Logic, Interface, and Governance.
 
 ## 3. Operational Commands
 
-Execute these commands from the repository root.
+Execute these commands from their respective root directories.
 
 ### Environment & Dependencies
 - **Install Backend Dependencies:**
@@ -81,11 +82,12 @@ Execute these commands from the repository root.
 Adherence to `ai_engineering/CODING_STANDARDS.md` is mandatory.
 
 ### Python Development (Backend)
-- **Version:** Python 3.11+
-- **Style:** PEP8 compliant (enforced by Ruff).
-- **Imports:**
-  - Use **absolute imports** starting from `backend`.
-  - *Correct:* `from backend.common.schemas import SectorMetrics`
+- Version: Python 3.11+
+- Style: PEP8 compliant (enforced by Ruff).
+- Imports:
+  - Use **absolute imports** relative to the `backend/` directory root.
+  - *Correct:* `from common.schemas import SectorMetrics`
+  - *Incorrect:* `from backend.common.schemas import SectorMetrics`
   - *Incorrect:* `from ..common.schemas import SectorMetrics`
   - **No circular imports.** Use dependency injection or restructuring to resolve cycles.
 

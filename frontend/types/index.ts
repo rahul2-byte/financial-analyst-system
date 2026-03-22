@@ -35,18 +35,29 @@ export interface OHLCDataPoint extends TimeSeriesDataPoint {
  */
 export interface ChartPayload<T extends ChartDataPoint = ChartDataPoint> {
   title: string;
-  type: ChartType;
+  chartType: ChartType; // Renamed from type to avoid collision in flat event structure
   data: T[]; 
   xAxisKey: Extract<keyof T, string>;
   seriesKeys: Extract<keyof T, string>[]; 
 }
 
+export interface ToolStatus {
+  tool_id: string;
+  step_number: number;
+  agent: string;
+  tool_name: string;
+  status: 'running' | 'completed' | 'error';
+  input: string;
+  output?: string;
+}
+
 // SSE Event Types
 export type StreamEvent = 
   | { type: 'text_delta'; content: string }
-  | { type: 'chart'; content: ChartPayload }
+  | ({ type: 'chart' } & ChartPayload)
   | { type: 'status'; message: string }
   | { type: 'error'; message?: string; content?: string }
+  | ({ type: 'tool_status' } & ToolStatus)
   | { type: 'done' };
 
 /**
@@ -57,6 +68,7 @@ export interface Message {
   role: Role;
   content: string; // Markdown text
   charts?: ChartPayload[]; // Attached charts
+  reasoning_steps?: ToolStatus[]; // Agent reasoning steps
   timestamp: Date;
   isStreaming?: boolean;
 }

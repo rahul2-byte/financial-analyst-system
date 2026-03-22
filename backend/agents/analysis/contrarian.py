@@ -5,9 +5,10 @@ from app.core.observability import observe
 from app.services.llm_interface import LLMServiceInterface
 from app.models.request_models import Message
 from agents.analysis.schemas import AgentResponse
+from agents.base import BaseAgent
 
 
-class ContrarianAgent:
+class ContrarianAgent(BaseAgent):
     """
     Agent responsible for finding reasons to reject an investment thesis.
     It acts as a professional skeptic, analyzing data for risks, weaknesses, and threats.
@@ -27,12 +28,14 @@ CRITICAL RULES:
     """
 
     def __init__(self, llm_service: LLMServiceInterface, model: str = "mistral-8b"):
-        self.llm = llm_service
-        self.model = model
+        super().__init__(llm_service, model)
 
     @observe(name="Agent:Contrarian:Execute")
     async def execute(
-        self, user_query: str, context_data: Optional[Dict[str, Any]] = None
+        self,
+        user_query: str,
+        step_number: int = 0,
+        context_data: Optional[Dict[str, Any]] = None,
     ) -> AgentResponse:
         """
         Executes the agent loop.
@@ -47,8 +50,12 @@ CRITICAL RULES:
             Message(role="user", content=prompt),
         ]
 
+        tid = None
         try:
-            response_msg = await self.llm.generate_message(
+            tid = await self.emit_status(
+                step_number, self.agent_name, "Generating bear case analysis...", status="running"
+            )
+            response_msg = await self.llm_service.generate_message(
                 messages=messages, model=self.model
             )
 
@@ -62,15 +69,25 @@ CRITICAL RULES:
                     and "status" in parsed_json
                     and "data" in parsed_json
                 ):
+                    await self.emit_status(
+                        step_number, self.agent_name, "Generating bear case analysis...", "Bear case analysis complete.", status="completed", tool_id=tid
+                    )
                     return AgentResponse(**parsed_json)
             except (json.JSONDecodeError, TypeError, ValueError):
                 pass
 
             # Fallback: Wrap the response content in the AgentResponse schema
             # Use 'response' key for consistency with the PipelineOrchestrator
+            await self.emit_status(
+                step_number, self.agent_name, "Generating bear case analysis...", "Bear case analysis complete.", status="completed", tool_id=tid
+            )
             return AgentResponse(
                 status="success", data={"response": content}, errors=None
             )
 
         except Exception as e:
+            if tid:
+                await self.emit_status(
+                    step_number, self.agent_name, "Generating bear case analysis...", str(e), status="error", tool_id=tid
+                )
             return AgentResponse(status="failure", data={}, errors=[str(e)])
