@@ -79,16 +79,17 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
 - **Imports:** Use **absolute imports** relative to `backend/` (e.g., `from app.core.logging import logger`).
 - **Validation:** Use **Pydantic v2** for all schemas, API models, and settings.
 - **Math/Quant:** Use NumPy or Pandas for vectorization. **No Python loops** for quantitative logic.
-- **Error Handling:** Use `logger.error(..., exc_info=True)` for traceability. No silent failures.
-- **Statelessness:** No global state. Use FastAPI dependency injection for services.
-- **Naming:** `snake_case` (files/vars), `PascalCase` (classes).
+- **Style:** PEP8 compliant, no global state, no magic numbers, no circular imports.
+- **Architecture:** Dependency Injection and interface-based design. Configuration via environment.
+- **Logging:** Structured logging with execution time tracking and error categorization.
+- **Testing:** Unit tests required for all new logic. Edge case handling is mandatory.
 
 ### TypeScript/React (Frontend)
 - **Frameworks:** Next.js 16+, React 19 (Server Components preferred).
 - **Styling:** Tailwind CSS 4. Use `clsx` and `tailwind-merge` for class utility management.
 - **Components:** Modular, functional components with explicit TypeScript prop interfaces.
 - **State Management:** Prioritize React Hooks (`useState`, `useMemo`, `useCallback`) and local state.
-- **Naming:** `PascalCase` (Components), `camelCase` (Variables/Methods).
+- **Typing:** Strict TypeScript typing for all props, states, and API responses.
 
 ---
 
@@ -99,23 +100,29 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
 - **Rule #4**: No secrets in source. Use `.env` and `app.config.settings`.
 - **Rule #5**: All data used for investment theses must be verified and deterministic.
 - **Rule #6**: Market data must be normalized to standard SI units and ISO currency codes.
+- **Rule #7**: One agent = One responsibility. No modular overlapping.
+- **Rule #8**: All investment reasoning must be grounded in verified quantitative data points.
 
 ---
 
 ## 7. Data Pipeline & Infrastructure
-- **Pipeline:** No sentiment analysis or LLM logic inside the raw data pipeline.
-- **Logs:** All pipeline steps must log execution time and source attribution.
-- **Configuration:** Managed via Pydantic settings in `backend/app/config.py`.
+- **Pipeline Integrity:** No sentiment analysis or LLM logic allowed inside the raw data pipeline.
+- **Sources:** Explicitly defined modules for News, Market Data, and Filings.
+- **Flow:** Every data point must be Validated and Normalized before Storage.
+- **Logs:** All pipeline steps must log execution time and source attribution for audit trails.
 - **Inference:** Uses `llama.cpp` for local inference and OpenTelemetry for observability.
+- **Storage:** PostgreSQL (TimescaleDB) for time-series and Qdrant for vector embeddings.
 
 ---
 
 ## 8. Development Boot Sequence
 Before submitting any code changes, agents must:
-1. **Read Constitution**: Verify alignment with `ai_engineering/PROJECT_CONSTITUTION.md`.
+1. **Load Context**: Read `PROJECT_CONSTITUTION.md`, `CODING_STANDARDS.md`, and `AGENT_RULES.md`.
 2. **Verify Patterns**: Use `glob`/`grep` to find existing implementations of similar logic.
-3. **TDD**: Write unit tests for new quant logic or tools BEFORE implementation.
-4. **Self-Verify**: Ensure `pytest`, `ruff check`, and frontend `npm run lint` pass.
-5. **Commit Message**: Use semantic prefixes (e.g., `feat(quant):`, `fix(agent):`).
+3. **Plan & Summarize**: Summarize current task and identify impacted modules before writing code.
+4. **TDD**: Write unit tests for new quant logic or tools BEFORE implementation.
+5. **Self-Verify**: Ensure `pytest`, `ruff check`, and frontend `npm run lint` pass.
+6. **Commit Message**: Use semantic prefixes (e.g., `feat(quant):`, `fix(agent):`).
+7. **Compliance Check**: Confirm changes align with system boundaries and LLM limitations.
 
 **End of Protocol.**
