@@ -7,8 +7,6 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
 
 **CRITICAL MANDATE:** LLMs must **NEVER** perform mathematical computations, financial ratio calculations, or time-series forecasting. All quantitative logic must be implemented in Python within the `backend/` directory.
 
----
-
 ## 2. Repository Architecture
 - **`backend/`**: FastAPI (3.11+), Quant Engine, Multi-agent Orchestration.
   - `agents/`: Single-responsibility agents (Fundamental, Technical, Risk, etc.).
