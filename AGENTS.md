@@ -44,7 +44,35 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
 
 ---
 
-## 4. Coding Standards & Style Guidelines
+## 4. Module-Centric Reference
+
+### A. Orchestration (The Engine)
+- **Primary Class:** `PipelineOrchestrator` (`backend/app/core/orchestrator.py`)
+- **Planning Flow:** `PlannerAgent` (`backend/agents/orchestration/planner.py`) generates a `PlanData` DAG (list of `ExecutionStep`).
+- **Execution:** `PipelineOrchestrator` groups steps by dependencies for parallel execution and routes tasks to specialized agents.
+- **Synthesis Pattern:** Multi-stage: LLM Draft -> `VerificationAgent` (Numeric Consistency) -> `ValidationAgent` (Compliance/Safety).
+
+### B. Agent Development Protocol
+- **Base Class:** `BaseAgent` (`backend/agents/base.py`). All agents MUST inherit this and implement `async def execute(self, user_query: str, step_number: int)`.
+- **Response Schema:** Use `AgentResponse` (`backend/agents/data_access/schemas.py`) for standard `{status, data, errors}` output.
+- **Synthesis Validation:** Use `ValidationResult` for compliance checkpoints.
+- **Rules:**
+  1. **Single Responsibility:** One agent = One task.
+  2. **Synthesis Grounding:** Every synthesis must be grounded in verified quantitative data.
+  3. **Real-time Feedback:** Use `await self.emit_status(...)` for progress updates.
+
+### C. Data Pipeline (The Source)
+- **Interfaces:** (`backend/data/interfaces/`)
+  - `IDataFetcher`: `fetch_ohlcv`, `fetch_news`.
+  - `IStructuredStorage`: `save_ohlcv`, `get_ohlcv`, `get_latest_date`.
+  - `IVectorStorage`: `upsert_chunks`, `search` (Hybrid/Temporal).
+- **Flow:** Fetch -> Validate -> Normalize -> Store.
+- **Normalization:** SI Units, ISO Currencies (no local currency scaling in logic).
+- **Integrity:** No sentiment analysis or LLM logic inside the raw data pipeline.
+
+---
+
+## 5. Coding Standards & Style Guidelines
 
 ### Python (Backend)
 - **Version:** Python 3.11+ (Strict typing mandatory).
@@ -64,20 +92,6 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
 
 ---
 
-## 5. Agent Development Protocol
-When modifying or creating Agents in `backend/agents/`:
-1. **Single Responsibility:** One agent = One task. No "god agents".
-2. **Deterministic Flow:** Agent -> Quantitative Tool (Python) -> Synthesis (LLM).
-3. **Synthesis Grounding:** Every synthesis must be grounded in verified quantitative data.
-4. **Structured Output:** Always return JSON validated by a Pydantic schema:
-   ```json
-   {"status": "success", "data": {...}, "errors": null}
-   ```
-5. **Real-time Feedback:** Use `await self.emit_status(...)` for progress updates.
-6. **Orchestration:** Agents must not self-trigger; all actions go through the Orchestrator.
-
----
-
 ## 6. Integrity Rules (Constitution)
 - **Rule #1**: LLM reasoning != Computation. Keep them strictly separate.
 - **Rule #2**: All data sources must define: **Fetch, Validate, Normalize, Store**.
@@ -93,6 +107,8 @@ When modifying or creating Agents in `backend/agents/`:
 - **Logs:** All pipeline steps must log execution time and source attribution.
 - **Configuration:** Managed via Pydantic settings in `backend/app/config.py`.
 - **Inference:** Uses `llama.cpp` for local inference and OpenTelemetry for observability.
+
+---
 
 ## 8. Development Boot Sequence
 Before submitting any code changes, agents must:
