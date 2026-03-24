@@ -7,6 +7,8 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
 
 **CRITICAL MANDATE:** LLMs must **NEVER** perform mathematical computations, financial ratio calculations, or time-series forecasting. All quantitative logic must be implemented in Python within the `backend/` directory.
 
+---
+
 ## 2. Repository Architecture
 - **`backend/`**: FastAPI (3.11+), Quant Engine, Multi-agent Orchestration.
   - `agents/`: Single-responsibility agents (Fundamental, Technical, Risk, etc.).
@@ -31,12 +33,8 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
   - Full suite: `pytest backend/tests`
   - Single File: `pytest backend/tests/quant/test_sector_risk.py`
   - Single Test: `pytest backend/tests/quant/test_sector_risk.py::test_calculation`
-  - Debugging: `pytest -s backend/tests`
 - **Frontend (Vitest):**
   - Run once: `npm run test` (from `frontend/`)
-  - Single File: `npx vitest frontend/tests/unit/Chart.test.tsx`
-  - Watch Mode: `npm run test:watch`
-  - Coverage: `npm run test:coverage`
 - **E2E (Playwright):** `npm run test:e2e`
 
 ### Linting & Formatting
