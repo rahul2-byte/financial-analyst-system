@@ -2,6 +2,27 @@ import { useState, useCallback, useRef } from "react";
 import { Message, StreamEvent, ToolStatus } from "@/types";
 import { chatStream } from "@/lib/api";
 
+const STATUS_NOISE_PATTERNS: RegExp[] = [
+  /^Executing:/i,
+  /^Step\s+\d+:\s+.+\s+running\.{0,3}$/i,
+  /^Step\s+\d+:\s+.+\s+completed\.{0,3}$/i,
+];
+
+const STATUS_PRIORITY_PATTERNS: RegExp[] = [
+  /initializing/i,
+  /planning/i,
+  /synthesizing|synthesis/i,
+  /verifying|verification/i,
+  /compliance/i,
+  /failed|error|crashed/i,
+];
+
+function shouldDisplayStatus(message: string): boolean {
+  const isPriority = STATUS_PRIORITY_PATTERNS.some((pattern) => pattern.test(message));
+  if (isPriority) return true;
+  return !STATUS_NOISE_PATTERNS.some((pattern) => pattern.test(message));
+}
+
 export function useChat() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [isLoading, setIsLoading] = useState(false);
@@ -119,17 +140,22 @@ export function useChat() {
               };
               updatedMsg.charts = [...(updatedMsg.charts || []), chartPayload];
             } else if (event.type === "status") {
+              const statusMessage = event.message?.trim() || "";
+              if (!statusMessage || !shouldDisplayStatus(statusMessage)) {
+                return prev;
+              }
+
               // Add generic status updates to reasoning steps for immediate feedback
               const steps = [...(updatedMsg.reasoning_steps || [])];
               // Only add if not already present
-              if (!steps.find(s => s.input === event.message)) {
+              if (!steps.find(s => s.input === statusMessage)) {
                 steps.push({
                   tool_id: `status-${steps.length}`,
                   step_number: -1, // Use -1 to keep system status at top
                   agent: "System",
                   tool_name: "Orchestrator",
                   status: "completed",
-                  input: event.message,
+                  input: statusMessage,
                 });
                 updatedMsg.reasoning_steps = steps;
               }

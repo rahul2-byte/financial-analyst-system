@@ -1,9 +1,12 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, it, expect } from "vitest";
 import { ReasoningTimeline } from "@/components/chat/ReasoningTimeline";
 
 describe("ReasoningTimeline", () => {
-  it("renders running/completed/error steps", () => {
+  it("shows concise overview and supports deep logs tab", async () => {
+    const user = userEvent.setup();
+
     render(
       <ReasoningTimeline
         steps={[
@@ -36,10 +39,16 @@ describe("ReasoningTimeline", () => {
       />,
     );
 
-    expect(screen.getByText("Reasoning Process")).toBeInTheDocument();
+    expect(screen.getByText("Reasoning")).toBeInTheDocument();
+    expect(screen.getByText("Execution Summary")).toBeInTheDocument();
+    expect(screen.getByText("Planning")).toBeInTheDocument();
+    expect(screen.getByText("Validation")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: /Deep Logs/i }));
+
     expect(screen.getByLabelText("Running")).toBeInTheDocument();
     expect(screen.getByLabelText("Completed")).toBeInTheDocument();
     expect(screen.getByLabelText("Error")).toBeInTheDocument();
-    expect(screen.getByText("Found 5 sources")).toBeInTheDocument();
+    expect(screen.getAllByText("Action:").length).toBeGreaterThan(0);
   });
 });
