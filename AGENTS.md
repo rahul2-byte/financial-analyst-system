@@ -1,166 +1,109 @@
 # AGENT ORIENTATION & COMPLIANCE PROTOCOL
 
 ## 1. System Identity & Mission
+You are an agent operating within **FIN-AI**, a production-grade Financial Intelligence Platform.
+- **Goal:** Deliver deterministic data processing and synthesis-driven investment research.
+- **Mission:** Bridge raw data and reasoning while maintaining absolute integrity.
 
-You are operating within a **Production-Grade Financial Intelligence Platform**.
-Your primary directive is to build a modular, multi-agent system where:
-- **Deterministic Logic** handles data processing and calculation.
-- **LLMs** handle reasoning, strategy, and synthesis.
-
-**CRITICAL MANDATE:**
-LLMs must **NEVER** perform mathematical computations, financial ratio calculations, or time-series forecasting. All quantitative logic must be implemented in Python within the `backend/` directory.
+**CRITICAL MANDATE:** LLMs must **NEVER** perform mathematical computations, financial ratio calculations, or time-series forecasting. All quantitative logic must be implemented in Python within the `backend/` directory.
 
 ---
 
 ## 2. Repository Architecture
-
-The repository is structured to separate Logic, Interface, and Governance.
-
-- **`backend/`**: The Backend Server Root.
-  - Contains all Python source code: Quant Engine, Agents, Orchestrator, API.
-  - This is the execution root for the backend server.
-- **`frontend/`**: The Frontend Application Root.
-  - Contains React/Next.js application code.
-  - This is the execution root for the frontend application.
-- **`ai_engineering/`**: The "Main Memory" & Governance Layer.
-  - Contains all architectural rules, constitutions, and policies.
-  - **READ-ONLY**: You must consult these files but never modify them without explicit authorization.
-  - Key files: `PROJECT_CONSTITUTION.md`, `CODING_STANDARDS.md`, `AGENT_RULES.md`.
+- **`backend/`**: FastAPI (3.11+), Quant Engine, Multi-agent Orchestration.
+  - `agents/`: Single-responsibility agents (Fundamental, Technical, Risk, etc.).
+  - `quant/`: Deterministic logic for financial indicators and scanners.
+  - `app/`: Core services, routes (`/api/chat`, `/api/health`), and Pydantic config.
+  - `storage/`: PostgreSQL (TimescaleDB for market data) and Qdrant (vector storage).
+- **`frontend/`**: Next.js 16 (App Router), React 19, Tailwind CSS 4.
+  - `components/`: UI blocks (Charts via Recharts, Virtual lists via TanStack).
+  - `app/`: Server-side components and routing.
+- **`ai_engineering/`**: Governance layer containing `PROJECT_CONSTITUTION.md` and `CODING_STANDARDS.md`.
 
 ---
 
 ## 3. Operational Commands
 
-Execute these commands from their respective root directories.
-
 ### Environment & Dependencies
-- **Install Backend Dependencies:**
-  ```bash
-  pip install -r backend/requirements.txt
-  ```
-- **Install Frontend Dependencies:**
-  ```bash
-  cd frontend && npm install
-  ```
+- **Backend:** `pip install -r backend/requirements.txt`
+- **Frontend:** `cd frontend && npm install`
 
-### Testing (Pytest)
-- **Run All Tests:**
-  ```bash
-  pytest backend/tests
-  ```
-- **Run Specific Test File:**
-  ```bash
-  pytest backend/tests/quant/test_sector_risk.py
-  ```
-- **Run with Output Logs (Debug):**
-  ```bash
-  pytest -s backend/tests
-  ```
-- **Run with Coverage:**
-  ```bash
-  pytest --cov=backend backend/tests
-  ```
+### Running Tests
+- **Backend (Pytest):**
+  - Full suite: `pytest backend/tests`
+  - Single File: `pytest backend/tests/quant/test_sector_risk.py`
+  - Single Test: `pytest backend/tests/quant/test_sector_risk.py::test_calculation`
+  - Debugging: `pytest -s backend/tests`
+- **Frontend (Vitest):**
+  - Run once: `npm run test` (from `frontend/`)
+  - Single File: `npx vitest frontend/tests/unit/Chart.test.tsx`
+  - Watch Mode: `npm run test:watch`
+  - Coverage: `npm run test:coverage`
+- **E2E (Playwright):** `npm run test:e2e`
 
-### Code Quality & Linting
-- **Lint (Ruff):**
-  ```bash
-  ruff check backend/
-  ```
-- **Format (Ruff):**
-  ```bash
-  ruff format backend/
-  ```
-- **Type Check (Mpy):**
-  ```bash
-  mypy backend/
-  ```
+### Linting & Formatting
+- **Backend (Ruff):** `ruff check backend/` and `ruff format backend/`
+- **Backend (Types):** `mypy backend/`
+- **Frontend (ESLint):** `npm run lint`
 
 ---
 
 ## 4. Coding Standards & Style Guidelines
 
-Adherence to `ai_engineering/CODING_STANDARDS.md` is mandatory.
+### Python (Backend)
+- **Version:** Python 3.11+ (Strict typing mandatory).
+- **Imports:** Use **absolute imports** relative to `backend/` (e.g., `from app.core.logging import logger`).
+- **Validation:** Use **Pydantic v2** for all schemas, API models, and settings.
+- **Math/Quant:** Use NumPy or Pandas for vectorization. **No Python loops** for quantitative logic.
+- **Error Handling:** Use `logger.error(..., exc_info=True)` for traceability. No silent failures.
+- **Statelessness:** No global state. Use FastAPI dependency injection for services.
+- **Naming:** `snake_case` (files/vars), `PascalCase` (classes).
 
-### Python Development (Backend)
-- Version: Python 3.11+
-- Style: PEP8 compliant (enforced by Ruff).
-- Imports:
-  - Use **absolute imports** relative to the `backend/` directory root.
-  - *Correct:* `from common.schemas import SectorMetrics`
-  - *Incorrect:* `from backend.common.schemas import SectorMetrics`
-  - *Incorrect:* `from ..common.schemas import SectorMetrics`
-  - **No circular imports.** Use dependency injection or restructuring to resolve cycles.
-
-### Typing & Schemas
-- **Strict Typing:** All function signatures must have type hints.
-  ```python
-  def calculate_risk(self, data: List[float]) -> float:
-  ```
-- **Data Validation:** Use **Pydantic v2** or `dataclasses` for all data structures.
-  - Raw dictionaries are forbidden for internal data passing.
-- **No Magic Numbers:** All constants must be named and preferably loaded from configuration.
-
-### Error Handling
-- **Custom Exceptions:** Define domain-specific exceptions in `backend/common/exceptions.py`.
-- **No Silent Failures:** Never use bare `try...except`. Log the error and re-raise or handle gracefully.
-- **Logging:** Use structured logging (JSON format preferred). Include execution time and context.
-
-### Performance
-- **Vectorization:** Use NumPy/Pandas for data processing. Avoid Python loops for heavy computation.
-- **Statelessness:** Functions should be pure where possible. Global state is forbidden.
+### TypeScript/React (Frontend)
+- **Frameworks:** Next.js 16+, React 19 (Server Components preferred).
+- **Styling:** Tailwind CSS 4. Use `clsx` and `tailwind-merge` for class utility management.
+- **Components:** Modular, functional components with explicit TypeScript prop interfaces.
+- **State Management:** Prioritize React Hooks (`useState`, `useMemo`, `useCallback`) and local state.
+- **Naming:** `PascalCase` (Components), `camelCase` (Variables/Methods).
 
 ---
 
-## 5. Agent Development Rules
-
-When building or modifying Agents (in `backend/agents/`):
-
-1.  **Single Responsibility:** One agent = One task.
-2.  **Stateless:** Agents must not maintain internal state between executions.
-3.  **Structured Output:**
-    - Agents **MUST** return structured JSON.
-    - Format:
-      ```json
-      {
-        "status": "success | failure",
-        "data": { ... },
-        "errors": null
-      }
-      ```
-4.  **No Direct Communication:** Agents do not call other agents directly. All coordination is handled by the `Orchestrator`.
-5.  **Prompt Engineering:** Use strict templates. Validate all LLM outputs against Pydantic schemas.
+## 5. Agent Development Protocol
+When modifying or creating Agents in `backend/agents/`:
+1. **Single Responsibility:** One agent = One task. No "god agents".
+2. **Deterministic Flow:** Agent -> Quantitative Tool (Python) -> Synthesis (LLM).
+3. **Synthesis Grounding:** Every synthesis must be grounded in verified quantitative data.
+4. **Structured Output:** Always return JSON validated by a Pydantic schema:
+   ```json
+   {"status": "success", "data": {...}, "errors": null}
+   ```
+5. **Real-time Feedback:** Use `await self.emit_status(...)` for progress updates.
+6. **Orchestration:** Agents must not self-trigger; all actions go through the Orchestrator.
 
 ---
 
-## 6. Development Workflow (The "Boot Sequence")
-
-Before writing code, every active agent must:
-
-1.  **Read Context:**
-    - `ai_engineering/BOOT_SEQUENCE.md`
-    - `ai_engineering/PROJECT_CONSTITUTION.md`
-    - `ai_engineering/ACTIVE_TASK.md`
-2.  **Explore Codebase:**
-    - Use `grep` and `find` to understand existing patterns.
-    - Do not assume file locations; verify them.
-3.  **Plan:**
-    - Formulate a plan that respects the "No LLM Math" rule.
-    - Identify impacted modules.
-4.  **Implement (Test-Driven):**
-    - Write unit tests *first* or in parallel.
-    - Implement deterministic logic in `backend/quant/` or `backend/common/`.
-    - Implement agent logic in `backend/agents/`.
-5.  **Verify:**
-    - Run `pytest`.
-    - Run `ruff check`.
-    - Ensure no regression.
+## 6. Integrity Rules (Constitution)
+- **Rule #1**: LLM reasoning != Computation. Keep them strictly separate.
+- **Rule #2**: All data sources must define: **Fetch, Validate, Normalize, Store**.
+- **Rule #3**: No architectural drift. Check `ai_engineering/` before changing patterns.
+- **Rule #4**: No secrets in source. Use `.env` and `app.config.settings`.
+- **Rule #5**: All data used for investment theses must be verified and deterministic.
+- **Rule #6**: Market data must be normalized to standard SI units and ISO currency codes.
 
 ---
 
-## 7. Version Control & Changelog
+## 7. Data Pipeline & Infrastructure
+- **Pipeline:** No sentiment analysis or LLM logic inside the raw data pipeline.
+- **Logs:** All pipeline steps must log execution time and source attribution.
+- **Configuration:** Managed via Pydantic settings in `backend/app/config.py`.
+- **Inference:** Uses `llama.cpp` for local inference and OpenTelemetry for observability.
 
-- **Commit Messages:** Semantic and descriptive (e.g., `feat(quant): add sector risk scoring`).
-- **Changelog:** Update `CHANGELOG.md` for every architectural change or significant feature, following `ai_engineering/CHANGELOG_POLICY.md`.
-- **Review:** Self-review code against `ai_engineering/CODING_STANDARDS.md` before finalizing.
+## 8. Development Boot Sequence
+Before submitting any code changes, agents must:
+1. **Read Constitution**: Verify alignment with `ai_engineering/PROJECT_CONSTITUTION.md`.
+2. **Verify Patterns**: Use `glob`/`grep` to find existing implementations of similar logic.
+3. **TDD**: Write unit tests for new quant logic or tools BEFORE implementation.
+4. **Self-Verify**: Ensure `pytest`, `ruff check`, and frontend `npm run lint` pass.
+5. **Commit Message**: Use semantic prefixes (e.g., `feat(quant):`, `fix(agent):`).
 
 **End of Protocol.**
