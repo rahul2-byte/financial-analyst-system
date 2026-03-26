@@ -114,17 +114,22 @@ class WebSearchAgent(BaseAgent):
                                     "properties": {
                                         "title": {"type": "string"},
                                         "url": {"type": "string"},
-                                        "key_fact_extracted": {"type": "string"}
+                                        "key_fact_extracted": {"type": "string"},
                                     },
-                                    "required": ["title", "url", "key_fact_extracted"]
+                                    "required": ["title", "url", "key_fact_extracted"],
                                 },
                                 "description": "List of sources to prove findings.",
                             },
                         },
-                        "required": ["summary_of_findings", "is_breaking_news_detected", "potential_market_impact", "citations"],
+                        "required": [
+                            "summary_of_findings",
+                            "is_breaking_news_detected",
+                            "potential_market_impact",
+                            "citations",
+                        ],
                     },
                 },
-            }
+            },
         ]
 
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
@@ -159,7 +164,7 @@ class WebSearchAgent(BaseAgent):
                 result = self.provider.scrape_webpage(url)
                 # Cap the length so it doesn't blow up the context window
                 return json.dumps({"content": result[:8000]})
-            
+
             elif tool_name == "submit_research_report":
                 return json.dumps(arguments)
 
@@ -193,38 +198,53 @@ class WebSearchAgent(BaseAgent):
                 response_msg = await self.llm_service.generate_message(
                     messages=messages, model=self.model, tools=self._get_tools()
                 )
-                
+
                 if not response_msg.content:
                     response_msg.content = "Processing..."
-                
+
                 messages.append(response_msg)
 
                 if response_msg.tool_calls:
                     for tool_call in response_msg.tool_calls:
                         function_call = tool_call.get("function", {})
                         tool_name = function_call.get("name")
-                        
+
                         arguments_str = function_call.get("arguments", "{}")
                         try:
-                            arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+                            arguments = (
+                                json.loads(arguments_str)
+                                if isinstance(arguments_str, str)
+                                else arguments_str
+                            )
                         except json.JSONDecodeError:
                             arguments = {}
 
                         # Check if it's the final submission tool
                         if tool_name == "submit_research_report":
                             final_data = self._execute_tool(tool_name, arguments)
-                            return AgentResponse(status="success", data=json.loads(final_data), errors=None)
+                            return AgentResponse(
+                                status="success",
+                                data=json.loads(final_data),
+                                errors=None,
+                            )
 
                         # Otherwise, execute the search/scrape tool
                         tid = await self.emit_status(
-                            step_number, tool_name, json.dumps(arguments), status="running"
+                            step_number,
+                            tool_name,
+                            json.dumps(arguments),
+                            status="running",
                         )
                         tool_result = self._execute_tool(tool_name, arguments)
                         await self.emit_status(
                             step_number,
                             tool_name,
                             json.dumps(arguments),
-                            (tool_result[:500] + "..." if len(tool_result) > 500 else tool_result),
+                            (
+                                tool_result[:500] + "..."
+                                if len(tool_result) > 500
+                                else tool_result
+                            ),
                             status="completed",
                             tool_id=tid,
                         )
@@ -249,16 +269,18 @@ class WebSearchAgent(BaseAgent):
                 else:
                     # If the LLM returns text without calling a tool, we treat it as the final content but flag it.
                     return AgentResponse(
-                        status="success", 
-                        data={"response": response_msg.content}, 
-                        errors=["Final output was text-only, not structured JSON via submit_research_report tool."]
+                        status="success",
+                        data={"response": response_msg.content},
+                        errors=[
+                            "Final output was text-only, not structured JSON via submit_research_report tool."
+                        ],
                     )
-            
+
             # If the loop finishes without a 'submit_research_report' call.
             return AgentResponse(
                 status="failure",
                 data={},
-                errors=[f"Agent failed to submit results within {max_turns} turns."]
+                errors=[f"Agent failed to submit results within {max_turns} turns."],
             )
 
         except Exception as e:

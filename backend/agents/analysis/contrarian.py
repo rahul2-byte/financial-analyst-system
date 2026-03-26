@@ -63,11 +63,23 @@ class ContrarianAgent(BaseAgent):
                                 "items": {
                                     "type": "object",
                                     "properties": {
-                                        "risk_category": {"type": "string", "enum": ["Volatility", "Debt", "Sentiment", "Other"]},
+                                        "risk_category": {
+                                            "type": "string",
+                                            "enum": [
+                                                "Volatility",
+                                                "Debt",
+                                                "Sentiment",
+                                                "Other",
+                                            ],
+                                        },
                                         "description": {"type": "string"},
-                                        "supporting_data": {"type": "string"}
+                                        "supporting_data": {"type": "string"},
                                     },
-                                    "required": ["risk_category", "description", "supporting_data"]
+                                    "required": [
+                                        "risk_category",
+                                        "description",
+                                        "supporting_data",
+                                    ],
                                 },
                                 "description": "A structured list of all identified risks from the scanners.",
                             },
@@ -127,25 +139,33 @@ class ContrarianAgent(BaseAgent):
 
                 if not response_msg.tool_calls:
                     return AgentResponse(
-                        status="failure", data={}, errors=["Agent did not call any tools."]
+                        status="failure",
+                        data={},
+                        errors=["Agent did not call any tools."],
                     )
 
                 # Execute all tool calls in this turn
                 for tool_call in response_msg.tool_calls:
                     function_call = tool_call.get("function", {})
                     tool_name = function_call.get("name")
-                    
+
                     # Parse arguments safely
                     arguments_str = function_call.get("arguments", "{}")
                     try:
-                        arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+                        arguments = (
+                            json.loads(arguments_str)
+                            if isinstance(arguments_str, str)
+                            else arguments_str
+                        )
                     except json.JSONDecodeError:
                         arguments = {}
 
                     # If it's the final submission tool, we're done
                     if tool_name == "submit_bear_case":
                         final_data = self._execute_tool(tool_name, arguments)
-                        return AgentResponse(status="success", data=json.loads(final_data), errors=None)
+                        return AgentResponse(
+                            status="success", data=json.loads(final_data), errors=None
+                        )
 
                     # Otherwise, execute the tool and add result to context
                     tid = await self.emit_status(
@@ -153,7 +173,12 @@ class ContrarianAgent(BaseAgent):
                     )
                     tool_result = self._execute_tool(tool_name, arguments)
                     await self.emit_status(
-                        step_number, tool_name, "Running risk scan...", "Done.", status="completed", tool_id=tid
+                        step_number,
+                        tool_name,
+                        "Running risk scan...",
+                        "Done.",
+                        status="completed",
+                        tool_id=tid,
                     )
 
                     messages.append(
@@ -169,7 +194,7 @@ class ContrarianAgent(BaseAgent):
             return AgentResponse(
                 status="failure",
                 data={},
-                errors=[f"Agent failed to submit bear case within {max_turns} turns."]
+                errors=[f"Agent failed to submit bear case within {max_turns} turns."],
             )
 
         except Exception as e:

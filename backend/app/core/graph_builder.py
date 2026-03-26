@@ -50,7 +50,9 @@ def route_after_execution(state: ResearchGraphState) -> str:
         logger.info(f"All {executed_count} steps executed, routing to synthesis_node")
         return "synthesis_node"
 
-    logger.info(f"Executed {executed_count}/{total_steps} steps, looping to execute_level_node")
+    logger.info(
+        f"Executed {executed_count}/{total_steps} steps, looping to execute_level_node"
+    )
     return "execute_level_node"
 
 
@@ -64,7 +66,9 @@ def route_after_verification(state: ResearchGraphState) -> str:
         return "validation_node"
 
     if verification_retry_count < 3:
-        logger.warning(f"Verification failed (retry {verification_retry_count}/3), routing to synthesis_node")
+        logger.warning(
+            f"Verification failed (retry {verification_retry_count}/3), routing to synthesis_node"
+        )
         return "synthesis_node"
 
     logger.error("Verification failed after 3 retries, ending graph")

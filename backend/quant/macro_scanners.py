@@ -6,6 +6,7 @@ In a real-world scenario, these would fetch data from APIs (e.g., FRED).
 For now, they return mock data to facilitate agent development.
 """
 
+
 def interest_rate_scanner(country: str = "USA") -> Dict[str, Any]:
     """
     Scans for current interest rates and central bank stance.
@@ -17,8 +18,9 @@ def interest_rate_scanner(country: str = "USA") -> Dict[str, Any]:
         "rate_type": "Federal Funds Rate",
         "last_change_date": "2023-07-26",
         "central_bank_stance": "Hawkish",
-        "notes": "The central bank has signaled it will maintain high rates to combat inflation."
+        "notes": "The central bank has signaled it will maintain high rates to combat inflation.",
     }
+
 
 def economic_indicator_scanner(indicator: str) -> Dict[str, Any]:
     """
@@ -31,7 +33,7 @@ def economic_indicator_scanner(indicator: str) -> Dict[str, Any]:
             "value": "3.2%",
             "period": "YoY",
             "trend": "decreasing",
-            "notes": "Inflation is showing signs of cooling but remains above the 2% target."
+            "notes": "Inflation is showing signs of cooling but remains above the 2% target.",
         }
     elif indicator.lower() == "gdp":
         return {
@@ -39,12 +41,10 @@ def economic_indicator_scanner(indicator: str) -> Dict[str, Any]:
             "value": "2.1%",
             "period": "QoQ Annualized",
             "trend": "stable",
-            "notes": "Economic growth is moderate but resilient."
+            "notes": "Economic growth is moderate but resilient.",
         }
-    return {
-        "indicator": indicator,
-        "error": "Indicator not found or not supported."
-    }
+    return {"indicator": indicator, "error": "Indicator not found or not supported."}
+
 
 def commodity_price_scanner(commodity: str) -> Dict[str, Any]:
     """
@@ -56,9 +56,6 @@ def commodity_price_scanner(commodity: str) -> Dict[str, Any]:
             "price": 85.50,
             "unit": "USD per barrel",
             "trend": "increasing",
-            "notes": "Geopolitical tensions are putting upward pressure on oil prices."
+            "notes": "Geopolitical tensions are putting upward pressure on oil prices.",
         }
-    return {
-        "commodity": commodity,
-        "error": "Commodity not found or not supported."
-    }
+    return {"commodity": commodity, "error": "Commodity not found or not supported."}

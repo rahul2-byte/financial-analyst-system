@@ -27,11 +27,14 @@ class MacroAnalysisAgent(BaseAgent):
                     "name": "interest_rate_scanner",
                     "description": "Scans for current interest rates and central bank stance for a country.",
                     "parameters": {
-                        "type": "object", 
+                        "type": "object",
                         "properties": {
-                            "country": {"type": "string", "description": "The country to scan, e.g., 'USA'."}
+                            "country": {
+                                "type": "string",
+                                "description": "The country to scan, e.g., 'USA'.",
+                            }
                         },
-                        "required": ["country"]
+                        "required": ["country"],
                     },
                 },
             },
@@ -41,11 +44,14 @@ class MacroAnalysisAgent(BaseAgent):
                     "name": "economic_indicator_scanner",
                     "description": "Scans for a specific key economic indicator like CPI or GDP.",
                     "parameters": {
-                        "type": "object", 
+                        "type": "object",
                         "properties": {
-                            "indicator": {"type": "string", "description": "The indicator to scan, e.g., 'CPI' or 'GDP'."}
+                            "indicator": {
+                                "type": "string",
+                                "description": "The indicator to scan, e.g., 'CPI' or 'GDP'.",
+                            }
                         },
-                        "required": ["indicator"]
+                        "required": ["indicator"],
                     },
                 },
             },
@@ -55,11 +61,14 @@ class MacroAnalysisAgent(BaseAgent):
                     "name": "commodity_price_scanner",
                     "description": "Scans for the price of a key commodity.",
                     "parameters": {
-                        "type": "object", 
+                        "type": "object",
                         "properties": {
-                            "commodity": {"type": "string", "description": "The commodity to scan, e.g., 'oil'."}
+                            "commodity": {
+                                "type": "string",
+                                "description": "The commodity to scan, e.g., 'oil'.",
+                            }
                         },
-                        "required": ["commodity"]
+                        "required": ["commodity"],
                     },
                 },
             },
@@ -82,9 +91,13 @@ class MacroAnalysisAgent(BaseAgent):
                                     "properties": {
                                         "indicator_name": {"type": "string"},
                                         "value": {"type": "string"},
-                                        "commentary": {"type": "string"}
+                                        "commentary": {"type": "string"},
                                     },
-                                    "required": ["indicator_name", "value", "commentary"]
+                                    "required": [
+                                        "indicator_name",
+                                        "value",
+                                        "commentary",
+                                    ],
                                 },
                                 "description": "A structured list of the key indicators and data points from the scan.",
                             },
@@ -101,7 +114,9 @@ class MacroAnalysisAgent(BaseAgent):
             if tool_name == "interest_rate_scanner":
                 return json.dumps(macro_scanners.interest_rate_scanner(**arguments))
             elif tool_name == "economic_indicator_scanner":
-                return json.dumps(macro_scanners.economic_indicator_scanner(**arguments))
+                return json.dumps(
+                    macro_scanners.economic_indicator_scanner(**arguments)
+                )
             elif tool_name == "commodity_price_scanner":
                 return json.dumps(macro_scanners.commodity_price_scanner(**arguments))
             elif tool_name == "submit_macro_outlook":
@@ -124,9 +139,7 @@ class MacroAnalysisAgent(BaseAgent):
             prompt += f"\n\nHere is the context data you must analyze: {context_data}"
 
         messages: List[Message] = [
-            Message(
-                role="system", content=prompt_manager.get_prompt("macro.system")
-            ),
+            Message(role="system", content=prompt_manager.get_prompt("macro.system")),
             Message(role="user", content=prompt),
         ]
 
@@ -139,33 +152,49 @@ class MacroAnalysisAgent(BaseAgent):
 
                 if not response_msg.tool_calls:
                     return AgentResponse(
-                        status="failure", data={}, errors=["Agent did not call any tools."]
+                        status="failure",
+                        data={},
+                        errors=["Agent did not call any tools."],
                     )
 
                 # Execute all tool calls in this turn
                 for tool_call in response_msg.tool_calls:
                     function_call = tool_call.get("function", {})
                     tool_name = function_call.get("name")
-                    
+
                     # Parse arguments safely
                     arguments_str = function_call.get("arguments", "{}")
                     try:
-                        arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+                        arguments = (
+                            json.loads(arguments_str)
+                            if isinstance(arguments_str, str)
+                            else arguments_str
+                        )
                     except json.JSONDecodeError:
                         arguments = {}
 
                     # If it's the final submission tool, we're done
                     if tool_name == "submit_macro_outlook":
                         final_data = self._execute_tool(tool_name, arguments)
-                        return AgentResponse(status="success", data=json.loads(final_data), errors=None)
+                        return AgentResponse(
+                            status="success", data=json.loads(final_data), errors=None
+                        )
 
                     # Otherwise, execute the tool and add result to context
                     tid = await self.emit_status(
-                        step_number, tool_name, "Scanning macro data...", status="running"
+                        step_number,
+                        tool_name,
+                        "Scanning macro data...",
+                        status="running",
                     )
                     tool_result = self._execute_tool(tool_name, arguments)
                     await self.emit_status(
-                        step_number, tool_name, "Scanning macro data...", "Done.", status="completed", tool_id=tid
+                        step_number,
+                        tool_name,
+                        "Scanning macro data...",
+                        "Done.",
+                        status="completed",
+                        tool_id=tid,
                     )
 
                     messages.append(
@@ -181,7 +210,9 @@ class MacroAnalysisAgent(BaseAgent):
             return AgentResponse(
                 status="failure",
                 data={},
-                errors=[f"Agent failed to submit macro outlook within {max_turns} turns."]
+                errors=[
+                    f"Agent failed to submit macro outlook within {max_turns} turns."
+                ],
             )
 
         except Exception as e:

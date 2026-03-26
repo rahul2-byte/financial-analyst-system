@@ -47,32 +47,45 @@ class SentimentAnalysisAgent(BaseAgent):
                     "parameters": {
                         "type": "object",
                         "properties": {
-                           "finbert_overall_score": {"type": "string"},
-                           "finbert_guidance_score": {"type": "string"},
-                           "order_book_updates": {"type": "array", "items": {"type": "string"}},
-                           "major_challenges": {"type": "array", "items": {"type": "string"}},
-                           "entity_impact_map": {
-                               "type": "array", 
-                               "items": {
-                                   "type": "object",
-                                   "properties": {
-                                       "entity_name": {"type": "string"},
-                                       "relationship": {"type": "string"},
-                                       "impact": {"type": "string"}
-                                   },
-                                   "required": ["entity_name", "relationship", "impact"]
-                               }
-                           },
-                           "is_contradictory": {"type": "boolean"},
-                           "contradiction_reason": {"type": "string"},
-                           "executive_summary": {"type": "string"}
-                       },
-                       "required": [
-                           "finbert_overall_score", "finbert_guidance_score", "is_contradictory", "executive_summary"
-                       ]
-                   }
-               }
-           }
+                            "finbert_overall_score": {"type": "string"},
+                            "finbert_guidance_score": {"type": "string"},
+                            "order_book_updates": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "major_challenges": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                            },
+                            "entity_impact_map": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "entity_name": {"type": "string"},
+                                        "relationship": {"type": "string"},
+                                        "impact": {"type": "string"},
+                                    },
+                                    "required": [
+                                        "entity_name",
+                                        "relationship",
+                                        "impact",
+                                    ],
+                                },
+                            },
+                            "is_contradictory": {"type": "boolean"},
+                            "contradiction_reason": {"type": "string"},
+                            "executive_summary": {"type": "string"},
+                        },
+                        "required": [
+                            "finbert_overall_score",
+                            "finbert_guidance_score",
+                            "is_contradictory",
+                            "executive_summary",
+                        ],
+                    },
+                },
+            },
         ]
 
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
@@ -119,33 +132,49 @@ class SentimentAnalysisAgent(BaseAgent):
 
                 if not response_msg.tool_calls:
                     return AgentResponse(
-                        status="failure", data={}, errors=["Agent did not call any tools."]
+                        status="failure",
+                        data={},
+                        errors=["Agent did not call any tools."],
                     )
 
                 # Execute all tool calls in this turn
                 for tool_call in response_msg.tool_calls:
                     function_call = tool_call.get("function", {})
                     tool_name = function_call.get("name")
-                    
+
                     # Parse arguments safely
                     arguments_str = function_call.get("arguments", "{}")
                     try:
-                        arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+                        arguments = (
+                            json.loads(arguments_str)
+                            if isinstance(arguments_str, str)
+                            else arguments_str
+                        )
                     except json.JSONDecodeError:
                         arguments = {}
 
                     # If it's the final submission tool, we're done
                     if tool_name == "submit_sentiment_analysis":
                         final_data = self._execute_tool(tool_name, arguments)
-                        return AgentResponse(status="success", data=json.loads(final_data), errors=None)
+                        return AgentResponse(
+                            status="success", data=json.loads(final_data), errors=None
+                        )
 
                     # Otherwise, execute the tool and add result to context
                     tid = await self.emit_status(
-                        step_number, tool_name, "Running sentiment analysis...", status="running"
+                        step_number,
+                        tool_name,
+                        "Running sentiment analysis...",
+                        status="running",
                     )
                     tool_result = self._execute_tool(tool_name, arguments)
                     await self.emit_status(
-                        step_number, tool_name, "Running sentiment analysis...", "Done.", status="completed", tool_id=tid
+                        step_number,
+                        tool_name,
+                        "Running sentiment analysis...",
+                        "Done.",
+                        status="completed",
+                        tool_id=tid,
                     )
 
                     messages.append(
@@ -161,7 +190,9 @@ class SentimentAnalysisAgent(BaseAgent):
             return AgentResponse(
                 status="failure",
                 data={},
-                errors=[f"Agent failed to submit sentiment analysis within {max_turns} turns."]
+                errors=[
+                    f"Agent failed to submit sentiment analysis within {max_turns} turns."
+                ],
             )
 
         except Exception as e:

@@ -9,10 +9,12 @@ from data.providers.yfinance import YFinanceFetcher
 from storage.sql.client import PostgresClient
 from agents.base import BaseAgent
 
+
 class MacroIndicatorsAgent(BaseAgent):
     """
     Agent responsible for fetching global macro-economic indicators.
     """
+
     def __init__(
         self,
         llm_service: LLMServiceInterface,
@@ -54,13 +56,19 @@ class MacroIndicatorsAgent(BaseAgent):
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "status": {"type": "string", "enum": ["success", "failure", "error"]},
-                            "summary": {"type": "string", "description": "Brief summary of the macro data retrieval and status of the save operation."}
+                            "status": {
+                                "type": "string",
+                                "enum": ["success", "failure", "error"],
+                            },
+                            "summary": {
+                                "type": "string",
+                                "description": "Brief summary of the macro data retrieval and status of the save operation.",
+                            },
                         },
-                        "required": ["status", "summary"]
-                    }
-                }
-            }
+                        "required": ["status", "summary"],
+                    },
+                },
+            },
         ]
 
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
@@ -68,13 +76,15 @@ class MacroIndicatorsAgent(BaseAgent):
             if tool_name == "fetch_macro_indicators":
                 data = self.yf.fetch_macro_indicators()
                 return json.dumps(data)
-            
+
             elif tool_name == "save_macro_indicators_to_db":
                 macro_data = arguments.get("macro_data", {})
                 if "error" not in macro_data:
                     self.sql_db.upsert_macro_indicators(macro_data)
                     return json.dumps({"status": "success"})
-                return json.dumps({"status": "failure", "error": "No macro data to save"})
+                return json.dumps(
+                    {"status": "failure", "error": "No macro data to save"}
+                )
 
             elif tool_name == "submit_macro_results":
                 return json.dumps(arguments)
@@ -86,10 +96,13 @@ class MacroIndicatorsAgent(BaseAgent):
 
     async def execute(self, user_query: str, step_number: int = 0) -> AgentResponse:
         messages = [
-            Message(role="system", content=prompt_manager.get_prompt("macro_indicators.system")),
+            Message(
+                role="system",
+                content=prompt_manager.get_prompt("macro_indicators.system"),
+            ),
             Message(role="user", content=user_query),
         ]
-        
+
         max_turns = 10
         current_turn = 0
 
@@ -98,41 +111,64 @@ class MacroIndicatorsAgent(BaseAgent):
                 response_data = await self.llm_service.generate_message(
                     messages=messages, model=self.model, tools=self._get_tools()
                 )
-                
-                response_msg = Message(**response_data) if isinstance(response_data, dict) else response_data
+
+                response_msg = (
+                    Message(**response_data)
+                    if isinstance(response_data, dict)
+                    else response_data
+                )
                 messages.append(response_msg)
 
                 if response_msg.tool_calls:
                     for tool_call in response_msg.tool_calls:
                         tool_name = tool_call.get("function", {}).get("name")
-                        arguments_str = tool_call.get("function", {}).get("arguments", "{}")
-                        
+                        arguments_str = tool_call.get("function", {}).get(
+                            "arguments", "{}"
+                        )
+
                         try:
-                            arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+                            arguments = (
+                                json.loads(arguments_str)
+                                if isinstance(arguments_str, str)
+                                else arguments_str
+                            )
                         except json.JSONDecodeError:
                             arguments = {}
 
                         # Check if it's the final submission tool
                         if tool_name == "submit_macro_results":
                             final_data = self._execute_tool(tool_name, arguments)
-                            return AgentResponse(status="success", data=json.loads(final_data), errors=None)
+                            return AgentResponse(
+                                status="success",
+                                data=json.loads(final_data),
+                                errors=None,
+                            )
 
                         # Otherwise, execute the tool and continue the loop
                         tool_result = self._execute_tool(tool_name, arguments)
-                        messages.append(Message(role="tool", content=tool_result, name=tool_name, tool_call_id=tool_call.get("id")))
-                    
+                        messages.append(
+                            Message(
+                                role="tool",
+                                content=tool_result,
+                                name=tool_name,
+                                tool_call_id=tool_call.get("id"),
+                            )
+                        )
+
                     current_turn += 1
                 else:
                     return AgentResponse(
-                        status="success", 
-                        data={"response": response_msg.content}, 
-                        errors=["Final output was text-only, not structured JSON via submit_macro_results tool."]
+                        status="success",
+                        data={"response": response_msg.content},
+                        errors=[
+                            "Final output was text-only, not structured JSON via submit_macro_results tool."
+                        ],
                     )
-            
+
             return AgentResponse(
                 status="failure",
                 data={},
-                errors=[f"Agent failed to submit results within {max_turns} turns."]
+                errors=[f"Agent failed to submit results within {max_turns} turns."],
             )
         except Exception as e:
             return AgentResponse(status="failure", data={}, errors=[str(e)])

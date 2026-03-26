@@ -82,7 +82,7 @@ class TechnicalAnalysisAgent(BaseAgent):
                         "required": ["trend", "report_summary", "key_indicators"],
                     },
                 },
-            }
+            },
         ]
 
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
@@ -139,25 +139,31 @@ class TechnicalAnalysisAgent(BaseAgent):
             messages.append(response_msg)
 
             if not response_msg.tool_calls:
-                 return AgentResponse(
-                    status="success", 
-                    data={"response": response_msg.content}, 
-                    errors=["Final output was text-only, not structured JSON via submit_technical_report tool."]
+                return AgentResponse(
+                    status="success",
+                    data={"response": response_msg.content},
+                    errors=[
+                        "Final output was text-only, not structured JSON via submit_technical_report tool."
+                    ],
                 )
 
             # Process tool calls (typically just run_technical_scan)
             for tool_call in response_msg.tool_calls:
                 function_call = tool_call.get("function", {})
                 tool_name = function_call.get("name")
-                
+
                 if tool_name == "submit_technical_report":
                     continue
 
                 arguments_str = function_call.get("arguments", "{}")
-                arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+                arguments = (
+                    json.loads(arguments_str)
+                    if isinstance(arguments_str, str)
+                    else arguments_str
+                )
 
                 tool_result = self._execute_tool(tool_name, arguments)
-                
+
                 langfuse_context.update_current_observation(
                     metadata={
                         "tool_name": tool_name,
@@ -184,15 +190,25 @@ class TechnicalAnalysisAgent(BaseAgent):
                 final_tool_call = final_response_msg.tool_calls[0]
                 final_tool_name = final_tool_call.get("function", {}).get("name")
                 if final_tool_name == "submit_technical_report":
-                    arguments_str = final_tool_call.get("function", {}).get("arguments", "{}")
-                    arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+                    arguments_str = final_tool_call.get("function", {}).get(
+                        "arguments", "{}"
+                    )
+                    arguments = (
+                        json.loads(arguments_str)
+                        if isinstance(arguments_str, str)
+                        else arguments_str
+                    )
                     final_data = self._execute_tool(final_tool_name, arguments)
-                    return AgentResponse(status="success", data=json.loads(final_data), errors=None)
+                    return AgentResponse(
+                        status="success", data=json.loads(final_data), errors=None
+                    )
 
             return AgentResponse(
                 status="success",
                 data={"response": final_response_msg.content},
-                errors=["Agent failed to use the submit_technical_report tool on its final step."]
+                errors=[
+                    "Agent failed to use the submit_technical_report tool on its final step."
+                ],
             )
 
         except Exception as e:

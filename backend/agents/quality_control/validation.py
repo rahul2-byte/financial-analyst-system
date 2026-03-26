@@ -64,7 +64,7 @@ class ValidationAgent(BaseAgent):
                         "required": ["is_valid", "final_approved_text"],
                     },
                 },
-            }
+            },
         ]
 
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
@@ -93,8 +93,10 @@ class ValidationAgent(BaseAgent):
                 role="system", content=prompt_manager.get_prompt("validation.system")
             ),
             Message(
-                role="user", 
-                content=prompt_manager.get_prompt("validation.user", user_query=user_query, draft_report=draft_report)
+                role="user",
+                content=prompt_manager.get_prompt(
+                    "validation.user", user_query=user_query, draft_report=draft_report
+                ),
             ),
         ]
 
@@ -106,31 +108,42 @@ class ValidationAgent(BaseAgent):
                 response_msg = await self.llm_service.generate_message(
                     messages=messages, model=self.model, tools=self._get_tools()
                 )
-                
+
                 if not response_msg.content:
                     response_msg.content = "Validating..."
-                
+
                 messages.append(response_msg)
 
                 if response_msg.tool_calls:
                     for tool_call in response_msg.tool_calls:
                         function_call = tool_call.get("function", {})
                         tool_name = function_call.get("name")
-                        
+
                         arguments_str = function_call.get("arguments", "{}")
                         try:
-                            arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+                            arguments = (
+                                json.loads(arguments_str)
+                                if isinstance(arguments_str, str)
+                                else arguments_str
+                            )
                         except json.JSONDecodeError:
                             arguments = {}
 
                         # Final submission
                         if tool_name == "submit_validation_result":
                             final_data = self._execute_tool(tool_name, arguments)
-                            return AgentResponse(status="success", data=json.loads(final_data), errors=None)
+                            return AgentResponse(
+                                status="success",
+                                data=json.loads(final_data),
+                                errors=None,
+                            )
 
                         # Execute deterministic checks
                         tid = await self.emit_status(
-                            step_number, tool_name, "Scanning draft for compliance...", status="running"
+                            step_number,
+                            tool_name,
+                            "Scanning draft for compliance...",
+                            status="running",
                         )
                         tool_result = self._execute_tool(tool_name, arguments)
                         await self.emit_status(
@@ -161,15 +174,19 @@ class ValidationAgent(BaseAgent):
                     current_turn += 1
                 else:
                     return AgentResponse(
-                        status="success", 
-                        data={"response": response_msg.content}, 
-                        errors=["Final output was text-only, not structured JSON via submit_validation_result tool."]
+                        status="success",
+                        data={"response": response_msg.content},
+                        errors=[
+                            "Final output was text-only, not structured JSON via submit_validation_result tool."
+                        ],
                     )
-            
+
             return AgentResponse(
                 status="failure",
                 data={},
-                errors=[f"Agent failed to submit validation results within {max_turns} turns."]
+                errors=[
+                    f"Agent failed to submit validation results within {max_turns} turns."
+                ],
             )
 
         except Exception as e:

@@ -42,12 +42,12 @@ def _get_agent_name(step: ExecutionStep) -> str:
 
 
 def _find_next_level(
-    steps: List[ExecutionStep],
-    executed_step_ids: Set[int]
+    steps: List[ExecutionStep], executed_step_ids: Set[int]
 ) -> List[ExecutionStep]:
     """Find steps where all dependencies have been executed."""
     return [
-        step for step in steps
+        step
+        for step in steps
         if all(dep in executed_step_ids for dep in step.dependencies)
     ]
 
@@ -65,10 +65,7 @@ async def planner_node(state: ResearchGraphState) -> Dict[str, Any]:
 
     if response.status == "failure" or not response.data:
         logger.error(f"Planner failed: {response.errors}")
-        return {
-            "plan": None,
-            "errors": [f"Planning failed: {response.errors}"]
-        }
+        return {"plan": None, "errors": [f"Planning failed: {response.errors}"]}
 
     plan_data = (
         response.data
@@ -79,7 +76,9 @@ async def planner_node(state: ResearchGraphState) -> Dict[str, Any]:
     logger.info(f"Planner generated {len(plan_data.execution_steps)} steps")
 
     return {
-        "plan": plan_data.model_dump() if hasattr(plan_data, "model_dump") else plan_data,
+        "plan": (
+            plan_data.model_dump() if hasattr(plan_data, "model_dump") else plan_data
+        ),
     }
 
 
@@ -121,14 +120,22 @@ async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
         execution_steps = plan_data.execution_steps
 
     current_executed = state.get("executed_steps", [])
-    executed_step_ids = {s.get("step_number", s.step_number if hasattr(s, "step_number") else -1) for s in current_executed}
+    executed_step_ids = {
+        s.get("step_number", s.step_number if hasattr(s, "step_number") else -1)
+        for s in current_executed
+    }
 
     next_level = _find_next_level(execution_steps, executed_step_ids)
 
     if not next_level:
         if len(current_executed) < len(execution_steps):
-            return {"errors": ["No steps ready to execute - possible circular dependency"]}
-        return {"agent_outputs": state.get("agent_outputs", {}), "executed_steps": current_executed}
+            return {
+                "errors": ["No steps ready to execute - possible circular dependency"]
+            }
+        return {
+            "agent_outputs": state.get("agent_outputs", {}),
+            "executed_steps": current_executed,
+        }
 
     agent_tasks = []
     for step in next_level:
@@ -167,7 +174,9 @@ async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
         else:
             new_agent_outputs[str(step.step_number)] = result.get("output", "")
 
-        new_executed_steps.append({"step_number": step.step_number, "agent": agent_name})
+        new_executed_steps.append(
+            {"step_number": step.step_number, "agent": agent_name}
+        )
 
     return {
         "agent_outputs": new_agent_outputs,
@@ -176,9 +185,7 @@ async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
 
 
 async def _execute_single_step(
-    agent: BaseAgent,
-    query: str,
-    step: ExecutionStep
+    agent: BaseAgent, query: str, step: ExecutionStep
 ) -> Dict[str, Any]:
     """Executes a single agent step and returns output."""
     try:
@@ -206,14 +213,20 @@ async def synthesis_node(state: ResearchGraphState) -> Dict[str, Any]:
 
     synthesis_retry_count = state.get("synthesis_retry_count", 0)
 
-    logger.info(f"Synthesis node generating draft report (attempt {synthesis_retry_count + 1})")
+    logger.info(
+        f"Synthesis node generating draft report (attempt {synthesis_retry_count + 1})"
+    )
 
     try:
-        prompt_header = prompt_manager.get_prompt("orchestrator.synthesis.header", user_query=user_query)
+        prompt_header = prompt_manager.get_prompt(
+            "orchestrator.synthesis.header", user_query=user_query
+        )
 
         agent_output_sections = []
         for step_num, output in agent_outputs.items():
-            section_header = prompt_manager.get_prompt("orchestrator.synthesis.section_header", step_number=step_num)
+            section_header = prompt_manager.get_prompt(
+                "orchestrator.synthesis.section_header", step_number=step_num
+            )
             agent_output_sections.append(f"{section_header}\n{output}")
 
         prompt = prompt_header + "\n\n" + "\n\n".join(agent_output_sections)

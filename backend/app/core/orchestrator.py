@@ -68,9 +68,7 @@ class PipelineOrchestrator:
             llm_service=self.llm, db_client=self.sql_db
         )
         self.price_and_fundamentals = PriceAndFundamentalsAgent(
-            llm_service=self.llm,
-            yf_fetcher=self.yf_fetcher,
-            sql_db=self.sql_db
+            llm_service=self.llm, yf_fetcher=self.yf_fetcher, sql_db=self.sql_db
         )
         self.market_news = MarketNewsAgent(
             llm_service=self.llm,
@@ -78,9 +76,7 @@ class PipelineOrchestrator:
             vector_db=self.vector_db,
         )
         self.macro_indicators = MacroIndicatorsAgent(
-            llm_service=self.llm,
-            yf_fetcher=self.yf_fetcher,
-            sql_db=self.sql_db
+            llm_service=self.llm, yf_fetcher=self.yf_fetcher, sql_db=self.sql_db
         )
         self.retrieval = RetrievalAgent(
             llm_service=self.llm, qdrant_client=self.vector_db
@@ -110,8 +106,16 @@ class PipelineOrchestrator:
 
         # Group by agent type
         data_sections = {
-            "Market Data": ["market_offline", "price_and_fundamentals", "macro_indicators"],
-            "Sentiment & Macro": ["sentiment_analysis", "macro_analysis", "market_news"],
+            "Market Data": [
+                "market_offline",
+                "price_and_fundamentals",
+                "macro_indicators",
+            ],
+            "Sentiment & Macro": [
+                "sentiment_analysis",
+                "macro_analysis",
+                "market_news",
+            ],
             "Contrarian Views": ["contrarian_analysis"],
             "Web & Retrieval": ["web_search", "retrieval"],
         }
@@ -635,8 +639,7 @@ class PipelineOrchestrator:
 
         try:
             async for event in self.research_graph.astream_events(
-                initial_state,
-                stream_mode="values"
+                initial_state, stream_mode="values"
             ):
                 if event:
                     # astream_events yields tuples of (event_name, event_data)
@@ -646,22 +649,43 @@ class PipelineOrchestrator:
                         event_name = None
                         event_data = event
 
-                    node_name = event_data.get("__metadata", {}).get("langgraph_node", "")
+                    node_name = event_data.get("__metadata", {}).get(
+                        "langgraph_node", ""
+                    )
                     if node_name:
                         if node_name == "planner_node":
-                            yield StreamEvent(event="status", data={"message": "Planning research strategy..."})
+                            yield StreamEvent(
+                                event="status",
+                                data={"message": "Planning research strategy..."},
+                            )
                         elif node_name == "execute_level_node":
                             plan = event_data.get("plan", {})
                             executed = len(event_data.get("executed_steps", []))
                             total = len(plan.get("execution_steps", [])) if plan else 0
-                            yield StreamEvent(event="status", data={"message": f"Executing step {executed + 1}/{total}..."})
+                            yield StreamEvent(
+                                event="status",
+                                data={
+                                    "message": f"Executing step {executed + 1}/{total}..."
+                                },
+                            )
                         elif node_name == "synthesis_node":
-                            yield StreamEvent(event="status", data={"message": "Synthesizing report..."})
+                            yield StreamEvent(
+                                event="status",
+                                data={"message": "Synthesizing report..."},
+                            )
                         elif node_name == "verification_node":
-                            yield StreamEvent(event="status", data={"message": "Verifying numeric accuracy..."})
+                            yield StreamEvent(
+                                event="status",
+                                data={"message": "Verifying numeric accuracy..."},
+                            )
                         elif node_name == "validation_node":
-                            yield StreamEvent(event="status", data={"message": "Performing final compliance check..."})
-                    
+                            yield StreamEvent(
+                                event="status",
+                                data={
+                                    "message": "Performing final compliance check..."
+                                },
+                            )
+
                     final_report = event_data.get("final_report")
                     errors_list = event_data.get("errors", [])
 
@@ -674,7 +698,7 @@ class PipelineOrchestrator:
             )
             yield StreamEvent(
                 event="error",
-                data={"content": f"An internal system error occurred: {str(e)}"}
+                data={"content": f"An internal system error occurred: {str(e)}"},
             )
             return
 
@@ -690,10 +714,7 @@ class PipelineOrchestrator:
         elif errors_list:
             yield StreamEvent(
                 event="error",
-                data={"content": f"Pipeline failed: {'; '.join(errors_list)}"}
+                data={"content": f"Pipeline failed: {'; '.join(errors_list)}"},
             )
         else:
-            yield StreamEvent(
-                event="error",
-                data={"content": "No report generated."}
-            )
+            yield StreamEvent(event="error", data={"content": "No report generated."})

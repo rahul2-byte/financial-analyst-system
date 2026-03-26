@@ -87,12 +87,15 @@ class MarketOfflineAgent(BaseAgent):
                         "type": "object",
                         "properties": {
                             "data_available": {"type": "boolean"},
-                            "summary": {"type": "string", "description": "Brief explanation of why the data is or is not available."}
+                            "summary": {
+                                "type": "string",
+                                "description": "Brief explanation of why the data is or is not available.",
+                            },
                         },
-                        "required": ["data_available", "summary"]
-                    }
-                }
-            }
+                        "required": ["data_available", "summary"],
+                    },
+                },
+            },
         ]
 
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
@@ -137,7 +140,7 @@ class MarketOfflineAgent(BaseAgent):
             ),
             Message(role="user", content=user_query),
         ]
-        
+
         max_turns = 10
         current_turn = 0
 
@@ -146,7 +149,7 @@ class MarketOfflineAgent(BaseAgent):
                 response_msg_obj = await self.llm_service.generate_message(
                     messages=messages, model=self.model, tools=self._get_tools()
                 )
-                
+
                 # Handle AsyncMock wrapping the Message object in tests
                 if isinstance(response_msg_obj, AsyncMock):
                     response_msg = response_msg_obj.return_value
@@ -158,34 +161,53 @@ class MarketOfflineAgent(BaseAgent):
                 if response_msg.tool_calls:
                     for tool_call in response_msg.tool_calls:
                         tool_name = tool_call.get("function", {}).get("name")
-                        arguments_str = tool_call.get("function", {}).get("arguments", "{}")
-                        
+                        arguments_str = tool_call.get("function", {}).get(
+                            "arguments", "{}"
+                        )
+
                         try:
-                            arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+                            arguments = (
+                                json.loads(arguments_str)
+                                if isinstance(arguments_str, str)
+                                else arguments_str
+                            )
                         except json.JSONDecodeError:
                             arguments = {}
 
                         # Check if it's the final submission tool
                         if tool_name == "submit_offline_status":
                             final_data = self._execute_tool(tool_name, arguments)
-                            return AgentResponse(status="success", data=json.loads(final_data), errors=None)
+                            return AgentResponse(
+                                status="success",
+                                data=json.loads(final_data),
+                                errors=None,
+                            )
 
                         # Otherwise, execute the tool and continue the loop
                         tool_result = self._execute_tool(tool_name, arguments)
-                        messages.append(Message(role="tool", content=tool_result, name=tool_name, tool_call_id=tool_call.get("id")))
-                    
+                        messages.append(
+                            Message(
+                                role="tool",
+                                content=tool_result,
+                                name=tool_name,
+                                tool_call_id=tool_call.get("id"),
+                            )
+                        )
+
                     current_turn += 1
                 else:
                     return AgentResponse(
-                        status="success", 
-                        data={"response": response_msg.content}, 
-                        errors=["Final output was text-only, not structured JSON via submit_offline_status tool."]
+                        status="success",
+                        data={"response": response_msg.content},
+                        errors=[
+                            "Final output was text-only, not structured JSON via submit_offline_status tool."
+                        ],
                     )
-            
+
             return AgentResponse(
                 status="failure",
                 data={},
-                errors=[f"Agent failed to submit results within {max_turns} turns."]
+                errors=[f"Agent failed to submit results within {max_turns} turns."],
             )
 
         except Exception as e:

@@ -103,7 +103,6 @@ class PostgresClient(IStructuredStorage):
             results = session.execute(statement, {"table_name": table_name}).fetchall()
             return [row[0] for row in results] if results else []
 
-
     def get_db_size(self) -> str:
         """Get the size of the current database as a human-readable string."""
         with Session(self.engine) as session:

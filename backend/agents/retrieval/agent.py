@@ -84,7 +84,7 @@ class RetrievalAgent(BaseAgent):
                         "required": ["answer", "confidence", "insufficient_data"],
                     },
                 },
-            }
+            },
         ]
 
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
@@ -125,7 +125,7 @@ class RetrievalAgent(BaseAgent):
                     )
 
                 return json.dumps(formatted_results)
-            
+
             elif tool_name == "submit_retrieval_results":
                 return json.dumps(arguments)
 
@@ -158,20 +158,38 @@ class RetrievalAgent(BaseAgent):
             if response_msg.tool_calls:
                 tool_call = response_msg.tool_calls[0]
                 tool_name = tool_call.get("function", {}).get("name")
-                
+
                 if tool_name == "submit_retrieval_results":
-                    arguments = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                    arguments = json.loads(
+                        tool_call.get("function", {}).get("arguments", "{}")
+                    )
                     return AgentResponse(status="success", data=arguments, errors=None)
 
-                arguments = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                arguments = json.loads(
+                    tool_call.get("function", {}).get("arguments", "{}")
+                )
                 tool_result_str = self._execute_tool(tool_name, arguments)
                 tool_result = json.loads(tool_result_str)
 
                 # SELF-CORRECTION: If no results, retry once with a broader query
-                if isinstance(tool_result, dict) and tool_result.get("status") == "no_results":
-                    messages.append(Message(role="tool", content=tool_result_str, name=tool_name, tool_call_id=tool_call.get("id")))
-                    
-                    retry_prompt = prompt_manager.get_prompt("retrieval.feedback", query=arguments.get("query"), user_query=user_query)
+                if (
+                    isinstance(tool_result, dict)
+                    and tool_result.get("status") == "no_results"
+                ):
+                    messages.append(
+                        Message(
+                            role="tool",
+                            content=tool_result_str,
+                            name=tool_name,
+                            tool_call_id=tool_call.get("id"),
+                        )
+                    )
+
+                    retry_prompt = prompt_manager.get_prompt(
+                        "retrieval.feedback",
+                        query=arguments.get("query"),
+                        user_query=user_query,
+                    )
                     messages.append(Message(role="user", content=retry_prompt))
 
                     response_msg = await self.llm_service.generate_message(
@@ -182,15 +200,28 @@ class RetrievalAgent(BaseAgent):
                     if response_msg.tool_calls:
                         tool_call = response_msg.tool_calls[0]
                         tool_name = tool_call.get("function", {}).get("name")
-                        
-                        if tool_name == "submit_retrieval_results":
-                             arguments = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
-                             return AgentResponse(status="success", data=arguments, errors=None)
 
-                        arguments = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                        if tool_name == "submit_retrieval_results":
+                            arguments = json.loads(
+                                tool_call.get("function", {}).get("arguments", "{}")
+                            )
+                            return AgentResponse(
+                                status="success", data=arguments, errors=None
+                            )
+
+                        arguments = json.loads(
+                            tool_call.get("function", {}).get("arguments", "{}")
+                        )
                         tool_result_str = self._execute_tool(tool_name, arguments)
 
-                messages.append(Message(role="tool", content=tool_result_str, name=tool_name, tool_call_id=tool_call.get("id")))
+                messages.append(
+                    Message(
+                        role="tool",
+                        content=tool_result_str,
+                        name=tool_name,
+                        tool_call_id=tool_call.get("id"),
+                    )
+                )
 
             # Final synthesis -> Must call submit_retrieval_results
             final_response_msg = await self.llm_service.generate_message(
@@ -199,14 +230,21 @@ class RetrievalAgent(BaseAgent):
 
             if final_response_msg.tool_calls:
                 final_tool_call = final_response_msg.tool_calls[0]
-                if final_tool_call.get("function", {}).get("name") == "submit_retrieval_results":
-                    arguments = json.loads(final_tool_call.get("function", {}).get("arguments", "{}"))
+                if (
+                    final_tool_call.get("function", {}).get("name")
+                    == "submit_retrieval_results"
+                ):
+                    arguments = json.loads(
+                        final_tool_call.get("function", {}).get("arguments", "{}")
+                    )
                     return AgentResponse(status="success", data=arguments, errors=None)
 
             return AgentResponse(
-                status="success", 
-                data={"response": final_response_msg.content}, 
-                errors=["Agent failed to use the submit_retrieval_results tool on its final step."]
+                status="success",
+                data={"response": final_response_msg.content},
+                errors=[
+                    "Agent failed to use the submit_retrieval_results tool on its final step."
+                ],
             )
 
         except Exception as e:

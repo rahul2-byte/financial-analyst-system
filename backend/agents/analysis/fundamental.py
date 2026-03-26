@@ -61,10 +61,14 @@ class FundamentalAnalysisAgent(BaseAgent):
                                 "description": "A score from 0.0 to 1.0 indicating confidence in the thesis, based on the strength of the data.",
                             },
                         },
-                        "required": ["investment_thesis", "key_findings", "confidence_score"],
+                        "required": [
+                            "investment_thesis",
+                            "key_findings",
+                            "confidence_score",
+                        ],
                     },
                 },
-            }
+            },
         ]
 
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
@@ -121,27 +125,33 @@ class FundamentalAnalysisAgent(BaseAgent):
 
                 if not response_msg.tool_calls:
                     return AgentResponse(
-                        status="success", 
-                        data={"response": response_msg.content}, 
-                        errors=["Agent did not call any tools."]
+                        status="success",
+                        data={"response": response_msg.content},
+                        errors=["Agent did not call any tools."],
                     )
 
                 # Execute all tool calls in this turn
                 for tool_call in response_msg.tool_calls:
                     function_call = tool_call.get("function", {})
                     tool_name = function_call.get("name")
-                    
+
                     # Parse arguments safely
                     arguments_str = function_call.get("arguments", "{}")
                     try:
-                        arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+                        arguments = (
+                            json.loads(arguments_str)
+                            if isinstance(arguments_str, str)
+                            else arguments_str
+                        )
                     except json.JSONDecodeError:
                         arguments = {}
 
                     # If it's the final submission tool, we're done
                     if tool_name == "submit_thesis":
                         final_data = self._execute_tool(tool_name, arguments)
-                        return AgentResponse(status="success", data=json.loads(final_data), errors=None)
+                        return AgentResponse(
+                            status="success", data=json.loads(final_data), errors=None
+                        )
 
                     # Otherwise, execute the tool and add result to context
                     tid = await self.emit_status(
@@ -149,11 +159,20 @@ class FundamentalAnalysisAgent(BaseAgent):
                     )
                     tool_result = self._execute_tool(tool_name, arguments)
                     await self.emit_status(
-                        step_number, tool_name, "Processing tool...", "Done.", status="completed", tool_id=tid
+                        step_number,
+                        tool_name,
+                        "Processing tool...",
+                        "Done.",
+                        status="completed",
+                        tool_id=tid,
                     )
 
                     langfuse_context.update_current_observation(
-                        metadata={"tool_name": tool_name, "tool_args": arguments, "tool_result": tool_result}
+                        metadata={
+                            "tool_name": tool_name,
+                            "tool_args": arguments,
+                            "tool_result": tool_result,
+                        }
                     )
 
                     messages.append(
@@ -169,7 +188,7 @@ class FundamentalAnalysisAgent(BaseAgent):
             return AgentResponse(
                 status="failure",
                 data={},
-                errors=[f"Agent failed to submit thesis within {max_turns} turns."]
+                errors=[f"Agent failed to submit thesis within {max_turns} turns."],
             )
 
         except Exception as e:

@@ -23,7 +23,7 @@ class PlannerAgent(BaseAgent):
         # Dynamically generate tool parameters from the Pydantic schema
         schema = PlanData.model_json_schema()
         # Ensure the schema is compatible with tool-calling formats (Mistral/OpenAI)
-        # It needs 'type', 'properties', and 'required'. 
+        # It needs 'type', 'properties', and 'required'.
         # Pydantic's schema includes these.
         return [
             {
@@ -86,7 +86,14 @@ class PlannerAgent(BaseAgent):
         try:
             for i in range(max_turns):
                 if i > 0 and last_error:
-                    messages.append(Message(role="user", content=prompt_manager.get_prompt("planner.feedback", error=str(last_error))))
+                    messages.append(
+                        Message(
+                            role="user",
+                            content=prompt_manager.get_prompt(
+                                "planner.feedback", error=str(last_error)
+                            ),
+                        )
+                    )
 
                 tid = await self.emit_status(
                     step_number,
@@ -94,14 +101,14 @@ class PlannerAgent(BaseAgent):
                     "Brainstorming research strategy...",
                     status="running",
                 )
-                
+
                 response_msg = await self.llm_service.generate_message(
                     messages=messages, model=self.model, tools=self._get_tools()
                 )
                 messages.append(response_msg)
 
                 if not response_msg.tool_calls:
-                    # If the LLM returns text without calling the submission tool, 
+                    # If the LLM returns text without calling the submission tool,
                     # we return it but flag it may not be correctly structured for the orchestrator.
                     await self.emit_status(
                         step_number,
@@ -114,22 +121,28 @@ class PlannerAgent(BaseAgent):
                     return AgentResponse(
                         status="success",
                         data={"assistant_response": response_msg.content},
-                        errors=["Final output was text-only, not structured JSON via submit_execution_plan tool."]
+                        errors=[
+                            "Final output was text-only, not structured JSON via submit_execution_plan tool."
+                        ],
                     )
 
                 # Find the 'submit_execution_plan' call
                 for tool_call in response_msg.tool_calls:
                     function_call = tool_call.get("function", {})
                     tool_name = function_call.get("name")
-                    
+
                     if tool_name == "submit_execution_plan":
                         arguments_str = function_call.get("arguments", "{}")
                         try:
-                            arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
-                            
+                            arguments = (
+                                json.loads(arguments_str)
+                                if isinstance(arguments_str, str)
+                                else arguments_str
+                            )
+
                             # Validate against PlanData before returning
                             plan_data = PlanData.model_validate(arguments)
-                            
+
                             await self.emit_status(
                                 step_number,
                                 self.agent_name,
@@ -138,21 +151,27 @@ class PlannerAgent(BaseAgent):
                                 status="completed",
                                 tool_id=tid,
                             )
-                            
+
                             return AgentResponse(
-                                status="success", data=plan_data.model_dump(), errors=None
+                                status="success",
+                                data=plan_data.model_dump(),
+                                errors=None,
                             )
                         except Exception as parse_error:
                             last_error = parse_error
                             # Log and retry if possible
-                            langfuse_context.update_current_observation(metadata={"parse_error": str(parse_error)})
-                            continue # Try next tool call or loop again
+                            langfuse_context.update_current_observation(
+                                metadata={"parse_error": str(parse_error)}
+                            )
+                            continue  # Try next tool call or loop again
 
             # If the loop finishes without a valid submission.
             return AgentResponse(
                 status="failure",
                 data={},
-                errors=[f"Agent failed to submit a valid execution plan within {max_turns} turns. Last error: {str(last_error)}"]
+                errors=[
+                    f"Agent failed to submit a valid execution plan within {max_turns} turns. Last error: {str(last_error)}"
+                ],
             )
 
         except Exception as e:
