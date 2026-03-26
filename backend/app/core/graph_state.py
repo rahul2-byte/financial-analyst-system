@@ -16,4 +16,5 @@ class ResearchGraphState(TypedDict):
     draft_report: Optional[str]
     final_report: Optional[str]
     synthesis_retry_count: int
+    verification_retry_count: int
     errors: List[str]

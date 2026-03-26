@@ -283,8 +283,10 @@ async def verification_node(state: ResearchGraphState) -> Dict[str, Any]:
             return {"verification_passed": True}
         else:
             logger.warning(f"Verification failed: {feedback}")
+            current_retry = state.get("verification_retry_count", 0)
             return {
                 "verification_passed": False,
+                "verification_retry_count": current_retry + 1,
                 "errors": [feedback],
             }
 
