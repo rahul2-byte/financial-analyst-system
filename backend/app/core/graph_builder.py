@@ -1,8 +1,7 @@
 import logging
 from typing import Dict, Any
 
-from langgraph.graph import StateGraph, END
-from langgraph.types import LangGraphRunnableProtocol
+from langgraph.graph import CompiledStateGraph, StateGraph, END
 
 from app.core.graph_state import ResearchGraphState
 from app.core.graph_nodes import (
@@ -78,7 +77,7 @@ def route_after_validation(state: ResearchGraphState) -> str:
     return END
 
 
-def build_graph() -> LangGraphRunnableProtocol:
+def build_graph() -> CompiledStateGraph[ResearchGraphState, Any, Any, Any]:
     """Build and compile the StateGraph with conditional edges."""
     logger.info("Building StateGraph")
 
