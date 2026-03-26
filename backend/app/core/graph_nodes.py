@@ -4,12 +4,15 @@ import logging
 from typing import List, Set, Dict, Any, Optional
 
 from app.core.graph_state import ResearchGraphState
+from app.core.prompts import prompt_manager
 from app.services.llm_interface import LLMServiceInterface
 from app.services.llama_cpp_service import LlamaCppService
+from app.models.request_models import Message
 from storage.sql.client import PostgresClient
 from storage.vector.client import QdrantStorage
 from data.providers.yfinance import YFinanceFetcher
 from data.providers.rss_news import RSSNewsFetcher
+from common.state import ToolResult
 
 from agents.base import BaseAgent
 from agents.orchestration.planner import PlannerAgent
@@ -24,6 +27,9 @@ from agents.analysis.sentiment import SentimentAnalysisAgent
 from agents.analysis.macro import MacroAnalysisAgent
 from agents.analysis.technical import TechnicalAnalysisAgent
 from agents.analysis.contrarian import ContrarianAgent
+from agents.quality_control.verification import VerificationAgent
+from agents.quality_control.validation import ValidationAgent
+from agents.data_access.schemas import AgentResponse
 
 logger = logging.getLogger(__name__)
 
@@ -190,3 +196,150 @@ async def _execute_single_step(
             return {"output": f"Error: {result.errors}", "data": None}
     except Exception as e:
         return {"output": f"Exception: {str(e)}", "data": None}
+
+
+async def synthesis_node(state: ResearchGraphState) -> Dict[str, Any]:
+    """Generates draft report from agent outputs using LLM."""
+    llm = LlamaCppService()
+    user_query = state["user_query"]
+    agent_outputs = state.get("agent_outputs", {})
+
+    synthesis_retry_count = state.get("synthesis_retry_count", 0)
+
+    logger.info(f"Synthesis node generating draft report (attempt {synthesis_retry_count + 1})")
+
+    try:
+        prompt_header = prompt_manager.get_prompt("orchestrator.synthesis.header", user_query=user_query)
+
+        agent_output_sections = []
+        for step_num, output in agent_outputs.items():
+            section_header = prompt_manager.get_prompt("orchestrator.synthesis.section_header", step_number=step_num)
+            agent_output_sections.append(f"{section_header}\n{output}")
+
+        prompt = prompt_header + "\n\n" + "\n\n".join(agent_output_sections)
+        prompt += prompt_manager.get_prompt("orchestrator.synthesis.instructions")
+
+        response = await llm.generate_message(
+            messages=[Message(role="user", content=prompt)],
+            model="mistral-8b",
+        )
+
+        draft_report = response.content if response.content else ""
+
+        if not draft_report:
+            return {
+                "draft_report": None,
+                "errors": ["Synthesis failed to generate draft report"],
+                "synthesis_retry_count": synthesis_retry_count + 1,
+            }
+
+        return {
+            "draft_report": draft_report,
+            "synthesis_retry_count": synthesis_retry_count + 1,
+        }
+
+    except Exception as e:
+        logger.error(f"Synthesis node error: {e}", exc_info=True)
+        return {
+            "draft_report": None,
+            "errors": [f"Synthesis error: {str(e)}"],
+            "synthesis_retry_count": synthesis_retry_count + 1,
+        }
+
+
+async def verification_node(state: ResearchGraphState) -> Dict[str, Any]:
+    """Verifies numeric accuracy of draft report using VerificationAgent."""
+    llm = LlamaCppService()
+    verifier = VerificationAgent(llm_service=llm)
+
+    draft_report = state.get("draft_report") or ""
+    tool_registry_raw = state.get("tool_registry", [])
+    tool_registry: List[ToolResult] = [
+        ToolResult(**t) if isinstance(t, dict) else t for t in tool_registry_raw
+    ]
+
+    logger.info("Verification node checking numeric accuracy")
+
+    try:
+        response = await verifier.execute(
+            user_query="",
+            step_number=0,
+            draft_report=draft_report,
+            tool_registry=tool_registry,
+        )
+
+        if response.status == "failure":
+            logger.error(f"Verification failed: {response.errors}")
+            return {
+                "errors": [f"Verification error: {response.errors}"],
+            }
+
+        result_data = response.data if response.data else {}
+        is_valid = result_data.get("is_valid", False)
+        feedback = result_data.get("feedback", "")
+
+        if is_valid:
+            logger.info("Verification passed")
+            return {"verification_passed": True}
+        else:
+            logger.warning(f"Verification failed: {feedback}")
+            return {
+                "verification_passed": False,
+                "errors": [feedback],
+            }
+
+    except Exception as e:
+        logger.error(f"Verification node error: {e}", exc_info=True)
+        return {
+            "verification_passed": False,
+            "errors": [f"Verification error: {str(e)}"],
+        }
+
+
+async def validation_node(state: ResearchGraphState) -> Dict[str, Any]:
+    """Validates draft report for compliance using ValidationAgent."""
+    llm = LlamaCppService()
+    validator = ValidationAgent(llm_service=llm)
+
+    user_query = state["user_query"]
+    draft_report = state.get("draft_report") or ""
+
+    logger.info("Validation node checking compliance")
+
+    try:
+        response = await validator.execute(
+            user_query=user_query,
+            step_number=0,
+            draft_report=draft_report,
+        )
+
+        if response.status == "failure":
+            logger.error(f"Validation failed: {response.errors}")
+            return {
+                "final_report": None,
+                "errors": [f"Validation error: {response.errors}"],
+            }
+
+        result_data = response.data if response.data else {}
+        is_valid = result_data.get("is_valid", False)
+        final_approved_text = result_data.get("final_approved_text", "")
+
+        if is_valid and final_approved_text:
+            logger.info("Validation passed, final report approved")
+            return {
+                "final_report": final_approved_text,
+            }
+        else:
+            violations = result_data.get("violations_found", [])
+            logger.warning(f"Validation failed: {violations}")
+            return {
+                "final_report": None,
+                "errors": [f"Validation violations: {violations}"],
+            }
+
+    except Exception as e:
+        logger.error(f"Validation node error: {e}", exc_info=True)
+        return {
+            "final_report": None,
+            "errors": [f"Validation error: {str(e)}"],
+        }
