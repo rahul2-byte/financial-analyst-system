@@ -1,5 +1,7 @@
 import re
 import logging
+import os
+from pathlib import Path
 from typing import Dict, List, Any
 
 # Conditional import so the rest of the app doesn't crash if transformers isn't installed
@@ -11,6 +13,9 @@ except ImportError:
     nltk = None
 
 logger = logging.getLogger(__name__)
+
+BACKEND_ROOT = Path(__file__).resolve().parent.parent
+DEFAULT_FINBERT_PATH = BACKEND_ROOT / "ai-lab" / "models" / "finbert"
 
 
 class NLPScorer:
@@ -46,9 +51,26 @@ class NLPScorer:
                 raise ImportError(
                     "transformers is not installed. Run: pip install transformers torch"
                 )
+
+            model_path_str = os.getenv("FINBERT_MODEL_PATH", str(DEFAULT_FINBERT_PATH))
+            model_path = Path(model_path_str)
+            if not model_path.exists():
+                raise FileNotFoundError(
+                    f"FinBERT model directory not found at '{model_path}'. "
+                    "Download once to backend/ai-lab/models/finbert and keep runtime offline."
+                )
+
+            # Enforce offline behavior for runtime model loading.
+            os.environ.setdefault("HF_HUB_OFFLINE", "1")
+            os.environ.setdefault("TRANSFORMERS_OFFLINE", "1")
+
             logger.info("Loading FinBERT model...")
-            # We use a lightweight financial sentiment model
-            self.model = pipeline("sentiment-analysis", model="ProsusAI/finbert")
+            self.model = pipeline(
+                "sentiment-analysis",
+                model=str(model_path),
+                tokenizer=str(model_path),
+                local_files_only=True,
+            )
             logger.info("FinBERT loaded.")
 
     def _split_into_sentences(self, text: str) -> List[str]:

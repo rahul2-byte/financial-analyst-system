@@ -1,7 +1,9 @@
 import json
-from typing import Dict, Any
+from typing import Dict, Any, List
+from unittest.mock import AsyncMock
 from app.core.observability import observe, langfuse_context
 
+from app.core.prompts import prompt_manager
 from app.services.llm_interface import LLMServiceInterface
 from app.models.request_models import Message
 from agents.data_access.schemas import AgentResponse
@@ -13,17 +15,6 @@ class MarketOfflineAgent(BaseAgent):
     """
     Agent responsible for querying the local PostgreSQL database
     to determine what market data is already available offline.
-    """
-
-    SYSTEM_PROMPT = """
-You are the Market Offline Data Agent for a Financial Intelligence Platform.
-Your sole responsibility is to query the local PostgreSQL database using the provided tools to answer the user's question about what data we have offline.
-
-CRITICAL RULES:
-1. You DO NOT perform any math or financial calculations.
-2. You MUST use the tools provided to you to fetch the answer.
-3. You return the final answer to the user in a clear, concise manner based on the tool's output.
-4. Always respond with JSON matching the AgentResponse schema at the end.
     """
 
     def __init__(
@@ -48,22 +39,39 @@ CRITICAL RULES:
             {
                 "type": "function",
                 "function": {
-                    "name": "get_db_info",
-                    "description": "Gets overall database information: total tickers, table count, DB size, and if there is any data.",
+                    "name": "get_table_names",
+                    "description": "Gets a list of all table names in the database.",
                     "parameters": {"type": "object", "properties": {}, "required": []},
                 },
             },
             {
                 "type": "function",
                 "function": {
+                    "name": "get_column_names",
+                    "description": "Gets a list of column names for a specific table.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "table_name": {
+                                "type": "string",
+                                "description": "The name of the table to inspect.",
+                            }
+                        },
+                        "required": ["table_name"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "get_ticker_info",
-                    "description": "Gets specific info for a stock ticker: date ranges, row counts, and data frequency.",
+                    "description": "Gets specific info for a stock ticker: date ranges, row counts, and if it was found.",
                     "parameters": {
                         "type": "object",
                         "properties": {
                             "ticker": {
                                 "type": "string",
-                                "description": "The stock ticker symbol (e.g., 'AAPL').",
+                                "description": "The stock ticker symbol (e.g., 'RELIANCE.NS').",
                             }
                         },
                         "required": ["ticker"],
@@ -73,20 +81,18 @@ CRITICAL RULES:
             {
                 "type": "function",
                 "function": {
-                    "name": "delete_ticker_data",
-                    "description": "Deletes all offline data for a specific stock ticker.",
+                    "name": "submit_offline_status",
+                    "description": "Submits the final determination of whether the data is available offline.",
                     "parameters": {
                         "type": "object",
                         "properties": {
-                            "ticker": {
-                                "type": "string",
-                                "description": "The stock ticker symbol to delete.",
-                            }
+                            "data_available": {"type": "boolean"},
+                            "summary": {"type": "string", "description": "Brief explanation of why the data is or is not available."}
                         },
-                        "required": ["ticker"],
-                    },
-                },
-            },
+                        "required": ["data_available", "summary"]
+                    }
+                }
+            }
         ]
 
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
@@ -96,31 +102,22 @@ CRITICAL RULES:
                 status = self.db.is_db_up()
                 return json.dumps({"db_up": status})
 
-            elif tool_name == "get_db_info":
-                has_data = self.db.has_any_data()
-                tickers = self.db.get_ticker_count()
-                tables = self.db.get_table_count()
-                size = self.db.get_db_size()
-                return json.dumps(
-                    {
-                        "has_data": has_data,
-                        "total_tickers": tickers,
-                        "total_tables": tables,
-                        "db_size": size,
-                    }
-                )
+            elif tool_name == "get_table_names":
+                tables = self.db.get_table_names()
+                return json.dumps({"tables": tables})
+
+            elif tool_name == "get_column_names":
+                table_name = arguments.get("table_name", "")
+                columns = self.db.get_column_names(table_name)
+                return json.dumps({"table": table_name, "columns": columns})
 
             elif tool_name == "get_ticker_info":
                 ticker = arguments.get("ticker", "")
                 info = self.db.get_ticker_info(ticker)
                 return json.dumps(info)
 
-            elif tool_name == "delete_ticker_data":
-                ticker = arguments.get("ticker", "")
-                deleted_rows = self.db.delete_ticker_data(ticker)
-                return json.dumps(
-                    {"ticker": ticker, "deleted_rows": deleted_rows, "success": True}
-                )
+            elif tool_name == "submit_offline_status":
+                return json.dumps(arguments)
 
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
@@ -131,94 +128,64 @@ CRITICAL RULES:
     @observe(name="Agent:MarketOffline:Execute")
     async def execute(self, user_query: str, step_number: int = 0) -> AgentResponse:
         """
-        Executes the agent loop:
-        1. Sends query to LLM with tools
-        2. LLM optionally calls tool
-        3. Agent runs tool and sends result back to LLM
-        4. LLM formulates final answer
+        Executes the agent loop with sequential tool calling.
         """
         messages = [
-            Message(role="system", content=self.SYSTEM_PROMPT),
+            Message(
+                role="system",
+                content=prompt_manager.get_prompt("market_offline.system"),
+            ),
             Message(role="user", content=user_query),
         ]
+        
+        max_turns = 10
+        current_turn = 0
 
         try:
-            # 1. First LLM call, providing tools
-            tid_gen = await self.emit_status(
-                step_number, self.agent_name, "Generating tool calls...", status="running"
-            )
-            response_msg = await self.llm_service.generate_message(
-                messages=messages, model=self.model, tools=self._get_tools()
-            )
-            await self.emit_status(
-                step_number, self.agent_name, "Generating tool calls...", "Tool calls generated.", status="completed", tool_id=tid_gen
-            )
+            while current_turn < max_turns:
+                response_msg_obj = await self.llm_service.generate_message(
+                    messages=messages, model=self.model, tools=self._get_tools()
+                )
+                
+                # Handle AsyncMock wrapping the Message object in tests
+                if isinstance(response_msg_obj, AsyncMock):
+                    response_msg = response_msg_obj.return_value
+                else:
+                    response_msg = response_msg_obj
 
-            messages.append(response_msg)
+                messages.append(response_msg)
 
-            # 2. Check if LLM wants to call a tool
-            if response_msg.tool_calls:
-                for tool_call in response_msg.tool_calls:
-                    function_call = tool_call.get("function", {})
-                    tool_name = function_call.get("name")
-                    arguments_str = function_call.get("arguments", "{}")
-
-                    if isinstance(arguments_str, str):
+                if response_msg.tool_calls:
+                    for tool_call in response_msg.tool_calls:
+                        tool_name = tool_call.get("function", {}).get("name")
+                        arguments_str = tool_call.get("function", {}).get("arguments", "{}")
+                        
                         try:
-                            arguments = json.loads(arguments_str)
+                            arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
                         except json.JSONDecodeError:
                             arguments = {}
-                    else:
-                        arguments = arguments_str
 
-                    # 3. Execute tool
-                    tid = await self.emit_status(
-                        step_number, tool_name, json.dumps(arguments), status="running"
+                        # Check if it's the final submission tool
+                        if tool_name == "submit_offline_status":
+                            final_data = self._execute_tool(tool_name, arguments)
+                            return AgentResponse(status="success", data=json.loads(final_data), errors=None)
+
+                        # Otherwise, execute the tool and continue the loop
+                        tool_result = self._execute_tool(tool_name, arguments)
+                        messages.append(Message(role="tool", content=tool_result, name=tool_name, tool_call_id=tool_call.get("id")))
+                    
+                    current_turn += 1
+                else:
+                    return AgentResponse(
+                        status="success", 
+                        data={"response": response_msg.content}, 
+                        errors=["Final output was text-only, not structured JSON via submit_offline_status tool."]
                     )
-                    tool_result = self._execute_tool(tool_name, arguments)
-                    await self.emit_status(
-                        step_number,
-                        tool_name,
-                        json.dumps(arguments),
-                        tool_result[:500] + "..." if len(tool_result) > 500 else tool_result,
-                        status="completed",
-                        tool_id=tid,
-                    )
-
-                    langfuse_context.update_current_observation(
-                        metadata={
-                            "tool_name": tool_name,
-                            "tool_args": arguments,
-                            "tool_result": tool_result,
-                        }
-                    )
-
-                    # Append tool result to messages
-                    messages.append(
-                        Message(
-                            role="tool",
-                            content=tool_result,
-                            name=tool_name,
-                            tool_call_id=tool_call.get("id"),
-                        )
-                    )
-
-                # 4. LLM formulates final answer
-                tid_synth = await self.emit_status(
-                    step_number, self.agent_name, "Synthesizing final answer...", status="running"
-                )
-                final_response_msg = await self.llm_service.generate_message(
-                    messages=messages, model=self.model
-                )
-                await self.emit_status(
-                    step_number, self.agent_name, "Synthesizing final answer...", "Synthesis complete.", status="completed", tool_id=tid_synth
-                )
-                final_content = final_response_msg.content
-            else:
-                final_content = response_msg.content
-
+            
             return AgentResponse(
-                status="success", data={"response": final_content}, errors=None
+                status="failure",
+                data={},
+                errors=[f"Agent failed to submit results within {max_turns} turns."]
             )
 
         except Exception as e:

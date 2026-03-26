@@ -35,12 +35,12 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
   - Single Test: `pytest backend/tests/quant/test_sector_risk.py::test_calculation`
 - **Frontend (Vitest):**
   - Run once: `npm run test` (from `frontend/`)
-- **E2E (Playwright):** `npm run test:e2e`
+- **E2E (Playwright):** `npm run test:e2e` (from `frontend/`)
 
 ### Linting & Formatting
 - **Backend (Ruff):** `ruff check backend/` and `ruff format backend/`
 - **Backend (Types):** `mypy backend/`
-- **Frontend (ESLint):** `npm run lint`
+- **Frontend (ESLint):** `npm run lint` (from `frontend/`)
 
 ---
 

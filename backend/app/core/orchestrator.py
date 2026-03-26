@@ -2,8 +2,10 @@ import asyncio
 import logging
 import json
 import random
+import re
 from typing import List, Set, AsyncGenerator, Any, Optional
 
+from app.core.prompts import prompt_manager
 from app.core.observability import observe, langfuse_context
 from app.core.session_logging import SessionLogger
 
@@ -18,7 +20,9 @@ from data.providers.rss_news import RSSNewsFetcher
 from agents.base import BaseAgent, status_queue_var
 from agents.orchestration.planner import PlannerAgent
 from agents.data_access.market_offline import MarketOfflineAgent
-from agents.data_access.market_online import MarketOnlineAgent
+from agents.data_access.price_and_fundamentals import PriceAndFundamentalsAgent
+from agents.data_access.market_news import MarketNewsAgent
+from agents.data_access.macro_indicators import MacroIndicatorsAgent
 from agents.retrieval.agent import RetrievalAgent
 from agents.analysis.fundamental import FundamentalAnalysisAgent
 from agents.analysis.sentiment import SentimentAnalysisAgent
@@ -30,9 +34,13 @@ from agents.analysis.technical import TechnicalAnalysisAgent
 from agents.analysis.contrarian import ContrarianAgent
 
 from common.state import ResearchState, ToolResult
-from agents.orchestration.schemas import ExecutionStep
+from agents.orchestration.schemas import ExecutionStep, PlanData
 
 logger = logging.getLogger(__name__)
+
+
+FAILED_OUTPUT_PREFIXES = ("Error:", "Exception:")
+NUMERIC_TOKEN_RE = re.compile(r"-?[\$₹]?\d+(?:,\d+)*(?:\.\d+)?(?:%|Cr|L|x)?\b")
 
 
 class PipelineOrchestrator:
@@ -55,12 +63,20 @@ class PipelineOrchestrator:
         self.market_offline = MarketOfflineAgent(
             llm_service=self.llm, db_client=self.sql_db
         )
-        self.market_online = MarketOnlineAgent(
+        self.price_and_fundamentals = PriceAndFundamentalsAgent(
             llm_service=self.llm,
             yf_fetcher=self.yf_fetcher,
+            sql_db=self.sql_db
+        )
+        self.market_news = MarketNewsAgent(
+            llm_service=self.llm,
             rss_fetcher=self.rss_fetcher,
-            sql_db=self.sql_db,
             vector_db=self.vector_db,
+        )
+        self.macro_indicators = MacroIndicatorsAgent(
+            llm_service=self.llm,
+            yf_fetcher=self.yf_fetcher,
+            sql_db=self.sql_db
         )
         self.retrieval = RetrievalAgent(
             llm_service=self.llm, qdrant_client=self.vector_db
@@ -73,6 +89,88 @@ class PipelineOrchestrator:
         self.validator = ValidationAgent(llm_service=self.llm)
         self.verification_agent = VerificationAgent(llm_service=self.llm)
         self.web_search = WebSearchAgent(llm_service=self.llm)
+
+    @staticmethod
+    def _is_failed_output(output: Any) -> bool:
+        text = str(output).strip()
+        return text.startswith(FAILED_OUTPUT_PREFIXES)
+
+    def _build_synthesis_prompt(self, user_query: str, state: ResearchState) -> str:
+        """
+        Constructs the prompt for the final synthesis LLM step using map-reduce style sections.
+        We group outputs by agent type to keep the context organized and prevent amnesia.
+        """
+        prompt = prompt_manager.get_prompt(
+            "orchestrator.synthesis.header", user_query=user_query
+        )
+
+        # Group by agent type
+        data_sections = {
+            "Market Data": ["market_offline", "price_and_fundamentals", "macro_indicators"],
+            "Sentiment & Macro": ["sentiment_analysis", "macro_analysis", "market_news"],
+            "Contrarian Views": ["contrarian_analysis"],
+            "Web & Retrieval": ["web_search", "retrieval"],
+        }
+
+        # Build sections map based on tool registry names
+        sections_content = {k: [] for k in data_sections.keys()}
+        sections_content["Other"] = []
+
+        for tool_result in state.tool_registry:
+            tool_name = tool_result.tool_name.replace("agent_", "")
+
+            # Find which section this belongs to
+            placed = False
+            for section, agent_types in data_sections.items():
+                if any(t in tool_name for t in agent_types):
+                    sections_content[section].append(
+                        prompt_manager.get_prompt(
+                            "orchestrator.synthesis.agent_output",
+                            agent_name=tool_result.tool_name.upper(),
+                            metrics=tool_result.extracted_metrics,
+                            output_data=tool_result.output_data,
+                        )
+                    )
+                    placed = True
+                    break
+
+            if not placed:
+                sections_content["Other"].append(
+                    prompt_manager.get_prompt(
+                        "orchestrator.synthesis.agent_output",
+                        agent_name=tool_result.tool_name.upper(),
+                        metrics=tool_result.extracted_metrics,
+                        output_data=tool_result.output_data,
+                    )
+                )
+
+        # Construct the final prompt iteratively
+        for section, contents in sections_content.items():
+            if contents:
+                prompt += prompt_manager.get_prompt(
+                    "orchestrator.synthesis.section_header",
+                    section_name=section.upper(),
+                )
+                prompt += "\n".join(contents) + "\n"
+
+        prompt += prompt_manager.get_prompt("orchestrator.synthesis.instructions")
+        return prompt
+
+    def _redact_numeric_tokens(self, text: str) -> str:
+        redacted = NUMERIC_TOKEN_RE.sub("[numeric value omitted]", text)
+        return prompt_manager.get_prompt(
+            "orchestrator.synthesis.redaction_note", redacted_text=redacted
+        )
+
+    async def _stream_text_to_queue(
+        self, text: str, status_queue: asyncio.Queue
+    ) -> None:
+        words = text.split(" ") if text else []
+        for i, word in enumerate(words):
+            content = word + (" " if i < len(words) - 1 else "")
+            await status_queue.put(
+                StreamEvent(event="token", data={"content": content})
+            )
 
     def _group_steps(self, steps: List[ExecutionStep]) -> List[List[ExecutionStep]]:
         """Groups steps into levels based on dependencies for parallel execution."""
@@ -158,8 +256,12 @@ class PipelineOrchestrator:
             target_agent: Optional[Any] = None
             if agent_name == "market_offline":
                 target_agent = self.market_offline
-            elif agent_name == "market_online":
-                target_agent = self.market_online
+            elif agent_name == "price_and_fundamentals":
+                target_agent = self.price_and_fundamentals
+            elif agent_name == "market_news":
+                target_agent = self.market_news
+            elif agent_name == "macro_indicators":
+                target_agent = self.macro_indicators
             elif agent_name == "web_search":
                 target_agent = self.web_search
             elif agent_name == "retrieval":
@@ -176,7 +278,9 @@ class PipelineOrchestrator:
                 target_agent = self.contrarian
 
             if target_agent:
-                result = await target_agent.execute(agent_query, step_number=step.step_number)
+                result = await target_agent.execute(
+                    agent_query, step_number=step.step_number
+                )
             elif agent_name == "validation":
                 return
             else:
@@ -220,7 +324,9 @@ class PipelineOrchestrator:
                 await status_queue.put(
                     StreamEvent(
                         event="status",
-                        data={"message": f"Step {step.step_number}: {agent_name} completed."},
+                        data={
+                            "message": f"Step {step.step_number}: {agent_name} completed."
+                        },
                     )
                 )
             elif result:
@@ -239,7 +345,9 @@ class PipelineOrchestrator:
                 await status_queue.put(
                     StreamEvent(
                         event="status",
-                        data={"message": f"Step {step.step_number}: {agent_name} failed."},
+                        data={
+                            "message": f"Step {step.step_number}: {agent_name} failed."
+                        },
                     )
                 )
 
@@ -282,15 +390,29 @@ class PipelineOrchestrator:
         if not state.agent_outputs:
             yield StreamEvent(
                 event="error",
-                data={"content": "I gathered data but could not formulate a conclusive answer."},
+                data={
+                    "content": "I gathered data but could not formulate a conclusive answer."
+                },
             )
             return
 
-        synthesis_prompt = f"Synthesize the following research data to answer the user's query: '{user_query}'\n\nData Gathered:\n"
-        for step_num, data in state.agent_outputs.items():
-            synthesis_prompt += f"Step {step_num} Result: {data}\n"
+        has_successful_data = any(
+            not self._is_failed_output(output)
+            for output in state.agent_outputs.values()
+        )
+        if not has_successful_data:
+            yield StreamEvent(
+                event="error",
+                data={
+                    "content": "I could not verify enough reliable data to produce a report."
+                },
+            )
+            return
+
+        synthesis_prompt = self._build_synthesis_prompt(user_query, state)
 
         current_synthesis_prompt = synthesis_prompt
+        last_draft_report = ""
 
         for attempt in range(3):
             state.retry_count = attempt
@@ -298,7 +420,9 @@ class PipelineOrchestrator:
             await status_queue.put(
                 StreamEvent(
                     event="status",
-                    data={"message": f"Synthesizing report (Attempt {attempt + 1}/3)..."},
+                    data={
+                        "message": f"Synthesizing report (Attempt {attempt + 1}/3)..."
+                    },
                 )
             )
 
@@ -323,18 +447,23 @@ class PipelineOrchestrator:
                 await asyncio.sleep(2)
                 if not draft_report_task.done():
                     await status_queue.put(
-                        StreamEvent(event="status", data={"message": "Finishing synthesis..."})
+                        StreamEvent(
+                            event="status", data={"message": "Finishing synthesis..."}
+                        )
                     )
 
             draft_report = await draft_report_task
+            last_draft_report = draft_report
             session_logger.log_step(
                 "SYNTHESIS_DRAFT", "Raw report generated by LLM.", data=draft_report
             )
 
             await status_queue.put(
-                StreamEvent(event="status", data={"message": "Verifying numeric accuracy..."})
+                StreamEvent(
+                    event="status", data={"message": "Verifying numeric accuracy..."}
+                )
             )
-            
+
             verification_agent_response = await self.verification_agent.execute(
                 user_query=user_query,
                 draft_report=draft_report,
@@ -350,7 +479,7 @@ class PipelineOrchestrator:
             if verification_agent_response.status == "success":
                 is_valid = verification_agent_response.data.get("is_valid", False)
                 feedback = verification_agent_response.data.get("feedback", "")
-                
+
                 if is_valid:
                     logger.info("Numeric verification passed.")
                     await status_queue.put(
@@ -374,7 +503,9 @@ class PipelineOrchestrator:
                         if val_data.get("is_valid", False) or val_data.get(
                             "final_approved_text"
                         ):
-                            final_text = val_data.get("final_approved_text", draft_report)
+                            final_text = val_data.get(
+                                "final_approved_text", draft_report
+                            )
                             if final_text is None:
                                 final_text = draft_report
                         else:
@@ -388,7 +519,7 @@ class PipelineOrchestrator:
 
                         # NATURAL STREAMING for verified reports
                         # Break into smaller chunks and add a natural-feeling delay
-                        
+
                         # Split by whitespace to stream word-by-word
                         words = final_text.split(" ")
                         for i, word in enumerate(words):
@@ -403,7 +534,9 @@ class PipelineOrchestrator:
 
                         return
                     else:
-                        logger.error(f"Validation agent failed: {validation_result.errors}")
+                        logger.error(
+                            f"Validation agent failed: {validation_result.errors}"
+                        )
                         yield StreamEvent(
                             event="error",
                             data={
@@ -412,32 +545,55 @@ class PipelineOrchestrator:
                         )
                         return
                 else:
-                    logger.warning(
-                        f"Numeric verification failed: {feedback}"
-                    )
+                    logger.warning(f"Numeric verification failed: {feedback}")
                     current_synthesis_prompt = (
                         f"{synthesis_prompt}\n\n"
-                        f"PREVIOUS ATTEMPT FAILED VERIFICATION: {feedback}\n"
-                        "Please correct the inaccuracies above."
+                        + prompt_manager.get_prompt(
+                            "orchestrator.feedback", error=feedback
+                        )
                     )
             else:
-                logger.error(f"Verification agent failed: {verification_agent_response.errors}")
+                logger.error(
+                    f"Verification agent failed: {verification_agent_response.errors}"
+                )
                 yield StreamEvent(
                     event="error",
                     data={"content": "Verification system error occurred."},
                 )
                 return
 
+        if last_draft_report:
+            yield StreamEvent(
+                event="status",
+                data={
+                    "message": "Numeric checks failed repeatedly. Returning qualitative fallback."
+                },
+            )
+            fallback_text = self._redact_numeric_tokens(last_draft_report)
+            words = fallback_text.split(" ")
+            for i, word in enumerate(words):
+                content = word + (" " if i < len(words) - 1 else "")
+                yield StreamEvent(event="token", data={"content": content})
+                await asyncio.sleep(random.uniform(0.01, 0.03))
+            return
+
         yield StreamEvent(
             event="error",
             data={"content": "Multiple numeric consistency checks failed."},
         )
 
-    async def execute_query(self, user_query: str) -> AsyncGenerator[dict, None]:
+    async def execute_query(
+        self,
+        user_query: str,
+        conversation_history: Optional[List[Message]] = None,
+    ) -> AsyncGenerator[dict, None]:
         """Main entry point for handling a user query through the multi-agent system (Streaming)."""
         # Immediately yield a start event to initialize the stream and bypass buffering
-        yield {"event": "status", "data": {"message": "Initializing research pipeline..."}}
-        
+        yield {
+            "event": "status",
+            "data": {"message": "Initializing research pipeline..."},
+        }
+
         langfuse_context.update_current_trace(
             input=user_query,
             tags=["orchestrator", "v1", "sequential", "streaming"],
@@ -459,70 +615,26 @@ class PipelineOrchestrator:
                     parameters={"query": user_query},
                 )
 
-                query_clean = user_query.lower().strip().rstrip("?.!")
-                greetings = [
-                    "hello",
-                    "hi",
-                    "hey",
-                    "who are you",
-                    "what can you do",
-                    "good morning",
-                    "good afternoon",
-                    "good evening",
-                ]
-
-                is_greeting = query_clean in greetings
-                is_financial = any(
-                    kw in query_clean
-                    for kw in [
-                        "nifty",
-                        "vix",
-                        "sensex",
-                        "reliance",
-                        "stock",
-                        "price",
-                        "market",
-                        "finance",
-                        "invest",
-                        "portfolio",
-                        "risk",
-                        "dividend",
-                    ]
-                )
-
-                if is_greeting and not is_financial:
-                    logger.info("Direct conversational response triggered.")
-                    session_logger.log_step(
-                        "CLASSIFICATION",
-                        "Query identified as a non-financial greeting.",
-                    )
-                    await status_queue.put(
-                        StreamEvent(event="status", data={"message": "Synthesizing greeting..."})
-                    )
-                    messages = [
-                        Message(
-                            role="system",
-                            content="You are a senior financial intelligence assistant. Greeting the user warmly and briefly explain how you can help them with Indian stock market research, technical analysis, and fundamental deep-dives. Keep it concise.",
-                        ),
-                        Message(role="user", content=user_query),
-                    ]
-                    
-                    # TRUE STREAMING for conversational responses
-                    async for token_event in self.llm.generate_stream(
-                        messages=messages, model="mistral-8b"
-                    ):
-                        if token_event["event"] == "token":
-                            await status_queue.put(
-                                StreamEvent(event="token", data={"content": token_event["data"]})
-                            )
-                    return
-
                 await status_queue.put(
-                    StreamEvent(event="status", data={"message": "Planning research strategy..."})
+                    StreamEvent(
+                        event="status",
+                        data={"message": "Planning research strategy..."},
+                    )
                 )
-                plan_agent_response = await self.planner.execute(user_query)
+                planner_context = {
+                    "conversation_history": [
+                        msg.model_dump() if hasattr(msg, "model_dump") else msg
+                        for msg in (conversation_history or [])
+                    ]
+                }
+                plan_agent_response = await self.planner.execute(
+                    user_query, context=planner_context
+                )
 
-                if plan_agent_response.status == "failure" or not plan_agent_response.data:
+                if (
+                    plan_agent_response.status == "failure"
+                    or not plan_agent_response.data
+                ):
                     logger.error(f"Planner failed: {plan_agent_response.errors}")
                     session_logger.log_error(
                         "PLANNING_FAILED",
@@ -539,8 +651,11 @@ class PipelineOrchestrator:
                     )
                     return
 
-                from agents.orchestration.schemas import PlanData
-                plan = PlanData(**plan_agent_response.data)
+                plan = (
+                    plan_agent_response.data
+                    if isinstance(plan_agent_response.data, PlanData)
+                    else PlanData(**plan_agent_response.data)
+                )
                 logger.info(f"Generated Plan with {len(plan.execution_steps)} steps.")
                 session_logger.log_step(
                     "PLANNING_COMPLETE",
@@ -548,50 +663,75 @@ class PipelineOrchestrator:
                     data=plan.model_dump(),
                 )
 
-                if not plan.is_financial_request or not plan.execution_steps:
-                    logger.info("Planner marked request as non-financial.")
-                    await status_queue.put(
-                        StreamEvent(event="status", data={"message": "Synthesizing response..."})
+                if plan.response_mode in {
+                    "direct_response",
+                    "ask_clarification",
+                    "ask_plan_approval",
+                }:
+                    planner_text = (
+                        plan.assistant_response
+                        if plan.assistant_response
+                        else "I need more details before I can proceed."
                     )
-                    messages = [
-                        Message(
-                            role="system",
-                            content="You are a helpful financial intelligence assistant. Answer the user's general query concisely.",
-                        ),
-                        Message(role="user", content=user_query),
-                    ]
-                    
-                    # TRUE STREAMING for non-financial queries
-                    async for token_event in self.llm.generate_stream(
-                        messages=messages, model="mistral-8b"
-                    ):
-                        if token_event["event"] == "token":
-                            await status_queue.put(
-                                StreamEvent(event="token", data={"content": token_event["data"]})
-                            )
+                    await status_queue.put(
+                        StreamEvent(
+                            event="status", data={"message": "Synthesizing response..."}
+                        )
+                    )
+                    await self._stream_text_to_queue(planner_text, status_queue)
+                    return
+
+                if plan.response_mode != "execute_plan":
+                    await status_queue.put(
+                        StreamEvent(
+                            event="error",
+                            data={
+                                "content": f"Planner returned unsupported response_mode: {plan.response_mode}"
+                            },
+                        )
+                    )
+                    return
+
+                if not plan.execution_steps:
+                    await status_queue.put(
+                        StreamEvent(
+                            event="error",
+                            data={
+                                "content": "Planner selected execute_plan but provided no execution steps."
+                            },
+                        )
+                    )
                     return
 
                 state = ResearchState(query=user_query)
 
-                # 3. Sequential Execution (Optimized for low-memory local LLMs)
+                # 3. Parallel Execution (Optimized for low-memory local LLMs)
                 levels = self._group_steps(plan.execution_steps)
                 for i, level_steps in enumerate(levels):
-                    for step in level_steps:
-                        agent_name = (
+                    agent_names = [
+                        (
                             step.target_agent.value
                             if hasattr(step.target_agent, "value")
                             else str(step.target_agent)
                         )
-                        await status_queue.put(
-                            StreamEvent(
-                                event="status", data={"message": f"Executing: {agent_name}..."}
-                            )
+                        for step in level_steps
+                    ]
+                    await status_queue.put(
+                        StreamEvent(
+                            event="status",
+                            data={
+                                "message": f"Executing concurrently: {', '.join(agent_names)}..."
+                            },
                         )
+                    )
 
-                        # Run agents one by one to prevent memory overflow on local hardware
-                        await self._execute_step(
+                    tasks = [
+                        self._execute_step(
                             step, user_query, state, status_queue, session_logger
                         )
+                        for step in level_steps
+                    ]
+                    await asyncio.gather(*tasks)
 
                 # 4. Final Synthesis & Verification
                 async for event in self._synthesize_report(
@@ -604,7 +744,9 @@ class PipelineOrchestrator:
                 await status_queue.put(
                     StreamEvent(
                         event="error",
-                        data={"content": f"An internal system error occurred: {str(e)}"},
+                        data={
+                            "content": f"An internal system error occurred: {str(e)}"
+                        },
                     )
                 )
             finally:
@@ -617,7 +759,7 @@ class PipelineOrchestrator:
             event = await status_queue.get()
             if event is None:
                 break
-            
+
             # Use a more robust check than isinstance to handle potential re-imports
             if hasattr(event, "model_dump"):
                 yield event.model_dump()

@@ -14,10 +14,41 @@ class WebSearchProvider:
     """
 
     def __init__(self):
-        self.ddgs = DDGS()
+        try:
+            self.ddgs = DDGS(timeout=10)
+        except TypeError:
+            self.ddgs = DDGS()  # Fallback for older versions
         self.headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36"
         }
+
+    @staticmethod
+    def normalize_time_range(
+        time_range: Optional[str], default: Optional[str] = "m"
+    ) -> Optional[str]:
+        """Normalizes timelimit values for DDGS to supported set: d, w, m, y."""
+        if not time_range:
+            return default
+
+        normalized = str(time_range).strip().lower()
+        if normalized in {"d", "w", "m", "y"}:
+            return normalized
+
+        aliases = {
+            "day": "d",
+            "daily": "d",
+            "week": "w",
+            "weekly": "w",
+            "month": "m",
+            "monthly": "m",
+            "year": "y",
+            "yearly": "y",
+            "90d": "m",
+            "d90": "m",
+            "3m": "m",
+            "last_90_days": "m",
+        }
+        return aliases.get(normalized, default)
 
     @observe(name="Tool:WebSearch:General")
     def search_general_web(
@@ -27,13 +58,38 @@ class WebSearchProvider:
         Perform a standard text search on DuckDuckGo.
         time_range can be 'd' (day), 'w' (week), 'm' (month), 'y' (year).
         """
+        import asyncio
+
+        async def _run_search():
+            try:
+                safe_time_range = self.normalize_time_range(time_range, default=None)
+                results = self.ddgs.text(
+                    query,
+                    max_results=max_results,
+                    timelimit=safe_time_range,
+                )
+                return list(results)
+            except Exception as e:
+                logger.error(f"DuckDuckGo Search error: {e}")
+                return [{"error": str(e)}]
+
         try:
-            results = self.ddgs.text(
-                query,
-                max_results=max_results,
-                timelimit=time_range if time_range else None,
-            )
-            return list(results)
+            # We can't use asyncio.wait_for directly here because it's synchronous code
+            # But the orchestrator makes it async. Let's just catch exceptions from ddgs properly.
+            # Actually ddgs text is synchronous generator, let's just make sure we capture it quickly.
+            import time
+
+            start = time.time()
+            safe_time_range = self.normalize_time_range(time_range, default=None)
+            results = []
+            for r in self.ddgs.text(
+                query, max_results=max_results, timelimit=safe_time_range
+            ):
+                results.append(r)
+                if time.time() - start > 10.0:
+                    logger.warning("Web search timed out, returning partial results")
+                    break
+            return results
         except Exception as e:
             logger.error(f"DuckDuckGo Search error: {e}")
             return [{"error": str(e)}]
@@ -46,12 +102,19 @@ class WebSearchProvider:
         Perform a news search on DuckDuckGo.
         """
         try:
-            results = self.ddgs.news(
-                query,
-                max_results=max_results,
-                timelimit=time_range if time_range else None,
-            )
-            return list(results)
+            import time
+
+            start = time.time()
+            safe_time_range = self.normalize_time_range(time_range, default="w")
+            results = []
+            for r in self.ddgs.news(
+                query, max_results=max_results, timelimit=safe_time_range
+            ):
+                results.append(r)
+                if time.time() - start > 10.0:
+                    logger.warning("News search timed out, returning partial results")
+                    break
+            return results
         except Exception as e:
             logger.error(f"DuckDuckGo News Search error: {e}")
             return [{"error": str(e)}]

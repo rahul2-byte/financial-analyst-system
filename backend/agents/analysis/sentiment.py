@@ -1,12 +1,12 @@
 import json
-from typing import Dict, Any, Optional
-from app.core.observability import observe, langfuse_context
+from typing import Dict, Any, Optional, List
 
+from app.core.observability import observe
+from app.core.prompts import prompt_manager
 from app.services.llm_interface import LLMServiceInterface
 from app.models.request_models import Message
-from agents.analysis.schemas import AgentResponse, QualitativeInsights
+from agents.analysis.schemas import AgentResponse
 from quant.nlp_scorer import NLPScorer
-from app.core.utils import clean_json_string
 from agents.base import BaseAgent
 
 
@@ -14,17 +14,6 @@ class SentimentAnalysisAgent(BaseAgent):
     """
     Hybrid Agent combining deterministic FinBERT scoring (via Python)
     with LLM-based reasoning to extract actionable insights from unstructured text.
-    """
-
-    SYSTEM_PROMPT = """
-You are the Qualitative Sentiment Analyst for a Financial Intelligence Platform.
-Your job is to synthesize raw text (news, transcripts) alongside mathematical FinBERT sentiment scores provided to you.
-
-CRITICAL RULES:
-1. You DO NOT perform any math or generate your own probability scores. Use the FinBERT scores provided by your tool.
-2. Read the text to extract specific details: order book updates, challenges, and entity impacts (competitors, suppliers).
-3. CONTRADICTION DETECTION: You must compare the FinBERT score against your human-like reading of the text. If the score is 'Bullish' but the text describes a massive lawsuit or debt default, you MUST flag `is_contradictory` as True and explain why.
-4. Your final output must EXACTLY match the QualitativeInsights JSON schema. Do not output anything outside of the JSON.
     """
 
     def __init__(self, llm_service: LLMServiceInterface, model: str = "mistral-8b"):
@@ -37,7 +26,7 @@ CRITICAL RULES:
                 "type": "function",
                 "function": {
                     "name": "run_finbert_analysis",
-                    "description": "Runs deterministic FinBERT sentiment scoring and forward-looking tense parsing on raw text.",
+                    "description": "Runs deterministic FinBERT sentiment scoring on raw text.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -49,20 +38,54 @@ CRITICAL RULES:
                         "required": ["text"],
                     },
                 },
-            }
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "submit_sentiment_analysis",
+                    "description": "Submits the final qualitative sentiment analysis.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                           "finbert_overall_score": {"type": "string"},
+                           "finbert_guidance_score": {"type": "string"},
+                           "order_book_updates": {"type": "array", "items": {"type": "string"}},
+                           "major_challenges": {"type": "array", "items": {"type": "string"}},
+                           "entity_impact_map": {
+                               "type": "array", 
+                               "items": {
+                                   "type": "object",
+                                   "properties": {
+                                       "entity_name": {"type": "string"},
+                                       "relationship": {"type": "string"},
+                                       "impact": {"type": "string"}
+                                   },
+                                   "required": ["entity_name", "relationship", "impact"]
+                               }
+                           },
+                           "is_contradictory": {"type": "boolean"},
+                           "contradiction_reason": {"type": "string"},
+                           "executive_summary": {"type": "string"}
+                       },
+                       "required": [
+                           "finbert_overall_score", "finbert_guidance_score", "is_contradictory", "executive_summary"
+                       ]
+                   }
+               }
+           }
         ]
 
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
-        """Executes the NLP scorer tool."""
+        """Executes the requested tool."""
         try:
             if tool_name == "run_finbert_analysis":
                 text = arguments.get("text", "")
                 if not text:
                     return json.dumps({"error": "No text provided"})
-
-                # Run the deterministic python layer
                 results = self.scorer.analyze_text(text)
                 return json.dumps(results)
+            elif tool_name == "submit_sentiment_analysis":
+                return json.dumps(arguments)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -73,69 +96,56 @@ CRITICAL RULES:
         self, user_query: str, step_number: int = 0, raw_text_data: Optional[str] = None
     ) -> AgentResponse:
         """
-        Executes the agent loop.
-        Forces the LLM to return the exact QualitativeInsights Pydantic model structure.
+        Executes the agent loop with flexible multi-turn tool usage.
         """
+        max_turns = 5
         prompt = user_query
         if raw_text_data:
-            # We truncate massive transcripts slightly so the prompt doesn't explode,
-            # though the ideal architecture uses RAG before this point.
-            truncated_text = raw_text_data[:15000]
-            prompt += f"\n\nHere is the raw text you must analyze:\n{truncated_text}"
+            prompt += f"\n\nHere is the raw text you must analyze:\n{raw_text_data}"
 
-        messages = [
-            Message(role="system", content=self.SYSTEM_PROMPT),
+        messages: List[Message] = [
+            Message(
+                role="system", content=prompt_manager.get_prompt("sentiment.system")
+            ),
             Message(role="user", content=prompt),
         ]
 
         try:
-            # Step 1: The LLM should decide to call the FinBERT tool to get the mathematical scores
-            tid_strat = await self.emit_status(
-                step_number, self.agent_name, "Analyzing sentiment markers...", status="running"
-            )
-            response_msg = await self.llm_service.generate_message(
-                messages=messages, model=self.model, tools=self._get_tools()
-            )
-            await self.emit_status(
-                step_number, self.agent_name, "Analyzing sentiment markers...", "Strategy generated.", status="completed", tool_id=tid_strat
-            )
+            for turn in range(max_turns):
+                response_msg = await self.llm_service.generate_message(
+                    messages=messages, model=self.model, tools=self._get_tools()
+                )
+                messages.append(response_msg)
 
-            messages.append(response_msg)
+                if not response_msg.tool_calls:
+                    return AgentResponse(
+                        status="failure", data={}, errors=["Agent did not call any tools."]
+                    )
 
-            # Step 2: Execute FinBERT tool if requested
-            if response_msg.tool_calls:
+                # Execute all tool calls in this turn
                 for tool_call in response_msg.tool_calls:
                     function_call = tool_call.get("function", {})
                     tool_name = function_call.get("name")
+                    
+                    # Parse arguments safely
                     arguments_str = function_call.get("arguments", "{}")
+                    try:
+                        arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+                    except json.JSONDecodeError:
+                        arguments = {}
 
-                    if isinstance(arguments_str, str):
-                        try:
-                            arguments = json.loads(arguments_str)
-                        except json.JSONDecodeError:
-                            arguments = {}
-                    else:
-                        arguments = arguments_str
+                    # If it's the final submission tool, we're done
+                    if tool_name == "submit_sentiment_analysis":
+                        final_data = self._execute_tool(tool_name, arguments)
+                        return AgentResponse(status="success", data=json.loads(final_data), errors=None)
 
+                    # Otherwise, execute the tool and add result to context
                     tid = await self.emit_status(
-                        step_number, tool_name, "Running FinBERT NLP scan...", status="running"
+                        step_number, tool_name, "Running sentiment analysis...", status="running"
                     )
                     tool_result = self._execute_tool(tool_name, arguments)
                     await self.emit_status(
-                        step_number,
-                        tool_name,
-                        "Running FinBERT NLP scan...",
-                        "NLP scan complete.",
-                        status="completed",
-                        tool_id=tid,
-                    )
-
-                    langfuse_context.update_current_observation(
-                        metadata={
-                            "tool_name": tool_name,
-                            "tool_args": arguments,
-                            "tool_result": tool_result,
-                        }
+                        step_number, tool_name, "Running sentiment analysis...", "Done.", status="completed", tool_id=tid
                     )
 
                     messages.append(
@@ -147,57 +157,12 @@ CRITICAL RULES:
                         )
                     )
 
-                # Step 3: LLM Synthesizes the final output in the strict QualitativeInsights schema
-                tid_synth = await self.emit_status(
-                    step_number, self.agent_name, "Synthesizing qualitative insights...", status="running"
-                )
-                # We add the schema to the prompt for the final turn and ensure role alternation
-                messages.append(
-                    Message(
-                        role="user",
-                        content=f"Based on the analysis results above, synthesize the final qualitative analysis into a JSON object matching this schema: {json.dumps(QualitativeInsights.model_json_schema())}",
-                    )
-                )
-                final_response_msg = await self.llm_service.generate_message(
-                    messages=messages,
-                    model=self.model,
-                    response_format={"type": "json_object"},
-                )
-                await self.emit_status(
-                    step_number, self.agent_name, "Synthesizing qualitative insights...", "Synthesis complete.", status="completed", tool_id=tid_synth
-                )
-                final_content = final_response_msg.content
-            else:
-                # Fallback if it didn't call the tool (rare but possible)
-                tid_fb = await self.emit_status(
-                    step_number, self.agent_name, "Synthesizing insights...", status="running"
-                )
-                messages.append(
-                    Message(
-                        role="user",
-                        content=f"Please synthesize your findings into a JSON object matching this schema: {json.dumps(QualitativeInsights.model_json_schema())}",
-                    )
-                )
-                final_response_msg = await self.llm_service.generate_message(
-                    messages=messages,
-                    model=self.model,
-                    response_format={"type": "json_object"},
-                )
-                await self.emit_status(
-                    step_number, self.agent_name, "Synthesizing insights...", "Synthesis complete.", status="completed", tool_id=tid_fb
-                )
-                final_content = final_response_msg.content
-
-            # Parse the strict JSON string back into a dict for our standard AgentResponse
-            try:
-                if not final_content:
-                    raise ValueError("Final content is empty")
-                cleaned_content = clean_json_string(final_content)
-                parsed_insights = json.loads(cleaned_content)
-            except Exception:
-                parsed_insights = {"raw_output": final_content}
-
-            return AgentResponse(status="success", data=parsed_insights, errors=None)
+            # If we hit max turns without submission
+            return AgentResponse(
+                status="failure",
+                data={},
+                errors=[f"Agent failed to submit sentiment analysis within {max_turns} turns."]
+            )
 
         except Exception as e:
             return AgentResponse(status="failure", data={}, errors=[str(e)])

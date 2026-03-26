@@ -84,3 +84,78 @@ async def test_web_search_agent_flow():
     mock_web_provider.search_latest_news.assert_called_once_with(
         "RBI repo rate", time_range="w"
     )
+
+
+@pytest.mark.asyncio
+async def test_web_search_agent_retries_final_json_parse_failure():
+    mock_llm = MagicMock(spec=LLMServiceInterface)
+
+    first_llm_response = Message(
+        role="assistant",
+        content=None,
+        tool_calls=[
+            {
+                "id": "call_retry_1",
+                "type": "function",
+                "function": {
+                    "name": "search_latest_news",
+                    "arguments": '{"query": "Tata Motors"}',
+                },
+            }
+        ],
+    )
+    second_llm_response = Message(role="assistant", content="I have enough sources.")
+    third_llm_response = Message(
+        role="assistant",
+        content='```json\n{"summary_of_findings": "Bad\nJSON", "is_breaking_news_detected": true}\n```',
+    )
+    fourth_llm_response = Message(
+        role="assistant",
+        content=json.dumps(
+            {
+                "summary_of_findings": "Validated findings.",
+                "is_breaking_news_detected": False,
+                "potential_market_impact": "Neutral",
+                "citations": [],
+            }
+        ),
+    )
+
+    mock_llm.generate_message = AsyncMock(
+        side_effect=[
+            first_llm_response,
+            second_llm_response,
+            third_llm_response,
+            fourth_llm_response,
+        ]
+    )
+
+    mock_web_provider = MagicMock(spec=WebSearchProvider)
+    mock_web_provider.search_latest_news.return_value = [
+        {"title": "ok", "url": "https://example.com"}
+    ]
+
+    agent = WebSearchAgent(llm_service=mock_llm, provider=mock_web_provider)
+    response = await agent.execute(user_query="Retry JSON parse flow")
+
+    assert response.status == "success"
+    assert response.data["summary_of_findings"] == "Validated findings."
+    assert mock_llm.generate_message.call_count == 4
+
+
+@pytest.mark.asyncio
+async def test_web_search_agent_sanitizes_invalid_time_range():
+    mock_llm = MagicMock(spec=LLMServiceInterface)
+    mock_web_provider = MagicMock(spec=WebSearchProvider)
+    mock_web_provider.search_latest_news.return_value = []
+
+    agent = WebSearchAgent(llm_service=mock_llm, provider=mock_web_provider)
+    _ = agent._execute_tool(
+        "search_latest_news",
+        {"query": "Tata Motors", "time_range": "d90"},
+    )
+
+    mock_web_provider.search_latest_news.assert_called_once_with(
+        "Tata Motors",
+        time_range="m",
+    )

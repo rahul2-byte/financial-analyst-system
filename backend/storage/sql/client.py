@@ -44,6 +44,7 @@ class PostgresClient(IStructuredStorage):
                 count, min_date, max_date = result
                 return {
                     "ticker": ticker,
+                    "ticker_found": True,
                     "has_data": True,
                     "row_count": count,
                     "earliest_date": (
@@ -60,6 +61,7 @@ class PostgresClient(IStructuredStorage):
                 }
             return {
                 "ticker": ticker,
+                "ticker_found": False,
                 "has_data": False,
                 "row_count": 0,
                 "earliest_date": None,
@@ -82,6 +84,25 @@ class PostgresClient(IStructuredStorage):
             )
             result = session.execute(statement).first()
             return result[0] if result else 0
+
+    def get_table_names(self) -> List[str]:
+        """Get the names of all tables in the public schema."""
+        with Session(self.engine) as session:
+            statement = text(
+                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';"
+            )
+            results = session.execute(statement).fetchall()
+            return [row[0] for row in results] if results else []
+
+    def get_column_names(self, table_name: str) -> List[str]:
+        """Get the column names for a specific table."""
+        with Session(self.engine) as session:
+            statement = text(
+                "SELECT column_name FROM information_schema.columns WHERE table_name = :table_name;"
+            )
+            results = session.execute(statement, {"table_name": table_name}).fetchall()
+            return [row[0] for row in results] if results else []
+
 
     def get_db_size(self) -> str:
         """Get the size of the current database as a human-readable string."""

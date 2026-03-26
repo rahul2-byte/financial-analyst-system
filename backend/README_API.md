@@ -34,6 +34,13 @@ The path resolution is designed to be portable. The application can be run from 
       model_path: "/home/user/models/mistral-7b-instruct-v0.2.Q4_K_M.gguf"
     ```
 
+3. **Download FinBERT locally (offline runtime)**:
+    ```bash
+    python scripts/download_finbert.py
+    ```
+    This stores FinBERT in `backend/ai-lab/models/finbert`.
+    At runtime, sentiment analysis loads only from local files and does not call Hugging Face.
+
 ## Running the Server
 
 The `llama.cpp` server is started **on-demand** when the first API request is made.

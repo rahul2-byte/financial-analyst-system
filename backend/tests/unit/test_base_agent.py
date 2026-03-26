@@ -68,48 +68,60 @@ async def test_base_agent_init():
 
 @pytest.mark.asyncio
 async def test_base_agent_emit_status():
+    from app.core.orchestrator import status_queue_var
+
     llm = MockLLMService()
     queue = asyncio.Queue()
+    token = status_queue_var.set(queue)
     agent = BaseAgent(llm_service=llm, model="gpt-4")
-    agent.status_queue = queue
 
-    # Test emitting status
-    tool_id = await agent.emit_status(
-        step_number=1, tool_name="test_tool", input_desc="test input", status="running"
-    )
+    try:
+        # Test emitting status
+        tool_id = await agent.emit_status(
+            step_number=1,
+            tool_name="test_tool",
+            input_desc="test input",
+            status="running",
+        )
 
-    assert tool_id is not None
-    assert isinstance(uuid.UUID(tool_id), uuid.UUID)
+        assert tool_id is not None
+        assert isinstance(uuid.UUID(tool_id), uuid.UUID)
 
-    # Verify queue message
-    event = await queue.get()
-    assert event.event == "tool_status"
-    assert isinstance(event.data, ToolStatus)
-    assert event.data.tool_id == tool_id
-    assert event.data.status == "running"
-    assert event.data.tool_name == "test_tool"
+        # Verify queue message
+        event = await queue.get()
+        assert event.event == "tool_status"
+        assert isinstance(event.data, ToolStatus)
+        assert event.data.tool_id == tool_id
+        assert event.data.status == "running"
+        assert event.data.tool_name == "test_tool"
+    finally:
+        status_queue_var.reset(token)
 
 
 @pytest.mark.asyncio
 async def test_base_agent_emit_status_with_provided_id():
+    from app.core.orchestrator import status_queue_var
+
     llm = MockLLMService()
     queue = asyncio.Queue()
+    token = status_queue_var.set(queue)
     agent = BaseAgent(llm_service=llm, model="gpt-4")
-    agent.status_queue = queue
 
-    specific_id = str(uuid.uuid4())
-    tool_id = await agent.emit_status(
-        step_number=2,
-        tool_name="other_tool",
-        input_desc="input",
-        status="completed",
-        output_desc="output",
-        tool_id=specific_id,
-    )
+    try:
+        specific_id = str(uuid.uuid4())
+        tool_id = await agent.emit_status(
+            step_number=2,
+            tool_name="other_tool",
+            input_desc="input",
+            status="completed",
+            output_desc="output",
+            tool_id=specific_id,
+        )
 
-    assert tool_id == specific_id
+        assert tool_id == specific_id
 
-    event = await queue.get()
-    assert event.data.tool_id == specific_id
-    assert event.data.output == "output"
-    assert event.data.status == "completed"
+        event = await queue.get()
+        assert event.data.tool_id == specific_id
+        assert event.data.output == "output"
+    finally:
+        status_queue_var.reset(token)

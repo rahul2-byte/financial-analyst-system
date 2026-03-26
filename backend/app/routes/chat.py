@@ -36,13 +36,11 @@ async def chat_endpoint(request: ChatRequest):
         async def event_generator():
             # Send a 1KB preamble to bypass browser buffering (e.g. Chrome)
             yield f": {' ' * 1024}\n\n"
-            
+
             try:
-                async for event in orchestrator.execute_query(user_query):
-                    # LOG the event to server console for debugging
-                    event_type = event.get("event") or event.get("type")
-                    if event_type != "token":
-                        logger.info(f"SSE Yielding event: {event_type}")
+                async for event in orchestrator.execute_query(
+                    user_query, conversation_history=request.messages
+                ):
                     yield f"data: {json.dumps(event)}\n\n"
             except Exception as e_inner:
                 logger.error(f"Error in event generator: {e_inner}", exc_info=True)
@@ -52,13 +50,13 @@ async def chat_endpoint(request: ChatRequest):
                 yield "data: [DONE]\n\n"
 
         return StreamingResponse(
-            event_generator(), 
+            event_generator(),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
                 "X-Accel-Buffering": "no",  # Disable buffering for Nginx
-            }
+            },
         )
 
     except Exception as e:

@@ -1,7 +1,8 @@
 import json
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 from app.core.observability import observe, langfuse_context
 
+from app.core.prompts import prompt_manager
 from app.services.llm_interface import LLMServiceInterface
 from app.models.request_models import Message
 from agents.retrieval.schemas import AgentResponse
@@ -15,19 +16,6 @@ class RetrievalAgent(BaseAgent):
     Agent responsible for translating user queries into vector embeddings,
     searching the Qdrant database for relevant textual context (like news),
     and synthesizing a response.
-    """
-
-    SYSTEM_PROMPT = """
-You are the Retrieval (RAG) Agent for a Financial Intelligence Platform.
-Your job is to search the intelligence database for text data (news, transcripts, reports) that answers the user's question.
-
-CRITICAL RULES:
-1. You DO NOT perform mathematical computations.
-2. HYBRID SEARCH: Use the `search_intelligence_db` tool. It combines semantic meaning with keyword matching. Be specific with your search query.
-3. TEMPORAL AWARENESS: Financial data changes fast. Prioritize recent information.
-4. SYNTHESIS: Formulate your final answer using ONLY the context returned by the tool. Cite your sources if metadata is available.
-5. If the context doesn't answer the question after retrying, explicitly state that you have "Insufficient Data" to provide a reliable answer.
-6. Always respond with JSON matching the AgentResponse schema at the end.
     """
 
     def __init__(
@@ -64,6 +52,36 @@ CRITICAL RULES:
                             },
                         },
                         "required": ["query"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "submit_retrieval_results",
+                    "description": "Submits the final synthesized answer based on retrieved context.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "answer": {
+                                "type": "string",
+                                "description": "The synthesized answer based on retrieved context.",
+                            },
+                            "sources": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "A list of sources (titles, dates, or tickers) cited from the context.",
+                            },
+                            "confidence": {
+                                "type": "number",
+                                "description": "A score from 0.0 to 1.0 indicating confidence in the answer.",
+                            },
+                            "insufficient_data": {
+                                "type": "boolean",
+                                "description": "True if no relevant context was found to answer the query.",
+                            },
+                        },
+                        "required": ["answer", "confidence", "insufficient_data"],
                     },
                 },
             }
@@ -107,6 +125,9 @@ CRITICAL RULES:
                     )
 
                 return json.dumps(formatted_results)
+            
+            elif tool_name == "submit_retrieval_results":
+                return json.dumps(arguments)
 
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
@@ -117,144 +138,76 @@ CRITICAL RULES:
     @observe(name="Agent:Retrieval:Execute")
     async def execute(self, user_query: str, step_number: int = 0) -> AgentResponse:
         """
-        Executes the agent loop with a self-correction retry if results are insufficient.
+        Executes the retrieval loop.
+        Translates query to vector, searches Qdrant, and synthesizes an answer via submission tool.
         """
         messages = [
-            Message(role="system", content=self.SYSTEM_PROMPT),
+            Message(
+                role="system", content=prompt_manager.get_prompt("retrieval.system")
+            ),
             Message(role="user", content=user_query),
         ]
 
         try:
-            # Attempt 1: Standard retrieval
-            tid_gen = await self.emit_status(
-                step_number, self.agent_name, "Generating search query...", status="running"
-            )
+            # First LLM call -> Should call search_intelligence_db
             response_msg = await self.llm_service.generate_message(
                 messages=messages, model=self.model, tools=self._get_tools()
             )
-            await self.emit_status(
-                step_number, self.agent_name, "Generating search query...", "Search query generated.", status="completed", tool_id=tid_gen
-            )
-
             messages.append(response_msg)
 
             if response_msg.tool_calls:
-                tool_call = response_msg.tool_calls[
-                    0
-                ]  # Usually just one search tool call
-                function_call = tool_call.get("function", {})
-                tool_name = function_call.get("name")
+                tool_call = response_msg.tool_calls[0]
+                tool_name = tool_call.get("function", {}).get("name")
+                
+                if tool_name == "submit_retrieval_results":
+                    arguments = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                    return AgentResponse(status="success", data=arguments, errors=None)
 
-                raw_args = function_call.get("arguments", "{}")
-                arguments = (
-                    json.loads(raw_args) if isinstance(raw_args, str) else raw_args
-                )
-
-                tid = await self.emit_status(
-                    step_number, tool_name, json.dumps(arguments), status="running"
-                )
+                arguments = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
                 tool_result_str = self._execute_tool(tool_name, arguments)
                 tool_result = json.loads(tool_result_str)
-                await self.emit_status(
-                    step_number,
-                    tool_name,
-                    json.dumps(arguments),
-                    tool_result_str[:500] + "..." if len(tool_result_str) > 500 else tool_result_str,
-                    status="completed",
-                    tool_id=tid,
-                )
 
-                # SELF-CORRECTION: If no results, retry with a broader query
-                if (
-                    isinstance(tool_result, dict)
-                    and tool_result.get("status") == "no_results"
-                ):
-                    langfuse_context.update_current_observation(
-                        metadata={"retry": True, "reason": "no_results"}
-                    )
-
-                    retry_prompt = f"The previous search for '{arguments.get('query')}' yielded no results. Please try one more time with a broader or different search query that might find relevant financial context for: '{user_query}'"
-
-                    messages.append(
-                        Message(
-                            role="tool",
-                            content=tool_result_str,
-                            name=tool_name,
-                            tool_call_id=tool_call.get("id"),
-                        )
-                    )
+                # SELF-CORRECTION: If no results, retry once with a broader query
+                if isinstance(tool_result, dict) and tool_result.get("status") == "no_results":
+                    messages.append(Message(role="tool", content=tool_result_str, name=tool_name, tool_call_id=tool_call.get("id")))
+                    
+                    retry_prompt = prompt_manager.get_prompt("retrieval.feedback", query=arguments.get("query"), user_query=user_query)
                     messages.append(Message(role="user", content=retry_prompt))
 
-                    tid_retry = await self.emit_status(
-                        step_number, self.agent_name, "Retrying search with broader query...", status="running"
-                    )
                     response_msg = await self.llm_service.generate_message(
                         messages=messages, model=self.model, tools=self._get_tools()
-                    )
-                    await self.emit_status(
-                        step_number, self.agent_name, "Retrying search with broader query...", "Retry query generated.", status="completed", tool_id=tid_retry
                     )
                     messages.append(response_msg)
 
                     if response_msg.tool_calls:
                         tool_call = response_msg.tool_calls[0]
-                        function_call = tool_call.get("function", {})
-                        raw_args = function_call.get("arguments", "{}")
-                        arguments = (
-                            json.loads(raw_args)
-                            if isinstance(raw_args, str)
-                            else raw_args
-                        )
+                        tool_name = tool_call.get("function", {}).get("name")
                         
-                        tid = await self.emit_status(
-                            step_number, tool_call.get("function", {}).get("name"), json.dumps(arguments), status="running"
-                        )
-                        tool_result_str = self._execute_tool(
-                            function_call.get("name"), arguments
-                        )
-                        await self.emit_status(
-                            step_number,
-                            tool_call.get("function", {}).get("name"),
-                            json.dumps(arguments),
-                            tool_result_str[:500] + "..." if len(tool_result_str) > 500 else tool_result_str,
-                            status="completed",
-                            tool_id=tid,
-                        )
+                        if tool_name == "submit_retrieval_results":
+                             arguments = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                             return AgentResponse(status="success", data=arguments, errors=None)
 
-                messages.append(
-                    Message(
-                        role="tool",
-                        content=tool_result_str,
-                        name=tool_name,
-                        tool_call_id=tool_call.get("id"),
-                    )
-                )
+                        arguments = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                        tool_result_str = self._execute_tool(tool_name, arguments)
 
-                # Final synthesis
-                messages.append(
-                    Message(
-                        role="user",
-                        content="The intelligence retrieval process is complete. Synthesize the findings into a clear answer. If no relevant data was found, state 'Insufficient Data'.",
-                    )
-                )
+                messages.append(Message(role="tool", content=tool_result_str, name=tool_name, tool_call_id=tool_call.get("id")))
 
-                tid_synth = await self.emit_status(
-                    step_number, self.agent_name, "Synthesizing retrieved information...", status="running"
-                )
-                final_response_msg = await self.llm_service.generate_message(
-                    messages=messages, model=self.model
-                )
-                await self.emit_status(
-                    step_number, self.agent_name, "Synthesizing retrieved information...", "Synthesis complete.", status="completed", tool_id=tid_synth
-                )
-                final_content = final_response_msg.content
-            else:
-                final_content = response_msg.content
+            # Final synthesis -> Must call submit_retrieval_results
+            final_response_msg = await self.llm_service.generate_message(
+                messages=messages, model=self.model, tools=self._get_tools()
+            )
+
+            if final_response_msg.tool_calls:
+                final_tool_call = final_response_msg.tool_calls[0]
+                if final_tool_call.get("function", {}).get("name") == "submit_retrieval_results":
+                    arguments = json.loads(final_tool_call.get("function", {}).get("arguments", "{}"))
+                    return AgentResponse(status="success", data=arguments, errors=None)
 
             return AgentResponse(
-                status="success", data={"response": final_content}, errors=None
+                status="success", 
+                data={"response": final_response_msg.content}, 
+                errors=["Agent failed to use the submit_retrieval_results tool on its final step."]
             )
 
         except Exception as e:
-            # We could add an error status here if we have a tid
             return AgentResponse(status="failure", data={}, errors=[str(e)])

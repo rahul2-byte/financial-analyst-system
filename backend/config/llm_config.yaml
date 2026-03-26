@@ -17,7 +17,7 @@ llama_server:
   # Server arguments. Refer to llama.cpp documentation for all options.
   # Adjust n_gpu_layers based on your available VRAM. 0 means CPU only.
   args:
-    -c: 8192
+    -c: 16384
     -ngl: 32
     -np: 1
     --flash-attn: "on"
@@ -37,4 +37,5 @@ model:
 
 # Log file for the llama.cpp server's output.
 # This path is relative to the 'backend' directory.
-server_logfile: "logs/llama_server.log"
+# By putting it outside 'backend/', we avoid Uvicorn reload loops.
+server_logfile: "../logs/llama_server.log"

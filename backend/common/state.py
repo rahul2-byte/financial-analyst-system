@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timezone
 
 
@@ -91,6 +91,14 @@ class ToolResult(BaseModel):
         self.extracted_metrics = metrics
 
 
+class TaskMetadata(BaseModel):
+    agent: str
+    status: str
+    attempts: int = 0
+    validation_history: List[Dict[str, Any]] = Field(default_factory=list)
+    failure_reason: Optional[str] = None
+
+
 class ResearchState(BaseModel):
     query: str
     start_time: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
@@ -98,3 +106,5 @@ class ResearchState(BaseModel):
     agent_outputs: Dict[str, Any] = Field(default_factory=dict)
     verification_errors: List[str] = Field(default_factory=list)
     retry_count: int = 0
+    global_status: str = "IN_PROGRESS"
+    tasks_metadata: Dict[str, TaskMetadata] = Field(default_factory=dict)

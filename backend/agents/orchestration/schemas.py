@@ -34,6 +34,20 @@ class TargetAgent(str, Enum):
     VALIDATION = "validation"
 
 
+class PlannerIntentType(str, Enum):
+    GREETING = "greeting"
+    NON_FINANCIAL = "non_financial"
+    SIMPLE_FINANCIAL = "simple_financial"
+    COMPLEX_RESEARCH = "complex_research"
+
+
+class PlannerResponseMode(str, Enum):
+    DIRECT_RESPONSE = "direct_response"
+    ASK_CLARIFICATION = "ask_clarification"
+    ASK_PLAN_APPROVAL = "ask_plan_approval"
+    EXECUTE_PLAN = "execute_plan"
+
+
 class ExecutionStep(BaseModel):
     step_number: int = Field(
         ...,
@@ -59,6 +73,18 @@ class PlanData(BaseModel):
     plan_id: str = Field(
         ..., description="A unique identifier for this execution plan."
     )
+    intent_type: PlannerIntentType = Field(
+        default=PlannerIntentType.COMPLEX_RESEARCH,
+        description="Planner intent classification for the current turn.",
+    )
+    response_mode: PlannerResponseMode = Field(
+        default=PlannerResponseMode.EXECUTE_PLAN,
+        description="How orchestrator should route this response.",
+    )
+    assistant_response: str = Field(
+        default="",
+        description="Message to stream directly to the user when no execution is required.",
+    )
     is_financial_request: bool = Field(
         ..., description="Whether the request is related to finance/markets/economics."
     )
@@ -67,7 +93,20 @@ class PlanData(BaseModel):
         description="The scope of the request (e.g., 'single_stock', 'sector_analysis', 'macro_economics', 'global_news').",
     )
     execution_steps: List[ExecutionStep] = Field(
-        ..., description="The directed acyclic graph (DAG) of steps to execute."
+        default_factory=list,
+        description="The directed acyclic graph (DAG) of steps to execute.",
+    )
+    requires_user_approval: bool = Field(
+        default=False,
+        description="Whether user must approve the proposed plan before execution.",
+    )
+    clarifying_questions: List[str] = Field(
+        default_factory=list,
+        description="Targeted follow-up questions when requirements are unclear.",
+    )
+    proposed_plan: Optional[str] = Field(
+        default=None,
+        description="Human-readable execution plan for user confirmation.",
     )
 
 

@@ -45,13 +45,22 @@ class VerificationAgent(BaseAgent):
             return None
 
     async def execute(
-        self, user_query: str, step_number: int = 0, draft_report: str = "", tool_registry: List[ToolResult] = []
+        self,
+        user_query: str,
+        step_number: int = 0,
+        draft_report: str = "",
+        tool_registry: List[ToolResult] = [],
     ) -> AgentResponse:
         """
         Extracts all numbers from the draft report and verifies them against the tool registry.
         Returns an AgentResponse containing the verification results.
         """
-        tid = await self.emit_status(step_number, self.agent_name, "Verifying numeric accuracy...", status="running")
+        tid = await self.emit_status(
+            step_number,
+            self.agent_name,
+            "Verifying numeric accuracy...",
+            status="running",
+        )
 
         try:
             # 1. Flatten all metrics from tool_registry into a single lookup set
@@ -118,23 +127,34 @@ class VerificationAgent(BaseAgent):
                     "You must only use numbers found in the tool results. "
                     "Do not estimate, hallucinate, or use external knowledge for numeric data."
                 )
-            
-            await self.emit_status(step_number, self.agent_name, "Verifying numeric accuracy...", feedback, status="completed", tool_id=tid)
-                
+
+            await self.emit_status(
+                step_number,
+                self.agent_name,
+                "Verifying numeric accuracy...",
+                feedback,
+                status="completed",
+                tool_id=tid,
+            )
+
             return AgentResponse(
                 status="success",
-                data={
-                    "is_valid": is_valid,
-                    "feedback": feedback
-                },
-                errors=None
+                data={"is_valid": is_valid, "feedback": feedback},
+                errors=None,
             )
 
         except Exception as e:
             logger.error(f"VerificationAgent error: {e}", exc_info=True)
-            await self.emit_status(step_number, self.agent_name, "Verifying numeric accuracy...", str(e), status="error", tool_id=tid)
+            await self.emit_status(
+                step_number,
+                self.agent_name,
+                "Verifying numeric accuracy...",
+                str(e),
+                status="error",
+                tool_id=tid,
+            )
             return AgentResponse(
                 status="failure",
                 data={},
-                errors=[f"Verification system error: {str(e)}"]
+                errors=[f"Verification system error: {str(e)}"],
             )

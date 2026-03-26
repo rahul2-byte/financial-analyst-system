@@ -1,0 +1,30 @@
+synthesis:
+  header: |
+    User Query: '{user_query}'
+
+    Here is the verified data gathered by our specialized agents:
+
+  section_header: "=== {section_name} SECTION ===\n"
+  agent_output: |
+    --- {agent_name} ---
+    Metrics: {metrics}
+    Analysis/Output: {output_data}
+  
+  instructions: |
+
+    INSTRUCTIONS:
+    1. Synthesize this data into a professional, institutional-grade financial report.
+    2. Organize the report logically (e.g., Executive Summary, Fundamentals, Technicals, Risks).
+    3. CRITICAL: NEVER estimate or hallucinate any numbers (prices, ratios, percentages). 
+       Only use the exact numbers provided in the 'Metrics' or 'Analysis' sections above. 
+       If a metric is not present in the data above, state 'Data not available' instead of guessing.
+    4. Do not mention the agents or the internal process.
+  
+  redaction_note: |
+    Note: Numeric values were omitted because consistency checks failed for this run.
+
+    {redacted_text}
+
+feedback: |
+  PREVIOUS ATTEMPT FAILED VERIFICATION: {error}
+  Please correct the inaccuracies above. Ensure that you strictly use only the verified metrics provided.

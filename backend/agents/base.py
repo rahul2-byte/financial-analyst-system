@@ -6,8 +6,8 @@ from app.models.response_models import StreamEvent, ToolStatus
 from app.services.llm_interface import LLMServiceInterface
 
 # ContextVar to store the status queue for the current task/request
-status_queue_var: contextvars.ContextVar[Optional[asyncio.Queue]] = contextvars.ContextVar(
-    "status_queue", default=None
+status_queue_var: contextvars.ContextVar[Optional[asyncio.Queue]] = (
+    contextvars.ContextVar("status_queue", default=None)
 )
 
 

@@ -1,7 +1,7 @@
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from app.core.observability import observe, langfuse_context
-
+from app.core.prompts import prompt_manager
 from app.services.llm_interface import LLMServiceInterface
 from app.models.request_models import Message
 from agents.analysis.schemas import AgentResponse
@@ -14,17 +14,6 @@ class FundamentalAnalysisAgent(BaseAgent):
     Agent responsible for analyzing structured financial data.
     It strictly uses the FundamentalScanner to perform quantitative evaluations
     and uses the LLM solely to synthesize the deterministic output into a readable thesis.
-    """
-
-    SYSTEM_PROMPT = """
-You are the Fundamental Analysis Agent for a Financial Intelligence Platform.
-Your job is to read raw financial data, pass it to your deterministic analysis tool, and write a professional investment thesis based ONLY on the tool's output.
-
-CRITICAL RULES:
-1. You DO NOT perform any math or ratio calculations yourself.
-2. You MUST use the `run_fundamental_scan` tool to evaluate the raw data.
-3. Your final response should be a 2-3 paragraph professional Value Investment Thesis synthesizing the tool's output. Do not hallucinate numbers.
-4. Always respond with JSON matching the AgentResponse schema at the end.
     """
 
     def __init__(self, llm_service: LLMServiceInterface, model: str = "mistral-8b"):
@@ -49,6 +38,32 @@ CRITICAL RULES:
                         "required": ["raw_data"],
                     },
                 },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "submit_thesis",
+                    "description": "Submits the final investment thesis and key findings.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "investment_thesis": {
+                                "type": "string",
+                                "description": "The full, 2-3 paragraph investment thesis.",
+                            },
+                            "key_findings": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "description": "A bulleted list of the most critical data points from the scan.",
+                            },
+                            "confidence_score": {
+                                "type": "number",
+                                "description": "A score from 0.0 to 1.0 indicating confidence in the thesis, based on the strength of the data.",
+                            },
+                        },
+                        "required": ["investment_thesis", "key_findings", "confidence_score"],
+                    },
+                },
             }
         ]
 
@@ -67,6 +82,8 @@ CRITICAL RULES:
 
                 scan_results = self.scanner.scan(raw_data)
                 return json.dumps(scan_results)
+            elif tool_name == "submit_thesis":
+                return json.dumps(arguments)
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
         except Exception as e:
@@ -80,64 +97,63 @@ CRITICAL RULES:
         raw_fundamental_data: Optional[Dict[str, Any]] = None,
     ) -> AgentResponse:
         """
-        Executes the agent loop.
-        If raw_fundamental_data is provided directly, we inject it into the prompt.
+        Executes the agent loop with flexible multi-turn tool usage.
+        The agent can use multiple tools in sequence before submitting the final thesis.
         """
+        max_turns = 5
         prompt = user_query
         if raw_fundamental_data:
             prompt += f"\n\nHere is the raw data you must analyze: {json.dumps(raw_fundamental_data)}"
 
-        messages = [
-            Message(role="system", content=self.SYSTEM_PROMPT),
+        messages: List[Message] = [
+            Message(
+                role="system", content=prompt_manager.get_prompt("fundamental.system")
+            ),
             Message(role="user", content=prompt),
         ]
 
         try:
-            tid_strat = await self.emit_status(
-                step_number, self.agent_name, "Generating analysis strategy...", status="running"
-            )
-            response_msg = await self.llm_service.generate_message(
-                messages=messages, model=self.model, tools=self._get_tools()
-            )
-            await self.emit_status(
-                step_number, self.agent_name, "Generating analysis strategy...", "Strategy generated.", status="completed", tool_id=tid_strat
-            )
+            for turn in range(max_turns):
+                response_msg = await self.llm_service.generate_message(
+                    messages=messages, model=self.model, tools=self._get_tools()
+                )
+                messages.append(response_msg)
 
-            messages.append(response_msg)
+                if not response_msg.tool_calls:
+                    return AgentResponse(
+                        status="success", 
+                        data={"response": response_msg.content}, 
+                        errors=["Agent did not call any tools."]
+                    )
 
-            if response_msg.tool_calls:
+                # Execute all tool calls in this turn
                 for tool_call in response_msg.tool_calls:
                     function_call = tool_call.get("function", {})
                     tool_name = function_call.get("name")
+                    
+                    # Parse arguments safely
                     arguments_str = function_call.get("arguments", "{}")
+                    try:
+                        arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
+                    except json.JSONDecodeError:
+                        arguments = {}
 
-                    if isinstance(arguments_str, str):
-                        try:
-                            arguments = json.loads(arguments_str)
-                        except json.JSONDecodeError:
-                            arguments = {}
-                    else:
-                        arguments = arguments_str
+                    # If it's the final submission tool, we're done
+                    if tool_name == "submit_thesis":
+                        final_data = self._execute_tool(tool_name, arguments)
+                        return AgentResponse(status="success", data=json.loads(final_data), errors=None)
 
+                    # Otherwise, execute the tool and add result to context
                     tid = await self.emit_status(
-                        step_number, tool_name, "Processing raw financial data...", status="running"
+                        step_number, tool_name, "Processing tool...", status="running"
                     )
                     tool_result = self._execute_tool(tool_name, arguments)
                     await self.emit_status(
-                        step_number,
-                        tool_name,
-                        "Processing raw financial data...",
-                        "Scan complete.",
-                        status="completed",
-                        tool_id=tid,
+                        step_number, tool_name, "Processing tool...", "Done.", status="completed", tool_id=tid
                     )
 
                     langfuse_context.update_current_observation(
-                        metadata={
-                            "tool_name": tool_name,
-                            "tool_args": arguments,
-                            "tool_result": tool_result,
-                        }
+                        metadata={"tool_name": tool_name, "tool_args": arguments, "tool_result": tool_result}
                     )
 
                     messages.append(
@@ -149,29 +165,11 @@ CRITICAL RULES:
                         )
                     )
 
-                tid_synth = await self.emit_status(
-                    step_number,
-                    self.agent_name,
-                    "Synthesizing investment thesis...",
-                    status="running",
-                )
-                final_response_msg = await self.llm_service.generate_message(
-                    messages=messages, model=self.model
-                )
-                await self.emit_status(
-                    step_number,
-                    self.agent_name,
-                    "Synthesizing investment thesis...",
-                    "Synthesis complete.",
-                    status="completed",
-                    tool_id=tid_synth
-                )
-                final_content = final_response_msg.content
-            else:
-                final_content = response_msg.content
-
+            # If we hit max turns without submission
             return AgentResponse(
-                status="success", data={"response": final_content}, errors=None
+                status="failure",
+                data={},
+                errors=[f"Agent failed to submit thesis within {max_turns} turns."]
             )
 
         except Exception as e:

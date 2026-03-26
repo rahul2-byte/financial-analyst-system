@@ -22,3 +22,6 @@ opentelemetry-sdk
 opentelemetry-exporter-otlp
 opentelemetry-instrumentation-fastapi
 opentelemetry-instrumentation-httpx
+transformers
+torch
+nltk

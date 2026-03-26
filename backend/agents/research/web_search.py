@@ -1,12 +1,12 @@
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from app.core.observability import observe, langfuse_context
 
+from app.core.prompts import prompt_manager
 from app.services.llm_interface import LLMServiceInterface
 from app.models.request_models import Message
 from agents.research.schemas import AgentResponse, WebResearchResult
 from data.providers.web_search import WebSearchProvider
-from app.core.utils import clean_json_string
 from agents.base import BaseAgent
 
 
@@ -14,17 +14,6 @@ class WebSearchAgent(BaseAgent):
     """
     Agent responsible for browsing the internet dynamically using DuckDuckGo
     to answer highly specific, real-time, or niche contextual questions.
-    """
-
-    SYSTEM_PROMPT = """
-You are the Deep Web Research Agent for a Financial Intelligence Platform.
-Your job is to use the provided search tools to find highly specific, up-to-date information that standard financial APIs might miss.
-
-CRITICAL RULES:
-1. QUERY EXPANSION: If you don't know the answer, use your search tools. If the first search is bad, rewrite the query and search again.
-2. CONTEXTUALIZE: For Indian markets, you might need to append "India" or "NSE" to your queries for better results.
-3. ANTI-HALLUCINATION: You MUST base your final answer ONLY on the text returned by the search tools. You MUST extract exact URLs for the citations field.
-4. Your final output must EXACTLY match the WebResearchResult JSON schema. Do not output anything outside of the JSON.
     """
 
     def __init__(
@@ -97,6 +86,45 @@ CRITICAL RULES:
                     },
                 },
             },
+            {
+                "type": "function",
+                "function": {
+                    "name": "submit_research_report",
+                    "description": "Submits the final research findings and citations.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "summary_of_findings": {
+                                "type": "string",
+                                "description": "A clear, professional summary of the research findings.",
+                            },
+                            "is_breaking_news_detected": {
+                                "type": "boolean",
+                                "description": "True if the research uncovered breaking news.",
+                            },
+                            "potential_market_impact": {
+                                "type": "string",
+                                "enum": ["Bullish", "Bearish", "Neutral"],
+                                "description": "Estimated market impact.",
+                            },
+                            "citations": {
+                                "type": "array",
+                                "items": {
+                                    "type": "object",
+                                    "properties": {
+                                        "title": {"type": "string"},
+                                        "url": {"type": "string"},
+                                        "key_fact_extracted": {"type": "string"}
+                                    },
+                                    "required": ["title", "url", "key_fact_extracted"]
+                                },
+                                "description": "List of sources to prove findings.",
+                            },
+                        },
+                        "required": ["summary_of_findings", "is_breaking_news_detected", "potential_market_impact", "citations"],
+                    },
+                },
+            }
         ]
 
     def _execute_tool(self, tool_name: str, arguments: Dict[str, Any]) -> str:
@@ -105,18 +133,24 @@ CRITICAL RULES:
             if tool_name == "search_general_web":
                 query = arguments.get("query", "")
                 time_range = arguments.get("time_range")
-                # Ensure time_range is a string if present, otherwise None
+                safe_time_range = WebSearchProvider.normalize_time_range(
+                    str(time_range) if time_range else None,
+                    default=None,
+                )
                 results = self.provider.search_general_web(
-                    query, time_range=str(time_range) if time_range else None
+                    query, time_range=safe_time_range
                 )
                 return json.dumps(results)
 
             elif tool_name == "search_latest_news":
                 query = arguments.get("query", "")
                 time_range = arguments.get("time_range", "w")
-                # Ensure time_range is a string if present, otherwise None
+                safe_time_range = WebSearchProvider.normalize_time_range(
+                    str(time_range) if time_range else None,
+                    default="w",
+                )
                 results = self.provider.search_latest_news(
-                    query, time_range=str(time_range) if time_range else None
+                    query, time_range=safe_time_range
                 )
                 return json.dumps(results)
 
@@ -125,6 +159,9 @@ CRITICAL RULES:
                 result = self.provider.scrape_webpage(url)
                 # Cap the length so it doesn't blow up the context window
                 return json.dumps({"content": result[:8000]})
+            
+            elif tool_name == "submit_research_report":
+                return json.dumps(arguments)
 
             else:
                 return json.dumps({"error": f"Unknown tool: {tool_name}"})
@@ -134,149 +171,95 @@ CRITICAL RULES:
     @observe(name="Agent:WebSearch:Execute")
     async def execute(self, user_query: str, step_number: int = 0) -> AgentResponse:
         """
-        Executes the agent loop. Allows multiple tool calls in sequence if the LLM
-        decides it needs to refine its search before giving a final answer.
+        Executes the agent loop using a robust, multi-turn tool-based architecture.
         """
-        messages = [
-            Message(role="system", content=self.SYSTEM_PROMPT),
-            Message(role="user", content=user_query),
+        messages: List[Message] = [
+            Message(
+                role="system", content=prompt_manager.get_prompt("web_search.system")
+            ),
+            Message(
+                role="user",
+                content=prompt_manager.get_prompt(
+                    "web_search.user_initial", user_query=user_query
+                ),
+            ),
         ]
 
-        # We allow up to 3 turns for the agent to search, read, and search again
-        max_turns = 3
+        max_turns = 5
         current_turn = 0
 
         try:
             while current_turn < max_turns:
-                tid_turn = await self.emit_status(
-                    step_number, self.agent_name, f"Search turn {current_turn+1}...", status="running"
-                )
-                # In the last turn, or if we want to force JSON, we can pass response_format.
-                # However, if the LLM wants to call a tool, it can't return structured JSON at the same time usually.
                 response_msg = await self.llm_service.generate_message(
                     messages=messages, model=self.model, tools=self._get_tools()
                 )
-                await self.emit_status(
-                    step_number, self.agent_name, f"Search turn {current_turn+1}...", "LLM processing search turn.", status="completed", tool_id=tid_turn
-                )
-
+                
                 if not response_msg.content:
-                    response_msg.content = "Calling tool..."
-
+                    response_msg.content = "Processing..."
+                
                 messages.append(response_msg)
 
-                # If the LLM didn't call a tool, it thinks it's ready to answer.
-                # We can break and then do one final pass for the structured JSON.
-                if not response_msg.tool_calls:
-                    break
-
-                # Execute tools
-                for tool_call in response_msg.tool_calls:
-                    function_call = tool_call.get("function", {})
-                    tool_name = function_call.get("name")
-                    arguments_str = function_call.get("arguments", "{}")
-
-                    if isinstance(arguments_str, str):
+                if response_msg.tool_calls:
+                    for tool_call in response_msg.tool_calls:
+                        function_call = tool_call.get("function", {})
+                        tool_name = function_call.get("name")
+                        
+                        arguments_str = function_call.get("arguments", "{}")
                         try:
-                            arguments = json.loads(arguments_str)
+                            arguments = json.loads(arguments_str) if isinstance(arguments_str, str) else arguments_str
                         except json.JSONDecodeError:
                             arguments = {}
-                    else:
-                        arguments = arguments_str
 
-                    tid = await self.emit_status(
-                        step_number, tool_name, json.dumps(arguments), status="running"
-                    )
-                    tool_result = self._execute_tool(tool_name, arguments)
-                    await self.emit_status(
-                        step_number,
-                        tool_name,
-                        json.dumps(arguments),
-                        tool_result[:500] + "..." if len(tool_result) > 500 else tool_result,
-                        status="completed",
-                        tool_id=tid,
-                    )
+                        # Check if it's the final submission tool
+                        if tool_name == "submit_research_report":
+                            final_data = self._execute_tool(tool_name, arguments)
+                            return AgentResponse(status="success", data=json.loads(final_data), errors=None)
 
-                    langfuse_context.update_current_observation(
-                        metadata={
-                            "tool_name": tool_name,
-                            "tool_args": arguments,
-                            "tool_result": tool_result,
-                        }
-                    )
-
-                    messages.append(
-                        Message(
-                            role="tool",
-                            content=tool_result,
-                            name=tool_name,
-                            tool_call_id=tool_call.get("id"),
+                        # Otherwise, execute the search/scrape tool
+                        tid = await self.emit_status(
+                            step_number, tool_name, json.dumps(arguments), status="running"
                         )
+                        tool_result = self._execute_tool(tool_name, arguments)
+                        await self.emit_status(
+                            step_number,
+                            tool_name,
+                            json.dumps(arguments),
+                            (tool_result[:500] + "..." if len(tool_result) > 500 else tool_result),
+                            status="completed",
+                            tool_id=tid,
+                        )
+
+                        langfuse_context.update_current_observation(
+                            metadata={
+                                "tool_name": tool_name,
+                                "tool_args": arguments,
+                                "tool_result": tool_result,
+                            }
+                        )
+
+                        messages.append(
+                            Message(
+                                role="tool",
+                                content=tool_result,
+                                name=tool_name,
+                                tool_call_id=tool_call.get("id"),
+                            )
+                        )
+                    current_turn += 1
+                else:
+                    # If the LLM returns text without calling a tool, we treat it as the final content but flag it.
+                    return AgentResponse(
+                        status="success", 
+                        data={"response": response_msg.content}, 
+                        errors=["Final output was text-only, not structured JSON via submit_research_report tool."]
                     )
-
-                current_turn += 1
-
-            # Now we have all the information in the messages history.
-            # Perform the final synthesis step enforcing the JSON schema.
-            if messages[-1].role == "tool":
-                tid_proc = await self.emit_status(
-                    step_number, self.agent_name, "Processing search results...", status="running"
-                )
-                # Let the assistant process the tool results before we ask for the final JSON
-                intermediate_msg = await self.llm_service.generate_message(
-                    messages=messages, model=self.model
-                )
-                if not intermediate_msg.content:
-                    intermediate_msg.content = "Processed tool results."
-                await self.emit_status(
-                    step_number, self.agent_name, "Processing search results...", "Results processed.", status="completed", tool_id=tid_proc
-                )
-                messages.append(intermediate_msg)
-
-            tid_synth = await self.emit_status(
-                step_number, self.agent_name, "Synthesizing final research report...", status="running"
+            
+            # If the loop finishes without a 'submit_research_report' call.
+            return AgentResponse(
+                status="failure",
+                data={},
+                errors=[f"Agent failed to submit results within {max_turns} turns."]
             )
-            schema_str = json.dumps(WebResearchResult.model_json_schema())
-            final_prompt = (
-                f"Based on all the research findings above, synthesize the results into a final JSON object matching this schema: {schema_str}\n\n"
-                "CRITICAL: You MUST return ONLY valid JSON. Do not wrap your response in markdown backticks (```json). "
-                "Do not include any conversational text or explanations."
-            )
-            messages.append(Message(role="user", content=final_prompt))
-            final_response_msg = await self.llm_service.generate_message(
-                messages=messages,
-                model=self.model,
-                response_format={"type": "json_object"},
-            )
-            await self.emit_status(
-                step_number, self.agent_name, "Synthesizing final research report...", "Synthesis complete.", status="completed", tool_id=tid_synth
-            )
-            final_content = final_response_msg.content
-
-            if not final_content:
-                # If the LLM returned an empty string, maybe it was just a conversational response before.
-                # But we forced JSON, so this is unlikely unless the model is failing.
-                raise ValueError("LLM returned empty content for final synthesis.")
-
-            try:
-                # Ensure final_content is not None or empty before loading
-                if not final_content:
-                    raise ValueError("Final content from LLM is empty or None.")
-                cleaned_content = clean_json_string(final_content)
-                parsed_insights = json.loads(cleaned_content)
-            except Exception as json_e:
-                # Log the error for debugging
-                import logging
-
-                logging.getLogger(__name__).error(
-                    f"Failed to parse LLM final content as JSON: {json_e}. Content: {final_content}"
-                )
-                parsed_insights = {
-                    "raw_output": final_content,
-                    "parse_error": str(json_e),
-                }
-
-            return AgentResponse(status="success", data=parsed_insights, errors=None)
 
         except Exception as e:
             return AgentResponse(status="failure", data={}, errors=[str(e)])

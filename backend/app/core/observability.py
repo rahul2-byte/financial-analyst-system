@@ -67,7 +67,7 @@ def observe(name: Optional[Any] = None, as_type: str = "span", **outer_kwargs):
                 span.set_attribute("observation.type", as_type)
                 for k, v in outer_kwargs.items():
                     span.set_attribute(f"meta.{k}", str(v))
-                
+
                 try:
                     async for item in func(*args, **kwargs):
                         yield item
