@@ -3,11 +3,12 @@ import logging
 import json
 import random
 import re
-from typing import List, Set, AsyncGenerator, Any, Optional
+from typing import List, Set, AsyncGenerator, Any, Optional, Dict
 
 from app.core.prompts import prompt_manager
 from app.core.observability import observe, langfuse_context
 from app.core.session_logging import SessionLogger
+from app.core.graph_builder import research_graph
 
 from app.models.request_models import Message
 from app.models.response_models import StreamEvent
@@ -588,7 +589,6 @@ class PipelineOrchestrator:
         conversation_history: Optional[List[Message]] = None,
     ) -> AsyncGenerator[dict, None]:
         """Main entry point for handling a user query through the multi-agent system (Streaming)."""
-        # Immediately yield a start event to initialize the stream and bypass buffering
         yield {
             "event": "status",
             "data": {"message": "Initializing research pipeline..."},
@@ -596,176 +596,94 @@ class PipelineOrchestrator:
 
         langfuse_context.update_current_trace(
             input=user_query,
-            tags=["orchestrator", "v1", "sequential", "streaming"],
+            tags=["orchestrator", "v1", "langgraph", "streaming"],
             user_id="anonymous",
             metadata={"source": "cli", "version": "v1.2"},
         )
 
-        status_queue = asyncio.Queue()
         session_logger = SessionLogger.get_logger(user_query)
+        session_logger.log_step(
+            "RECEIVE_QUERY",
+            "New research query received by the orchestrator.",
+            parameters={"query": user_query},
+        )
 
-        async def run_pipeline():
-            # Set the status queue in the context for all agents called in this task
-            token = status_queue_var.set(status_queue)
-            try:
-                logger.info(f"Orchestrator received query: {user_query}")
-                session_logger.log_step(
-                    "RECEIVE_QUERY",
-                    "New research query received by the orchestrator.",
-                    parameters={"query": user_query},
+        conversation_history_dicts = [
+            msg.model_dump() if hasattr(msg, "model_dump") else msg
+            for msg in (conversation_history or [])
+        ]
+
+        initial_state: Dict[str, Any] = {
+            "user_query": user_query,
+            "conversation_history": conversation_history_dicts,
+            "plan": None,
+            "executed_steps": [],
+            "agent_outputs": {},
+            "tool_registry": [],
+            "draft_report": None,
+            "final_report": None,
+            "synthesis_retry_count": 0,
+            "verification_retry_count": 0,
+            "errors": [],
+        }
+
+        final_report = None
+        errors_list = []
+
+        try:
+            async for event in research_graph.astream(
+                initial_state,
+                stream_mode="values"
+            ):
+                if event:
+                    node_name = event.get("__metadata", {}).get("langgraph_node", "")
+                    if node_name:
+                        if node_name == "planner_node":
+                            yield StreamEvent(event="status", data={"message": "Planning research strategy..."})
+                        elif node_name == "execute_level_node":
+                            plan = event.get("plan", {})
+                            executed = len(event.get("executed_steps", []))
+                            total = len(plan.get("execution_steps", [])) if plan else 0
+                            yield StreamEvent(event="status", data={"message": f"Executing step {executed + 1}/{total}..."})
+                        elif node_name == "synthesis_node":
+                            yield StreamEvent(event="status", data={"message": "Synthesizing report..."})
+                        elif node_name == "verification_node":
+                            yield StreamEvent(event="status", data={"message": "Verifying numeric accuracy..."})
+                        elif node_name == "validation_node":
+                            yield StreamEvent(event="status", data={"message": "Performing final compliance check..."})
+                    
+                    final_report = event.get("final_report")
+                    errors_list = event.get("errors", [])
+
+        except Exception as e:
+            logger.error(f"Orchestrator failed: {e}", exc_info=True)
+            session_logger.log_error(
+                "ORCHESTRATOR_ERROR",
+                "The orchestrator encountered an error.",
+                data={"exception": str(e)},
+            )
+            yield StreamEvent(
+                event="error",
+                data={"content": f"An internal system error occurred: {str(e)}"}
+            )
+            return
+
+        if final_report:
+            words = final_report.split(" ")
+            for i, word in enumerate(words):
+                content = word + (" " if i < len(words) - 1 else "")
+                yield StreamEvent(
+                    event="token",
+                    data={"content": content},
                 )
-
-                await status_queue.put(
-                    StreamEvent(
-                        event="status",
-                        data={"message": "Planning research strategy..."},
-                    )
-                )
-                planner_context = {
-                    "conversation_history": [
-                        msg.model_dump() if hasattr(msg, "model_dump") else msg
-                        for msg in (conversation_history or [])
-                    ]
-                }
-                plan_agent_response = await self.planner.execute(
-                    user_query, context=planner_context
-                )
-
-                if (
-                    plan_agent_response.status == "failure"
-                    or not plan_agent_response.data
-                ):
-                    logger.error(f"Planner failed: {plan_agent_response.errors}")
-                    session_logger.log_error(
-                        "PLANNING_FAILED",
-                        "The Planner Agent failed to generate a plan.",
-                        data=plan_agent_response.errors,
-                    )
-                    await status_queue.put(
-                        StreamEvent(
-                            event="error",
-                            data={
-                                "content": "I apologize, but I could not formulate a plan to answer your request."
-                            },
-                        )
-                    )
-                    return
-
-                plan = (
-                    plan_agent_response.data
-                    if isinstance(plan_agent_response.data, PlanData)
-                    else PlanData(**plan_agent_response.data)
-                )
-                logger.info(f"Generated Plan with {len(plan.execution_steps)} steps.")
-                session_logger.log_step(
-                    "PLANNING_COMPLETE",
-                    "Research strategy successfully mapped.",
-                    data=plan.model_dump(),
-                )
-
-                if plan.response_mode in {
-                    "direct_response",
-                    "ask_clarification",
-                    "ask_plan_approval",
-                }:
-                    planner_text = (
-                        plan.assistant_response
-                        if plan.assistant_response
-                        else "I need more details before I can proceed."
-                    )
-                    await status_queue.put(
-                        StreamEvent(
-                            event="status", data={"message": "Synthesizing response..."}
-                        )
-                    )
-                    await self._stream_text_to_queue(planner_text, status_queue)
-                    return
-
-                if plan.response_mode != "execute_plan":
-                    await status_queue.put(
-                        StreamEvent(
-                            event="error",
-                            data={
-                                "content": f"Planner returned unsupported response_mode: {plan.response_mode}"
-                            },
-                        )
-                    )
-                    return
-
-                if not plan.execution_steps:
-                    await status_queue.put(
-                        StreamEvent(
-                            event="error",
-                            data={
-                                "content": "Planner selected execute_plan but provided no execution steps."
-                            },
-                        )
-                    )
-                    return
-
-                state = ResearchState(query=user_query)
-
-                # 3. Parallel Execution (Optimized for low-memory local LLMs)
-                levels = self._group_steps(plan.execution_steps)
-                for i, level_steps in enumerate(levels):
-                    agent_names = [
-                        (
-                            step.target_agent.value
-                            if hasattr(step.target_agent, "value")
-                            else str(step.target_agent)
-                        )
-                        for step in level_steps
-                    ]
-                    await status_queue.put(
-                        StreamEvent(
-                            event="status",
-                            data={
-                                "message": f"Executing concurrently: {', '.join(agent_names)}..."
-                            },
-                        )
-                    )
-
-                    tasks = [
-                        self._execute_step(
-                            step, user_query, state, status_queue, session_logger
-                        )
-                        for step in level_steps
-                    ]
-                    await asyncio.gather(*tasks)
-
-                # 4. Final Synthesis & Verification
-                async for event in self._synthesize_report(
-                    user_query, state, status_queue, session_logger
-                ):
-                    await status_queue.put(event)
-
-            except Exception as e:
-                logger.error(f"Orchestrator failed: {e}", exc_info=True)
-                await status_queue.put(
-                    StreamEvent(
-                        event="error",
-                        data={
-                            "content": f"An internal system error occurred: {str(e)}"
-                        },
-                    )
-                )
-            finally:
-                status_queue_var.reset(token)
-                await status_queue.put(None)
-
-        pipeline_task = asyncio.create_task(run_pipeline())
-
-        while True:
-            event = await status_queue.get()
-            if event is None:
-                break
-
-            # Use a more robust check than isinstance to handle potential re-imports
-            if hasattr(event, "model_dump"):
-                yield event.model_dump()
-            elif isinstance(event, dict):
-                yield event
-            else:
-                yield {"type": "status", "message": str(event)}
-
-        await pipeline_task
+                await asyncio.sleep(random.uniform(0.01, 0.04))
+        elif errors_list:
+            yield StreamEvent(
+                event="error",
+                data={"content": f"Pipeline failed: {'; '.join(errors_list)}"}
+            )
+        else:
+            yield StreamEvent(
+                event="error",
+                data={"content": "No report generated."}
+            )
