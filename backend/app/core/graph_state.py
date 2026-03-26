@@ -1,13 +1,9 @@
 from typing import TypedDict, Dict, Any, List, Optional
-from operator import add
-from functools import reduce
 
 
-def merge_dicts(left: Dict[Any, Any], right: Dict[Any, Any]) -> Dict[Any, Any]:
+def merge_dicts(left: Dict[str, Any], right: Dict[str, Any]) -> Dict[str, Any]:
     """Custom merge function for dicts - right dict takes precedence."""
-    merged = left.copy()
-    merged.update(right)
-    return merged
+    return {**left, **right}
 
 
 class ResearchGraphState(TypedDict):
