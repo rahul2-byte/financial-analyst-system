@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 from typing import List, Set, Dict, Any, Optional
 
@@ -27,40 +28,6 @@ from agents.analysis.contrarian import ContrarianAgent
 logger = logging.getLogger(__name__)
 
 
-AGENT_MAP: Dict[str, BaseAgent] = {}
-
-
-def _initialize_agents():
-    """Initialize agents once for reuse across node calls."""
-    global AGENT_MAP
-    if AGENT_MAP:
-        return
-
-    llm = LlamaCppService()
-    sql_db = PostgresClient()
-    vector_db = QdrantStorage()
-    yf_fetcher = YFinanceFetcher()
-    rss_fetcher = RSSNewsFetcher()
-
-    AGENT_MAP["planner"] = PlannerAgent(llm_service=llm)
-    AGENT_MAP["market_offline"] = MarketOfflineAgent(llm_service=llm, db_client=sql_db)
-    AGENT_MAP["price_and_fundamentals"] = PriceAndFundamentalsAgent(
-        llm_service=llm, yf_fetcher=yf_fetcher, sql_db=sql_db
-    )
-    AGENT_MAP["market_news"] = MarketNewsAgent(
-        llm_service=llm, rss_fetcher=rss_fetcher, vector_db=vector_db
-    )
-    AGENT_MAP["macro_indicators"] = MacroIndicatorsAgent(
-        llm_service=llm, yf_fetcher=yf_fetcher, sql_db=sql_db
-    )
-    AGENT_MAP["retrieval"] = RetrievalAgent(llm_service=llm, qdrant_client=vector_db)
-    AGENT_MAP["fundamental_analysis"] = FundamentalAnalysisAgent(llm_service=llm)
-    AGENT_MAP["sentiment_analysis"] = SentimentAnalysisAgent(llm_service=llm)
-    AGENT_MAP["macro_analysis"] = MacroAnalysisAgent(llm_service=llm)
-    AGENT_MAP["technical_analysis"] = TechnicalAnalysisAgent(llm_service=llm)
-    AGENT_MAP["contrarian_analysis"] = ContrarianAgent(llm_service=llm)
-
-
 def _get_agent_name(step: ExecutionStep) -> str:
     """Extract agent name from step target."""
     if hasattr(step.target_agent, "value"):
@@ -68,18 +35,27 @@ def _get_agent_name(step: ExecutionStep) -> str:
     return str(step.target_agent)
 
 
+def _find_next_level(
+    steps: List[ExecutionStep],
+    executed_step_ids: Set[int]
+) -> List[ExecutionStep]:
+    """Find steps where all dependencies have been executed."""
+    return [
+        step for step in steps
+        if all(dep in executed_step_ids for dep in step.dependencies)
+    ]
+
+
 async def planner_node(state: ResearchGraphState) -> Dict[str, Any]:
     """Wraps PlannerAgent to generate execution plan from user query."""
-    _initialize_agents()
+    llm = LlamaCppService()
+    planner = PlannerAgent(llm_service=llm)
 
     user_query = state["user_query"]
     conversation_history = state.get("conversation_history", [])
 
-    planner = AGENT_MAP["planner"]
-    context = {"conversation_history": conversation_history}
-
     logger.info(f"Planner node processing query: {user_query}")
-    response = await planner.execute(user_query, context=context)
+    response = await planner.execute(user_query)
 
     if response.status == "failure" or not response.data:
         logger.error(f"Planner failed: {response.errors}")
@@ -101,44 +77,32 @@ async def planner_node(state: ResearchGraphState) -> Dict[str, Any]:
     }
 
 
-def _group_steps(steps: List[ExecutionStep]) -> List[List[ExecutionStep]]:
-    """Groups steps into levels based on dependencies for parallel execution."""
-    levels = []
-    executed_step_ids: Set[int] = set()
-    remaining_steps = list(steps)
-
-    while remaining_steps:
-        current_level = []
-        for step in remaining_steps[:]:
-            if all(dep in executed_step_ids for dep in step.dependencies):
-                current_level.append(step)
-                remaining_steps.remove(step)
-
-        if not current_level:
-            logger.error("Circular dependency detected in execution plan.")
-            break
-
-        levels.append(current_level)
-        for step in current_level:
-            executed_step_ids.add(step.step_number)
-
-    return levels
-
-
-def _find_next_level(
-    steps: List[ExecutionStep],
-    executed_step_ids: Set[int]
-) -> List[ExecutionStep]:
-    """Find steps where all dependencies have been executed."""
-    return [
-        step for step in steps
-        if all(dep in executed_step_ids for dep in step.dependencies)
-    ]
-
-
 async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
     """Executes the next level of steps in parallel where dependencies are met."""
-    _initialize_agents()
+    llm = LlamaCppService()
+    sql_db = PostgresClient()
+    vector_db = QdrantStorage()
+    yf_fetcher = YFinanceFetcher()
+    rss_fetcher = RSSNewsFetcher()
+
+    agent_map: Dict[str, BaseAgent] = {
+        "market_offline": MarketOfflineAgent(llm_service=llm, db_client=sql_db),
+        "price_and_fundamentals": PriceAndFundamentalsAgent(
+            llm_service=llm, yf_fetcher=yf_fetcher, sql_db=sql_db
+        ),
+        "market_news": MarketNewsAgent(
+            llm_service=llm, rss_fetcher=rss_fetcher, vector_db=vector_db
+        ),
+        "macro_indicators": MacroIndicatorsAgent(
+            llm_service=llm, yf_fetcher=yf_fetcher, sql_db=sql_db
+        ),
+        "retrieval": RetrievalAgent(llm_service=llm, qdrant_client=vector_db),
+        "fundamental_analysis": FundamentalAnalysisAgent(llm_service=llm),
+        "sentiment_analysis": SentimentAnalysisAgent(llm_service=llm),
+        "macro_analysis": MacroAnalysisAgent(llm_service=llm),
+        "technical_analysis": TechnicalAnalysisAgent(llm_service=llm),
+        "contrarian_analysis": ContrarianAgent(llm_service=llm),
+    }
 
     plan_data = state.get("plan")
     if not plan_data:
@@ -163,10 +127,10 @@ async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
     agent_tasks = []
     for step in next_level:
         agent_name = _get_agent_name(step)
-        agent = AGENT_MAP.get(agent_name)
+        agent = agent_map.get(agent_name)
         if not agent:
-            logger.warning(f"Agent {agent_name} not found in agent map")
-            continue
+            logger.error(f"Agent {agent_name} not found in agent map")
+            return {"errors": [f"Agent {agent_name} not found"]}
 
         user_query = state["user_query"]
         context_from_prev = "\n".join(
@@ -187,7 +151,6 @@ async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
         results = []
 
     new_agent_outputs = dict(state.get("agent_outputs", {}))
-    new_tool_registry = list(state.get("tool_registry", []))
     new_executed_steps = list(current_executed)
 
     for step, result in zip(next_level, results):
@@ -202,7 +165,6 @@ async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
 
     return {
         "agent_outputs": new_agent_outputs,
-        "tool_registry": new_tool_registry,
         "executed_steps": new_executed_steps,
     }
 
@@ -220,7 +182,6 @@ async def _execute_single_step(
             if isinstance(result.data, dict) and "response" in result.data:
                 output = result.data["response"]
             elif isinstance(result.data, dict):
-                import json
                 output = json.dumps(result.data)
             else:
                 output = str(result.data)
