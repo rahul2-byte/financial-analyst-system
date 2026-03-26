@@ -8,7 +8,7 @@ from typing import List, Set, AsyncGenerator, Any, Optional, Dict
 from app.core.prompts import prompt_manager
 from app.core.observability import observe, langfuse_context
 from app.core.session_logging import SessionLogger
-from app.core.graph_builder import research_graph
+from app.core.graph_builder import build_graph
 
 from app.models.request_models import Message
 from app.models.response_models import StreamEvent
@@ -58,6 +58,9 @@ class PipelineOrchestrator:
         self.vector_db = QdrantStorage()
         self.yf_fetcher = YFinanceFetcher()
         self.rss_fetcher = RSSNewsFetcher()
+
+        # Initialize Research Graph
+        self.research_graph = build_graph()
 
         # Initialize Agents
         self.planner = PlannerAgent(llm_service=self.llm)
@@ -631,18 +634,25 @@ class PipelineOrchestrator:
         errors_list = []
 
         try:
-            async for event in research_graph.astream(
+            async for event in self.research_graph.astream_events(
                 initial_state,
                 stream_mode="values"
             ):
                 if event:
-                    node_name = event.get("__metadata", {}).get("langgraph_node", "")
+                    # astream_events yields tuples of (event_name, event_data)
+                    if isinstance(event, tuple):
+                        event_name, event_data = event
+                    else:
+                        event_name = None
+                        event_data = event
+
+                    node_name = event_data.get("__metadata", {}).get("langgraph_node", "")
                     if node_name:
                         if node_name == "planner_node":
                             yield StreamEvent(event="status", data={"message": "Planning research strategy..."})
                         elif node_name == "execute_level_node":
-                            plan = event.get("plan", {})
-                            executed = len(event.get("executed_steps", []))
+                            plan = event_data.get("plan", {})
+                            executed = len(event_data.get("executed_steps", []))
                             total = len(plan.get("execution_steps", [])) if plan else 0
                             yield StreamEvent(event="status", data={"message": f"Executing step {executed + 1}/{total}..."})
                         elif node_name == "synthesis_node":
@@ -652,8 +662,8 @@ class PipelineOrchestrator:
                         elif node_name == "validation_node":
                             yield StreamEvent(event="status", data={"message": "Performing final compliance check..."})
                     
-                    final_report = event.get("final_report")
-                    errors_list = event.get("errors", [])
+                    final_report = event_data.get("final_report")
+                    errors_list = event_data.get("errors", [])
 
         except Exception as e:
             logger.error(f"Orchestrator failed: {e}", exc_info=True)
