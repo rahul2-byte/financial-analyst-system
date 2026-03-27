@@ -5,6 +5,7 @@ from typing import List, Set, Dict, Any, Optional
 
 from app.core.graph_state import ResearchGraphState
 from app.core.prompts import prompt_manager
+from app.core.agent_factories import LLMServiceFactory, DataServiceFactory
 from app.services.llm_interface import LLMServiceInterface
 from app.services.llama_cpp_service import LlamaCppService
 from app.models.request_models import Message
@@ -21,28 +22,6 @@ from agents.quality_control.validation import ValidationAgent
 from agents.data_access.schemas import AgentResponse
 
 logger = logging.getLogger(__name__)
-
-
-class NodeResources:
-    """Singleton for shared resources across graph nodes."""
-
-    _instance = None
-
-    llm: LlamaCppService
-    sql_db: PostgresClient
-    vector_db: QdrantStorage
-    yf_fetcher: YFinanceFetcher
-    rss_fetcher: RSSNewsFetcher
-
-    def __new__(cls):
-        if cls._instance is None:
-            cls._instance = super(NodeResources, cls).__new__(cls)
-            cls._instance.llm = LlamaCppService()
-            cls._instance.sql_db = PostgresClient()
-            cls._instance.vector_db = QdrantStorage()
-            cls._instance.yf_fetcher = YFinanceFetcher()
-            cls._instance.rss_fetcher = RSSNewsFetcher()
-        return cls._instance
 
 
 def _get_agent_name(step: ExecutionStep) -> str:
@@ -65,8 +44,12 @@ def _find_next_level(
 
 async def planner_node(state: ResearchGraphState) -> Dict[str, Any]:
     """Wraps PlannerAgent to generate execution plan from user query."""
-    resources = NodeResources()
-    planner = PlannerAgent(llm_service=resources.llm)
+    llm = LLMServiceFactory.get_llm_service()
+    sql_db = DataServiceFactory.get_sql_db()
+    vector_db = DataServiceFactory.get_vector_db()
+    yf_fetcher = DataServiceFactory.get_yf_fetcher()
+    rss_fetcher = DataServiceFactory.get_rss_fetcher()
+    planner = PlannerAgent(llm_service=llm)
 
     user_query = state["user_query"]
     conversation_history = state.get("conversation_history", [])
@@ -193,7 +176,11 @@ async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
 
 async def synthesis_node(state: ResearchGraphState) -> Dict[str, Any]:
     """Generates draft report from agent outputs using LLM."""
-    resources = NodeResources()
+    llm = LLMServiceFactory.get_llm_service()
+    sql_db = DataServiceFactory.get_sql_db()
+    vector_db = DataServiceFactory.get_vector_db()
+    yf_fetcher = DataServiceFactory.get_yf_fetcher()
+    rss_fetcher = DataServiceFactory.get_rss_fetcher()
     user_query = state["user_query"]
     agent_outputs = state.get("agent_outputs", {})
 
@@ -218,7 +205,7 @@ async def synthesis_node(state: ResearchGraphState) -> Dict[str, Any]:
         prompt = prompt_header + "\n\n" + "\n\n".join(agent_output_sections)
         prompt += prompt_manager.get_prompt("orchestrator.synthesis.instructions")
 
-        response = await resources.llm.generate_message(
+        response = await llm.generate_message(
             messages=[Message(role="user", content=prompt)],
             model="mistral-8b",
         )
@@ -248,8 +235,12 @@ async def synthesis_node(state: ResearchGraphState) -> Dict[str, Any]:
 
 async def verification_node(state: ResearchGraphState) -> Dict[str, Any]:
     """Verifies numeric accuracy of draft report using VerificationAgent."""
-    resources = NodeResources()
-    verifier = VerificationAgent(llm_service=resources.llm)
+    llm = LLMServiceFactory.get_llm_service()
+    sql_db = DataServiceFactory.get_sql_db()
+    vector_db = DataServiceFactory.get_vector_db()
+    yf_fetcher = DataServiceFactory.get_yf_fetcher()
+    rss_fetcher = DataServiceFactory.get_rss_fetcher()
+    verifier = VerificationAgent(llm_service=llm)
 
     draft_report = state.get("draft_report") or ""
     tool_registry_raw = state.get("tool_registry", [])
@@ -286,6 +277,7 @@ async def verification_node(state: ResearchGraphState) -> Dict[str, Any]:
             return {
                 "verification_passed": False,
                 "verification_retry_count": current_retry + 1,
+                "verification_feedback": feedback,
                 "errors": [feedback],
             }
 
@@ -299,8 +291,12 @@ async def verification_node(state: ResearchGraphState) -> Dict[str, Any]:
 
 async def validation_node(state: ResearchGraphState) -> Dict[str, Any]:
     """Validates draft report for compliance using ValidationAgent."""
-    resources = NodeResources()
-    validator = ValidationAgent(llm_service=resources.llm)
+    llm = LLMServiceFactory.get_llm_service()
+    sql_db = DataServiceFactory.get_sql_db()
+    vector_db = DataServiceFactory.get_vector_db()
+    yf_fetcher = DataServiceFactory.get_yf_fetcher()
+    rss_fetcher = DataServiceFactory.get_rss_fetcher()
+    validator = ValidationAgent(llm_service=llm)
 
     user_query = state["user_query"]
     draft_report = state.get("draft_report") or ""
@@ -355,13 +351,24 @@ async def market_offline_node(state: ResearchGraphState) -> Dict[str, Any]:
     Stateless node for MarketOffline agent.
     Queries local PostgreSQL database for market data availability.
     """
-    resources = NodeResources()
+    llm = LLMServiceFactory.get_llm_service()
+    sql_db = DataServiceFactory.get_sql_db()
+    vector_db = DataServiceFactory.get_vector_db()
+    yf_fetcher = DataServiceFactory.get_yf_fetcher()
+    rss_fetcher = DataServiceFactory.get_rss_fetcher()
     current_step = state.get("current_step", {})
     params = current_step.get("parameters", {})
     ticker = params.get("ticker", "")
 
     try:
-        info = resources.sql_db.get_ticker_info(ticker)
+        info = sql_db.get_ticker_info(ticker)
+        tool_result = ToolResult(
+            tool_name="market:get_ticker_info",
+            input_parameters=params,
+            output_data=info,
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"market_offline": json.dumps(info)},
             "tool_registry": [
@@ -369,7 +376,7 @@ async def market_offline_node(state: ResearchGraphState) -> Dict[str, Any]:
                     "tool_name": "market:get_ticker_info",
                     "input_parameters": params,
                     "output_data": info,
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -383,17 +390,28 @@ async def price_and_fundamentals_node(state: ResearchGraphState) -> Dict[str, An
     Stateless node for PriceAndFundamentals agent.
     Fetches stock data and fundamentals from Yahoo Finance.
     """
-    resources = NodeResources()
+    llm = LLMServiceFactory.get_llm_service()
+    sql_db = DataServiceFactory.get_sql_db()
+    vector_db = DataServiceFactory.get_vector_db()
+    yf_fetcher = DataServiceFactory.get_yf_fetcher()
+    rss_fetcher = DataServiceFactory.get_rss_fetcher()
     current_step = state.get("current_step", {})
     params = current_step.get("parameters", {})
     ticker = params.get("ticker", "")
 
     try:
-        price_data = resources.yf_fetcher.fetch_stock_price(ticker)
-        fundamentals = resources.yf_fetcher.fetch_company_fundamentals(ticker)
+        price_data = yf_fetcher.fetch_stock_price(ticker)
+        fundamentals = yf_fetcher.fetch_company_fundamentals(ticker)
 
         result = {"ticker": ticker, "price": price_data, "fundamentals": fundamentals}
 
+        tool_result = ToolResult(
+            tool_name="data:fetch_stock_data",
+            input_parameters=params,
+            output_data=result,
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"price_and_fundamentals": json.dumps(result)},
             "tool_registry": [
@@ -401,7 +419,7 @@ async def price_and_fundamentals_node(state: ResearchGraphState) -> Dict[str, An
                     "tool_name": "data:fetch_stock_data",
                     "input_parameters": params,
                     "output_data": result,
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -415,14 +433,25 @@ async def market_news_node(state: ResearchGraphState) -> Dict[str, Any]:
     Stateless node for MarketNews agent.
     Fetches market news from RSS and searches vector DB.
     """
-    resources = NodeResources()
+    llm = LLMServiceFactory.get_llm_service()
+    sql_db = DataServiceFactory.get_sql_db()
+    vector_db = DataServiceFactory.get_vector_db()
+    yf_fetcher = DataServiceFactory.get_yf_fetcher()
+    rss_fetcher = DataServiceFactory.get_rss_fetcher()
     current_step = state.get("current_step", {})
     params = current_step.get("parameters", {})
     query = params.get("query", "")
 
     try:
-        news = resources.rss_fetcher.fetch_market_news(query)
+        news = rss_fetcher.fetch_market_news(query)
 
+        tool_result = ToolResult(
+            tool_name="news:fetch_news",
+            input_parameters=params,
+            output_data={"articles": news},
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"market_news": json.dumps({"articles": news})},
             "tool_registry": [
@@ -430,7 +459,7 @@ async def market_news_node(state: ResearchGraphState) -> Dict[str, Any]:
                     "tool_name": "news:fetch_news",
                     "input_parameters": params,
                     "output_data": {"articles": news},
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -444,13 +473,24 @@ async def macro_indicators_node(state: ResearchGraphState) -> Dict[str, Any]:
     Stateless node for MacroIndicators agent.
     Fetches macroeconomic data.
     """
-    resources = NodeResources()
+    llm = LLMServiceFactory.get_llm_service()
+    sql_db = DataServiceFactory.get_sql_db()
+    vector_db = DataServiceFactory.get_vector_db()
+    yf_fetcher = DataServiceFactory.get_yf_fetcher()
+    rss_fetcher = DataServiceFactory.get_rss_fetcher()
     current_step = state.get("current_step", {})
     params = current_step.get("parameters", {})
 
     try:
-        indicators = resources.yf_fetcher.fetch_macro_indicators()
+        indicators = yf_fetcher.fetch_macro_indicators()
 
+        tool_result = ToolResult(
+            tool_name="macro:fetch_macro_data",
+            input_parameters=params,
+            output_data=indicators,
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"macro_indicators": json.dumps(indicators)},
             "tool_registry": [
@@ -458,7 +498,7 @@ async def macro_indicators_node(state: ResearchGraphState) -> Dict[str, Any]:
                     "tool_name": "macro:fetch_macro_data",
                     "input_parameters": params,
                     "output_data": indicators,
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -472,7 +512,11 @@ async def fundamental_analysis_node(state: ResearchGraphState) -> Dict[str, Any]
     Stateless node for FundamentalAnalysis agent.
     Uses FundamentalScanner for deterministic analysis.
     """
-    resources = NodeResources()
+    llm = LLMServiceFactory.get_llm_service()
+    sql_db = DataServiceFactory.get_sql_db()
+    vector_db = DataServiceFactory.get_vector_db()
+    yf_fetcher = DataServiceFactory.get_yf_fetcher()
+    rss_fetcher = DataServiceFactory.get_rss_fetcher()
     current_step = state.get("current_step", {})
     params = current_step.get("parameters", {})
     raw_data = params.get("raw_data", {})
@@ -483,6 +527,13 @@ async def fundamental_analysis_node(state: ResearchGraphState) -> Dict[str, Any]
         scanner = FundamentalScanner()
         scan_results = scanner.scan(raw_data)
 
+        tool_result = ToolResult(
+            tool_name="analysis:run_fundamental_scan",
+            input_parameters=params,
+            output_data=scan_results,
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"fundamental_analysis": json.dumps(scan_results)},
             "tool_registry": [
@@ -490,7 +541,7 @@ async def fundamental_analysis_node(state: ResearchGraphState) -> Dict[str, Any]
                     "tool_name": "analysis:run_fundamental_scan",
                     "input_parameters": params,
                     "output_data": scan_results,
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -504,7 +555,11 @@ async def technical_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
     Stateless node for TechnicalAnalysis agent.
     Uses TechnicalScanner for indicator calculations.
     """
-    resources = NodeResources()
+    llm = LLMServiceFactory.get_llm_service()
+    sql_db = DataServiceFactory.get_sql_db()
+    vector_db = DataServiceFactory.get_vector_db()
+    yf_fetcher = DataServiceFactory.get_yf_fetcher()
+    rss_fetcher = DataServiceFactory.get_rss_fetcher()
     current_step = state.get("current_step", {})
     params = current_step.get("parameters", {})
     ohlcv_data = params.get("ohlcv_data", [])
@@ -517,6 +572,13 @@ async def technical_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
         scanner = TechnicalScanner()
         scan_results = scanner.scan(df)
 
+        tool_result = ToolResult(
+            tool_name="analysis:run_technical_scan",
+            input_parameters=params,
+            output_data=scan_results,
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"technical_analysis": json.dumps(scan_results)},
             "tool_registry": [
@@ -524,7 +586,7 @@ async def technical_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
                     "tool_name": "analysis:run_technical_scan",
                     "input_parameters": params,
                     "output_data": scan_results,
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -538,19 +600,30 @@ async def sentiment_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
     Stateless node for SentimentAnalysis agent.
     Uses LLM for sentiment analysis.
     """
-    resources = NodeResources()
+    llm = LLMServiceFactory.get_llm_service()
+    sql_db = DataServiceFactory.get_sql_db()
+    vector_db = DataServiceFactory.get_vector_db()
+    yf_fetcher = DataServiceFactory.get_yf_fetcher()
+    rss_fetcher = DataServiceFactory.get_rss_fetcher()
     current_step = state.get("current_step", {})
     params = current_step.get("parameters", {})
     text = params.get("text", "")
 
     try:
         prompt = f"Analyze the sentiment of this text: {text}"
-        response = await resources.llm.generate_message(
+        response = await llm.generate_message(
             messages=[Message(role="user", content=prompt)], model="mistral-8b"
         )
 
         result = {"text": text, "analysis": response.content}
 
+        tool_result = ToolResult(
+            tool_name="analysis:analyze_sentiment",
+            input_parameters=params,
+            output_data=result,
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"sentiment_analysis": json.dumps(result)},
             "tool_registry": [
@@ -558,7 +631,7 @@ async def sentiment_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
                     "tool_name": "analysis:analyze_sentiment",
                     "input_parameters": params,
                     "output_data": result,
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -572,19 +645,30 @@ async def macro_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
     Stateless node for MacroAnalysis agent.
     Analyzes macroeconomic trends.
     """
-    resources = NodeResources()
+    llm = LLMServiceFactory.get_llm_service()
+    sql_db = DataServiceFactory.get_sql_db()
+    vector_db = DataServiceFactory.get_vector_db()
+    yf_fetcher = DataServiceFactory.get_yf_fetcher()
+    rss_fetcher = DataServiceFactory.get_rss_fetcher()
     current_step = state.get("current_step", {})
     params = current_step.get("parameters", {})
     macro_data = params.get("macro_data", {})
 
     try:
         prompt = f"Analyze these macroeconomic indicators: {json.dumps(macro_data)}"
-        response = await resources.llm.generate_message(
+        response = await llm.generate_message(
             messages=[Message(role="user", content=prompt)], model="mistral-8b"
         )
 
         result = {"macro_data": macro_data, "analysis": response.content}
 
+        tool_result = ToolResult(
+            tool_name="analysis:analyze_macro",
+            input_parameters=params,
+            output_data=result,
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"macro_analysis": json.dumps(result)},
             "tool_registry": [
@@ -592,7 +676,7 @@ async def macro_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
                     "tool_name": "analysis:analyze_macro",
                     "input_parameters": params,
                     "output_data": result,
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -606,7 +690,11 @@ async def contrarian_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
     Stateless node for ContrarianAnalysis agent.
     Generates contrarian investment signals.
     """
-    resources = NodeResources()
+    llm = LLMServiceFactory.get_llm_service()
+    sql_db = DataServiceFactory.get_sql_db()
+    vector_db = DataServiceFactory.get_vector_db()
+    yf_fetcher = DataServiceFactory.get_yf_fetcher()
+    rss_fetcher = DataServiceFactory.get_rss_fetcher()
     current_step = state.get("current_step", {})
     params = current_step.get("parameters", {})
     market_data = params.get("market_data", {})
@@ -614,7 +702,7 @@ async def contrarian_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
 
     try:
         prompt = f"Provide a contrarian analysis based on: Market Data: {json.dumps(market_data)}, Sentiment: {json.dumps(sentiment_data)}"
-        response = await resources.llm.generate_message(
+        response = await llm.generate_message(
             messages=[Message(role="user", content=prompt)], model="mistral-8b"
         )
 
@@ -624,6 +712,13 @@ async def contrarian_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
             "analysis": response.content,
         }
 
+        tool_result = ToolResult(
+            tool_name="analysis:analyze_contrarian",
+            input_parameters=params,
+            output_data=result,
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"contrarian_analysis": json.dumps(result)},
             "tool_registry": [
@@ -631,7 +726,7 @@ async def contrarian_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
                     "tool_name": "analysis:analyze_contrarian",
                     "input_parameters": params,
                     "output_data": result,
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -645,14 +740,25 @@ async def retrieval_node(state: ResearchGraphState) -> Dict[str, Any]:
     Stateless node for Retrieval agent.
     Searches vector database for context.
     """
-    resources = NodeResources()
+    llm = LLMServiceFactory.get_llm_service()
+    sql_db = DataServiceFactory.get_sql_db()
+    vector_db = DataServiceFactory.get_vector_db()
+    yf_fetcher = DataServiceFactory.get_yf_fetcher()
+    rss_fetcher = DataServiceFactory.get_rss_fetcher()
     current_step = state.get("current_step", {})
     params = current_step.get("parameters", {})
     query = params.get("query", "")
 
     try:
-        results = resources.vector_db.hybrid_search(query, limit=5)
+        results = vector_db.hybrid_search(query, limit=5)
 
+        tool_result = ToolResult(
+            tool_name="retrieval:hybrid_search",
+            input_parameters=params,
+            output_data={"results": results},
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"retrieval": json.dumps({"results": results})},
             "tool_registry": [
@@ -660,7 +766,7 @@ async def retrieval_node(state: ResearchGraphState) -> Dict[str, Any]:
                     "tool_name": "retrieval:hybrid_search",
                     "input_parameters": params,
                     "output_data": {"results": results},
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }

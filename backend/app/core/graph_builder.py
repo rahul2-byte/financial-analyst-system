@@ -123,7 +123,7 @@ def route_after_error_handler(state: ResearchGraphState) -> str:
         return END
 
     if should_retry:
-        logger.info("Retrying execution, routing back to execute_level_node")
+        logger.info("Retrying failed execution steps, routing to execute_level_node")
         return "execute_level_node"
 
     logger.error("Error handler returned no retry or escalate, ending graph")
