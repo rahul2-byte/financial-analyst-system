@@ -199,7 +199,7 @@ async def synthesis_node(state: ResearchGraphState) -> Dict[str, Any]:
         agent_output_sections = []
         for step_num, output in agent_outputs.items():
             section_header = prompt_manager.get_prompt(
-                "orchestrator.synthesis.section_header", step_number=step_num
+                "orchestrator.synthesis.section_header", section_name=f"Step {step_num}"
             )
             agent_output_sections.append(f"{section_header}\n{output}")
 
