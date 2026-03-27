@@ -11,13 +11,19 @@ from app.core.graph_nodes import (
     verification_node,
     validation_node,
 )
+from app.core.error_handler import error_handler_node
 from agents.orchestration.schemas import PlannerResponseMode
 
 logger = logging.getLogger(__name__)
 
 
 def route_after_planner(state: ResearchGraphState) -> str:
-    """Route after planner node based on response mode."""
+    """Route after planner node based on errors or response mode."""
+    errors = state.get("errors", [])
+    if errors:
+        logger.warning(f"Planner has errors: {errors}, routing to error_handler")
+        return "error_handler"
+
     plan = state.get("plan")
     if not plan:
         logger.warning("No plan found in state, ending graph")
@@ -34,7 +40,12 @@ def route_after_planner(state: ResearchGraphState) -> str:
 
 
 def route_after_execution(state: ResearchGraphState) -> str:
-    """Route after execution node - loop if more steps, else go to synthesis."""
+    """Route after execution node - check errors, loop if more steps, else go to synthesis."""
+    errors = state.get("errors", [])
+    if errors:
+        logger.warning(f"Execution has errors: {errors}, routing to error_handler")
+        return "error_handler"
+
     plan = state.get("plan")
     executed_steps = state.get("executed_steps", [])
 
@@ -57,7 +68,12 @@ def route_after_execution(state: ResearchGraphState) -> str:
 
 
 def route_after_verification(state: ResearchGraphState) -> str:
-    """Route after verification node based on validity and retry count."""
+    """Route after verification node based on errors, validity, or retry count."""
+    errors = state.get("errors", [])
+    if errors:
+        logger.warning(f"Verification has errors: {errors}, routing to error_handler")
+        return "error_handler"
+
     verification_passed = state.get("verification_passed", False)
     verification_retry_count = state.get("verification_retry_count", 0)
 
@@ -76,8 +92,41 @@ def route_after_verification(state: ResearchGraphState) -> str:
 
 
 def route_after_validation(state: ResearchGraphState) -> str:
-    """Route after validation node - always end."""
+    """Route after validation node - check errors or end."""
+    errors = state.get("errors", [])
+    if errors:
+        logger.warning(f"Validation has errors: {errors}, routing to error_handler")
+        return "error_handler"
+
     logger.info("Validation complete, ending graph")
+    return END
+
+
+def route_after_synthesis(state: ResearchGraphState) -> str:
+    """Route after synthesis node - check errors or proceed to verification."""
+    errors = state.get("errors", [])
+    if errors:
+        logger.warning(f"Synthesis has errors: {errors}, routing to error_handler")
+        return "error_handler"
+
+    logger.info("Synthesis complete, routing to verification_node")
+    return "verification_node"
+
+
+def route_after_error_handler(state: ResearchGraphState) -> str:
+    """Route after error handler - retry or end."""
+    should_retry = state.get("should_retry", False)
+    should_escalate = state.get("should_escalate", False)
+
+    if should_escalate:
+        logger.error("Error escalation triggered, ending graph")
+        return END
+
+    if should_retry:
+        logger.info("Retrying execution, routing back to planner")
+        return "planner_node"
+
+    logger.error("Error handler returned no retry or escalate, ending graph")
     return END
 
 
@@ -93,6 +142,7 @@ def build_graph() -> Any:
     graph.add_node("synthesis_node", synthesis_node)
     graph.add_node("verification_node", verification_node)
     graph.add_node("validation_node", validation_node)
+    graph.add_node("error_handler", error_handler_node)
 
     logger.info("Adding start edge to planner_node")
     graph.add_edge("__start__", "planner_node")
@@ -103,6 +153,7 @@ def build_graph() -> Any:
         route_after_planner,
         {
             "execute_level_node": "execute_level_node",
+            "error_handler": "error_handler",
             END: END,
         },
     )
@@ -114,11 +165,19 @@ def build_graph() -> Any:
         {
             "synthesis_node": "synthesis_node",
             "execute_level_node": "execute_level_node",
+            "error_handler": "error_handler",
         },
     )
 
-    logger.info("Adding edge from synthesis_node to verification_node")
-    graph.add_edge("synthesis_node", "verification_node")
+    logger.info("Adding conditional edges from synthesis_node")
+    graph.add_conditional_edges(
+        "synthesis_node",
+        route_after_synthesis,
+        {
+            "verification_node": "verification_node",
+            "error_handler": "error_handler",
+        },
+    )
 
     logger.info("Adding conditional edges from verification_node")
     graph.add_conditional_edges(
@@ -127,6 +186,7 @@ def build_graph() -> Any:
         {
             "validation_node": "validation_node",
             "synthesis_node": "synthesis_node",
+            "error_handler": "error_handler",
             END: END,
         },
     )
@@ -136,6 +196,17 @@ def build_graph() -> Any:
         "validation_node",
         route_after_validation,
         {
+            END: END,
+            "error_handler": "error_handler",
+        },
+    )
+
+    logger.info("Adding conditional edges from error_handler")
+    graph.add_conditional_edges(
+        "error_handler",
+        route_after_error_handler,
+        {
+            "planner_node": "planner_node",
             END: END,
         },
     )

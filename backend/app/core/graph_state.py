@@ -18,7 +18,8 @@ class ResearchGraphState(TypedDict):
     final_report: Optional[str]
     synthesis_retry_count: int
     verification_retry_count: int
-    verification_feedback: Optional[str]
+    verification_passed: bool
     errors: Annotated[List[str], operator.add]
-    current_tool: Optional[str]
-    tool_args: Dict[str, Any]
+    retry_count: int
+    should_retry: bool
+    should_escalate: bool
