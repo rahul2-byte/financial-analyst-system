@@ -99,11 +99,8 @@ def route_after_validation(state: ResearchGraphState) -> str:
 
 def route_after_synthesis(state: ResearchGraphState) -> str:
     """Route after synthesis node - check errors or proceed to verification."""
-    errors = state.get("errors", [])
-    if errors:
-        logger.warning(f"Synthesis has errors: {errors}, routing to error_handler")
-        return "error_handler"
-
+    # Always go to verification - even if there are downstream errors
+    # Verification will handle retry logic
     logger.info("Synthesis complete, routing to verification_node")
     return "verification_node"
 
