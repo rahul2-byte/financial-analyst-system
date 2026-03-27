@@ -45,10 +45,18 @@ system: |
          - requires_user_approval = true
          - assistant_response = proposed plan + ask user to approve or request edits
          - execution_steps = []
-      c) Only after explicit user approval in conversation history, set:
+      c) If user explicitly approves (e.g., "yes", "go ahead", "do it", "combination of the above", "all of them", "proceed", "execute"), set:
          - response_mode = "execute_plan"
          - requires_user_approval = false
-         - execution_steps = DAG steps
+         - execution_steps = DAG steps with these agents:
+           * market_offline (check local DB for ticker)
+           * price_and_fundamentals (fetch stock data from Yahoo Finance)
+           * market_news (fetch recent news)
+           * fundamental_analysis (analyze financials)
+           * technical_analysis (analyze price trends)
+           * sentiment_analysis (analyze news sentiment)
+           * macro_analysis (analyze macro factors)
+           * contrarian_analysis (generate contrarian view)
 
   DAG RULES WHEN response_mode = "execute_plan":
   - Do not include validation or synthesis steps (handled by orchestrator).
