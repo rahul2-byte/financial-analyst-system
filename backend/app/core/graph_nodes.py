@@ -15,11 +15,12 @@ from data.providers.yfinance import YFinanceFetcher
 from data.providers.rss_news import RSSNewsFetcher
 from common.state import ToolResult
 
-from agents.orchestration.planner import PlannerAgent
 from agents.orchestration.schemas import PlanData, ExecutionStep
-from agents.quality_control.verification import VerificationAgent
-from agents.quality_control.validation import ValidationAgent
-from agents.data_access.schemas import AgentResponse
+
+# Import new stateless nodes
+from app.core.nodes.planner_node import planner_node as planner_node_func
+from app.core.nodes.verification_node import verification_node as verification_node_func
+from app.core.nodes.validation_node import validation_node as validation_node_func
 
 logger = logging.getLogger(__name__)
 
@@ -43,37 +44,8 @@ def _find_next_level(
 
 
 async def planner_node(state: ResearchGraphState) -> Dict[str, Any]:
-    """Wraps PlannerAgent to generate execution plan from user query."""
-    llm = LLMServiceFactory.get_llm_service()
-    sql_db = DataServiceFactory.get_sql_db()
-    vector_db = DataServiceFactory.get_vector_db()
-    yf_fetcher = DataServiceFactory.get_yf_fetcher()
-    rss_fetcher = DataServiceFactory.get_rss_fetcher()
-    planner = PlannerAgent(llm_service=llm)
-
-    user_query = state["user_query"]
-    conversation_history = state.get("conversation_history", [])
-
-    logger.info(f"Planner node processing query: {user_query}")
-    response = await planner.execute(user_query)
-
-    if response.status == "failure" or not response.data:
-        logger.error(f"Planner failed: {response.errors}")
-        return {"plan": None, "errors": [f"Planning failed: {response.errors}"]}
-
-    plan_data = (
-        response.data
-        if isinstance(response.data, PlanData)
-        else PlanData(**response.data)
-    )
-
-    logger.info(f"Planner generated {len(plan_data.execution_steps)} steps")
-
-    return {
-        "plan": (
-            plan_data.model_dump() if hasattr(plan_data, "model_dump") else plan_data
-        ),
-    }
+    """Stateless planner node - delegates to pure function."""
+    return await planner_node_func(state)
 
 
 async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
@@ -245,112 +217,13 @@ async def synthesis_node(state: ResearchGraphState) -> Dict[str, Any]:
 
 
 async def verification_node(state: ResearchGraphState) -> Dict[str, Any]:
-    """Verifies numeric accuracy of draft report using VerificationAgent."""
-    llm = LLMServiceFactory.get_llm_service()
-    sql_db = DataServiceFactory.get_sql_db()
-    vector_db = DataServiceFactory.get_vector_db()
-    yf_fetcher = DataServiceFactory.get_yf_fetcher()
-    rss_fetcher = DataServiceFactory.get_rss_fetcher()
-    verifier = VerificationAgent(llm_service=llm)
-
-    draft_report = state.get("draft_report") or ""
-    tool_registry_raw = state.get("tool_registry", [])
-    tool_registry: List[ToolResult] = [
-        ToolResult(**t) if isinstance(t, dict) else t for t in tool_registry_raw
-    ]
-
-    logger.info("Verification node checking numeric accuracy")
-
-    try:
-        response = await verifier.execute(
-            user_query="",
-            step_number=0,
-            draft_report=draft_report,
-            tool_registry=tool_registry,
-        )
-
-        if response.status == "failure":
-            logger.error(f"Verification failed: {response.errors}")
-            return {
-                "errors": [f"Verification error: {response.errors}"],
-            }
-
-        result_data = response.data if response.data else {}
-        is_valid = result_data.get("is_valid", False)
-        feedback = result_data.get("feedback", "")
-
-        if is_valid:
-            logger.info("Verification passed")
-            return {"verification_passed": True}
-        else:
-            logger.warning(f"Verification failed: {feedback}")
-            current_retry = state.get("verification_retry_count", 0)
-            return {
-                "verification_passed": False,
-                "verification_retry_count": current_retry + 1,
-                "verification_feedback": feedback,
-                "errors": [feedback],
-            }
-
-    except Exception as e:
-        logger.error(f"Verification node error: {e}", exc_info=True)
-        return {
-            "verification_passed": False,
-            "errors": [f"Verification error: {str(e)}"],
-        }
+    """Stateless verification node - delegates to pure function."""
+    return await verification_node_func(state)
 
 
 async def validation_node(state: ResearchGraphState) -> Dict[str, Any]:
-    """Validates draft report for compliance using ValidationAgent."""
-    llm = LLMServiceFactory.get_llm_service()
-    sql_db = DataServiceFactory.get_sql_db()
-    vector_db = DataServiceFactory.get_vector_db()
-    yf_fetcher = DataServiceFactory.get_yf_fetcher()
-    rss_fetcher = DataServiceFactory.get_rss_fetcher()
-    validator = ValidationAgent(llm_service=llm)
-
-    user_query = state["user_query"]
-    draft_report = state.get("draft_report") or ""
-
-    logger.info("Validation node checking compliance")
-
-    try:
-        response = await validator.execute(
-            user_query=user_query,
-            step_number=0,
-            draft_report=draft_report,
-        )
-
-        if response.status == "failure":
-            logger.error(f"Validation failed: {response.errors}")
-            return {
-                "final_report": None,
-                "errors": [f"Validation error: {response.errors}"],
-            }
-
-        result_data = response.data if response.data else {}
-        is_valid = result_data.get("is_valid", False)
-        final_approved_text = result_data.get("final_approved_text", "")
-
-        if is_valid and final_approved_text:
-            logger.info("Validation passed, final report approved")
-            return {
-                "final_report": final_approved_text,
-            }
-        else:
-            violations = result_data.get("violations_found", [])
-            logger.warning(f"Validation failed: {violations}")
-            return {
-                "final_report": None,
-                "errors": [f"Validation violations: {violations}"],
-            }
-
-    except Exception as e:
-        logger.error(f"Validation node error: {e}", exc_info=True)
-        return {
-            "final_report": None,
-            "errors": [f"Validation error: {str(e)}"],
-        }
+    """Stateless validation node - delegates to pure function."""
+    return await validation_node_func(state)
 
 
 # ==================== STATELESS AGENT NODES ====================
