@@ -3,8 +3,14 @@ import operator
 
 
 def merge_dicts(left: Dict[str, Any], right: Dict[str, Any]) -> Dict[str, Any]:
-    """Custom merge function for dicts - right dict takes precedence."""
-    return {**left, **right}
+    """Custom merge function for dicts - performs deep merge."""
+    result = {**left}
+    for key, value in right.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = merge_dicts(result[key], value)
+        else:
+            result[key] = value
+    return result
 
 
 class ResearchGraphState(TypedDict):
