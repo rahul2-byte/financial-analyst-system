@@ -362,6 +362,13 @@ async def market_offline_node(state: ResearchGraphState) -> Dict[str, Any]:
 
     try:
         info = resources.sql_db.get_ticker_info(ticker)
+        tool_result = ToolResult(
+            tool_name="market:get_ticker_info",
+            input_parameters=params,
+            output_data=info,
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"market_offline": json.dumps(info)},
             "tool_registry": [
@@ -369,7 +376,7 @@ async def market_offline_node(state: ResearchGraphState) -> Dict[str, Any]:
                     "tool_name": "market:get_ticker_info",
                     "input_parameters": params,
                     "output_data": info,
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -394,6 +401,13 @@ async def price_and_fundamentals_node(state: ResearchGraphState) -> Dict[str, An
 
         result = {"ticker": ticker, "price": price_data, "fundamentals": fundamentals}
 
+        tool_result = ToolResult(
+            tool_name="data:fetch_stock_data",
+            input_parameters=params,
+            output_data=result,
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"price_and_fundamentals": json.dumps(result)},
             "tool_registry": [
@@ -401,7 +415,7 @@ async def price_and_fundamentals_node(state: ResearchGraphState) -> Dict[str, An
                     "tool_name": "data:fetch_stock_data",
                     "input_parameters": params,
                     "output_data": result,
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -423,6 +437,13 @@ async def market_news_node(state: ResearchGraphState) -> Dict[str, Any]:
     try:
         news = resources.rss_fetcher.fetch_market_news(query)
 
+        tool_result = ToolResult(
+            tool_name="news:fetch_news",
+            input_parameters=params,
+            output_data={"articles": news},
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"market_news": json.dumps({"articles": news})},
             "tool_registry": [
@@ -430,7 +451,7 @@ async def market_news_node(state: ResearchGraphState) -> Dict[str, Any]:
                     "tool_name": "news:fetch_news",
                     "input_parameters": params,
                     "output_data": {"articles": news},
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -451,6 +472,13 @@ async def macro_indicators_node(state: ResearchGraphState) -> Dict[str, Any]:
     try:
         indicators = resources.yf_fetcher.fetch_macro_indicators()
 
+        tool_result = ToolResult(
+            tool_name="macro:fetch_macro_data",
+            input_parameters=params,
+            output_data=indicators,
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"macro_indicators": json.dumps(indicators)},
             "tool_registry": [
@@ -458,7 +486,7 @@ async def macro_indicators_node(state: ResearchGraphState) -> Dict[str, Any]:
                     "tool_name": "macro:fetch_macro_data",
                     "input_parameters": params,
                     "output_data": indicators,
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -483,6 +511,13 @@ async def fundamental_analysis_node(state: ResearchGraphState) -> Dict[str, Any]
         scanner = FundamentalScanner()
         scan_results = scanner.scan(raw_data)
 
+        tool_result = ToolResult(
+            tool_name="analysis:run_fundamental_scan",
+            input_parameters=params,
+            output_data=scan_results,
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"fundamental_analysis": json.dumps(scan_results)},
             "tool_registry": [
@@ -490,7 +525,7 @@ async def fundamental_analysis_node(state: ResearchGraphState) -> Dict[str, Any]
                     "tool_name": "analysis:run_fundamental_scan",
                     "input_parameters": params,
                     "output_data": scan_results,
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -517,6 +552,13 @@ async def technical_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
         scanner = TechnicalScanner()
         scan_results = scanner.scan(df)
 
+        tool_result = ToolResult(
+            tool_name="analysis:run_technical_scan",
+            input_parameters=params,
+            output_data=scan_results,
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"technical_analysis": json.dumps(scan_results)},
             "tool_registry": [
@@ -524,7 +566,7 @@ async def technical_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
                     "tool_name": "analysis:run_technical_scan",
                     "input_parameters": params,
                     "output_data": scan_results,
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -551,6 +593,13 @@ async def sentiment_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
 
         result = {"text": text, "analysis": response.content}
 
+        tool_result = ToolResult(
+            tool_name="analysis:analyze_sentiment",
+            input_parameters=params,
+            output_data=result,
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"sentiment_analysis": json.dumps(result)},
             "tool_registry": [
@@ -558,7 +607,7 @@ async def sentiment_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
                     "tool_name": "analysis:analyze_sentiment",
                     "input_parameters": params,
                     "output_data": result,
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -585,6 +634,13 @@ async def macro_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
 
         result = {"macro_data": macro_data, "analysis": response.content}
 
+        tool_result = ToolResult(
+            tool_name="analysis:analyze_macro",
+            input_parameters=params,
+            output_data=result,
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"macro_analysis": json.dumps(result)},
             "tool_registry": [
@@ -592,7 +648,7 @@ async def macro_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
                     "tool_name": "analysis:analyze_macro",
                     "input_parameters": params,
                     "output_data": result,
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -624,6 +680,13 @@ async def contrarian_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
             "analysis": response.content,
         }
 
+        tool_result = ToolResult(
+            tool_name="analysis:analyze_contrarian",
+            input_parameters=params,
+            output_data=result,
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"contrarian_analysis": json.dumps(result)},
             "tool_registry": [
@@ -631,7 +694,7 @@ async def contrarian_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
                     "tool_name": "analysis:analyze_contrarian",
                     "input_parameters": params,
                     "output_data": result,
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
@@ -653,6 +716,13 @@ async def retrieval_node(state: ResearchGraphState) -> Dict[str, Any]:
     try:
         results = resources.vector_db.hybrid_search(query, limit=5)
 
+        tool_result = ToolResult(
+            tool_name="retrieval:hybrid_search",
+            input_parameters=params,
+            output_data={"results": results},
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
         return {
             "agent_outputs": {"retrieval": json.dumps({"results": results})},
             "tool_registry": [
@@ -660,7 +730,7 @@ async def retrieval_node(state: ResearchGraphState) -> Dict[str, Any]:
                     "tool_name": "retrieval:hybrid_search",
                     "input_parameters": params,
                     "output_data": {"results": results},
-                    "extracted_metrics": {},
+                    "extracted_metrics": tool_result.extracted_metrics,
                 }
             ],
         }
