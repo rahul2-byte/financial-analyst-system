@@ -245,11 +245,15 @@ def test_predefined_tools_registered():
     expected_tools = [
         "market:check_db_status",
         "market:get_table_names",
+        "market:get_column_names",
         "market:get_ticker_info",
-        "data:fetch_stock_price",
-        "data:save_ohlcv",
-        "data:fetch_company_fundamentals",
+        "market:submit_offline_status",
+        "data:fetch_stock_data",
+        "data:fetch_fundamentals",
+        "data:submit_data_response",
+        "news:fetch_news",
         "analysis:run_fundamental_scan",
+        "analysis:submit_thesis",
         "analysis:run_technical_scan",
     ]
 

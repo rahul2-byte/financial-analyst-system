@@ -1,6 +1,6 @@
 import pytest
 from unittest.mock import AsyncMock, MagicMock
-from app.core.tool_executor import ToolExecutorNode, execute_tool_node
+from app.core.tool_executor import ToolExecutorNode, execute_tool_node, TOOL_HANDLERS
 from app.core.tool_registry import ToolRegistry, ToolDefinition
 
 
@@ -8,6 +8,8 @@ from app.core.tool_registry import ToolRegistry, ToolDefinition
 def clean_registry():
     registry = ToolRegistry()
     registry.clear()
+    # Clear handlers too
+    TOOL_HANDLERS.clear()
     return registry
 
 
@@ -15,11 +17,14 @@ def clean_registry():
 async def test_tool_executor_routes_to_handler(clean_registry):
     """Test that executor routes to correct handler."""
     mock_handler = AsyncMock(return_value='{"result": "success"}')
+    
+    # Register handler in TOOL_HANDLERS (new way)
+    TOOL_HANDLERS["test:test_tool"] = mock_handler
+    
     tool_def = ToolDefinition(
         name="test_tool",
         description="Test",
         parameters={"type": "object"},
-        handler=mock_handler,
     )
 
     clean_registry.register("test", tool_def)
@@ -85,11 +90,14 @@ async def test_tool_executor_no_handler(clean_registry):
 async def test_execute_tool_node_function(clean_registry):
     """Test the LangGraph node function."""
     mock_handler = AsyncMock(return_value="result")
+    
+    # Register handler in TOOL_HANDLERS
+    TOOL_HANDLERS["test:node_test"] = mock_handler
+    
     tool_def = ToolDefinition(
         name="node_test",
         description="Test",
         parameters={"type": "object"},
-        handler=mock_handler,
     )
     clean_registry.register("test", tool_def)
 
