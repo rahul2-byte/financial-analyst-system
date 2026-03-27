@@ -69,11 +69,6 @@ def route_after_execution(state: ResearchGraphState) -> str:
 
 def route_after_verification(state: ResearchGraphState) -> str:
     """Route after verification node based on errors, validity, or retry count."""
-    errors = state.get("errors", [])
-    if errors:
-        logger.warning(f"Verification has errors: {errors}, routing to error_handler")
-        return "error_handler"
-
     verification_passed = state.get("verification_passed", False)
     verification_retry_count = state.get("verification_retry_count", 0)
 

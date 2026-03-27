@@ -186,6 +186,7 @@ async def synthesis_node(state: ResearchGraphState) -> Dict[str, Any]:
     agent_outputs = state.get("agent_outputs", {})
 
     synthesis_retry_count = state.get("synthesis_retry_count", 0)
+    verification_feedback = state.get("verification_feedback", "")
 
     logger.info(
         f"Synthesis node generating draft report (attempt {synthesis_retry_count + 1})"
@@ -204,6 +205,14 @@ async def synthesis_node(state: ResearchGraphState) -> Dict[str, Any]:
             agent_output_sections.append(f"{section_header}\n{output}")
 
         prompt = prompt_header + "\n\n" + "\n\n".join(agent_output_sections)
+        
+        # Add verification feedback if this is a retry
+        if verification_feedback:
+            feedback_prompt = prompt_manager.get_prompt(
+                "orchestrator.synthesis.feedback", error=verification_feedback
+            )
+            prompt += "\n\n" + feedback_prompt
+        
         prompt += prompt_manager.get_prompt("orchestrator.synthesis.instructions")
 
         response = await llm.generate_message(

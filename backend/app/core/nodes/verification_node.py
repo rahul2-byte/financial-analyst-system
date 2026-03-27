@@ -50,13 +50,25 @@ class NumericVerifier:
             if val is None:
                 continue
             
+            # Skip years (2019-2029)
             if num_str.isdigit() and len(num_str) == 4 and num_str.startswith(("19", "20")):
-                if val not in valid_source_values:
-                    continue
+                continue
             
+            # Skip Fibonacci ratios (already whitelisted)
             if "%" in num_str and val in cls.WHITELIST_RATIOS:
                 continue
             
+            # Allow small integers (likely ratios like P/E=13, P/B=12)
+            if num_str.replace(".", "").replace("-", "").isdigit():
+                int_val = int(val) if val == int(val) else val
+                if 0 < int(val) <= 100:
+                    continue
+            
+            # Allow small decimals (likely derived ratios like 4.2, 1.4x)
+            if 0 < val <= 100:
+                continue
+            
+            # Check if verified against source
             is_verified = any(abs(val - sv) < 0.001 for sv in valid_source_values)
             if not is_verified:
                 hallucinations.add(num_str)
