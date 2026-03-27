@@ -48,9 +48,16 @@ class PipelineOrchestrator:
             parameters={"query": user_query},
         )
 
+        def _normalize_message(msg) -> dict:
+            """Normalize message to dict format."""
+            if isinstance(msg, dict):
+                return msg
+            if hasattr(msg, "model_dump"):
+                return msg.model_dump()
+            return {"role": "unknown", "content": str(msg)}
+
         conversation_history_dicts = [
-            msg.model_dump() if hasattr(msg, "model_dump") else msg
-            for msg in (conversation_history or [])
+            _normalize_message(msg) for msg in (conversation_history or [])
         ]
 
         initial_state: Dict[str, Any] = {
