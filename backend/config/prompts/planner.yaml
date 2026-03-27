@@ -57,6 +57,16 @@ system: |
            * sentiment_analysis (analyze news sentiment)
            * macro_analysis (analyze macro factors)
            * contrarian_analysis (generate contrarian view)
+           
+           DEPENDENCY RULES:
+           - market_offline should run first (step 1)
+           - price_and_fundamentals can run in parallel with market_offline (step 2)
+           - market_news can run in parallel after step 1 (step 2)
+           - fundamental_analysis depends on price_and_fundamentals (step 3)
+           - technical_analysis depends on price_and_fundamentals (step 3)
+           - sentiment_analysis depends on market_news (step 3)
+           - macro_analysis can run independently (step 2)
+           - contrarian_analysis depends on fundamental_analysis, technical_analysis, sentiment_analysis (step 4)
 
   DAG RULES WHEN response_mode = "execute_plan":
   - Do not include validation or synthesis steps (handled by orchestrator).

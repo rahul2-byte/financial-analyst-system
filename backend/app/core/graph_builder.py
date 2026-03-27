@@ -207,6 +207,7 @@ def build_graph() -> Any:
         route_after_error_handler,
         {
             "planner_node": "planner_node",
+            "execute_level_node": "execute_level_node",
             END: END,
         },
     )
