@@ -34,6 +34,27 @@ from agents.data_access.schemas import AgentResponse
 logger = logging.getLogger(__name__)
 
 
+class NodeResources:
+    """Singleton for shared resources across graph nodes."""
+    _instance = None
+    
+    llm: LlamaCppService
+    sql_db: PostgresClient
+    vector_db: QdrantStorage
+    yf_fetcher: YFinanceFetcher
+    rss_fetcher: RSSNewsFetcher
+
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super(NodeResources, cls).__new__(cls)
+            cls._instance.llm = LlamaCppService()
+            cls._instance.sql_db = PostgresClient()
+            cls._instance.vector_db = QdrantStorage()
+            cls._instance.yf_fetcher = YFinanceFetcher()
+            cls._instance.rss_fetcher = RSSNewsFetcher()
+        return cls._instance
+
+
 def _get_agent_name(step: ExecutionStep) -> str:
     """Extract agent name from step target."""
     if hasattr(step.target_agent, "value"):
@@ -358,3 +379,308 @@ async def validation_node(state: ResearchGraphState) -> Dict[str, Any]:
             "final_report": None,
             "errors": [f"Validation error: {str(e)}"],
         }
+
+
+# ==================== STATELESS AGENT NODES ====================
+# These replace the class-based agents with pure function nodes
+
+
+async def market_offline_node(state: ResearchGraphState) -> Dict[str, Any]:
+    """
+    Stateless node for MarketOffline agent.
+    Queries local PostgreSQL database for market data availability.
+    """
+    resources = NodeResources()
+    current_step = state.get("current_step", {})
+    params = current_step.get("parameters", {})
+    ticker = params.get("ticker", "")
+    
+    try:
+        info = resources.sql_db.get_ticker_info(ticker)
+        return {
+            "agent_outputs": {"market_offline": json.dumps(info)},
+            "tool_registry": [{
+                "tool_name": "market:get_ticker_info",
+                "input_parameters": params,
+                "output_data": info,
+                "extracted_metrics": {}
+            }]
+        }
+    except Exception as e:
+        logger.error(f"MarketOffline node error: {e}")
+        return {"errors": [str(e)]}
+
+
+async def price_and_fundamentals_node(state: ResearchGraphState) -> Dict[str, Any]:
+    """
+    Stateless node for PriceAndFundamentals agent.
+    Fetches stock data and fundamentals from Yahoo Finance.
+    """
+    resources = NodeResources()
+    current_step = state.get("current_step", {})
+    params = current_step.get("parameters", {})
+    ticker = params.get("ticker", "")
+    
+    try:
+        price_data = resources.yf_fetcher.fetch_stock_price(ticker)
+        fundamentals = resources.yf_fetcher.fetch_company_fundamentals(ticker)
+        
+        result = {
+            "ticker": ticker,
+            "price": price_data,
+            "fundamentals": fundamentals
+        }
+        
+        return {
+            "agent_outputs": {"price_and_fundamentals": json.dumps(result)},
+            "tool_registry": [{
+                "tool_name": "data:fetch_stock_data",
+                "input_parameters": params,
+                "output_data": result,
+                "extracted_metrics": {}
+            }]
+        }
+    except Exception as e:
+        logger.error(f"PriceAndFundamentals node error: {e}")
+        return {"errors": [str(e)]}
+
+
+async def market_news_node(state: ResearchGraphState) -> Dict[str, Any]:
+    """
+    Stateless node for MarketNews agent.
+    Fetches market news from RSS and searches vector DB.
+    """
+    resources = NodeResources()
+    current_step = state.get("current_step", {})
+    params = current_step.get("parameters", {})
+    query = params.get("query", "")
+    
+    try:
+        news = resources.rss_fetcher.fetch_market_news(query)
+        
+        return {
+            "agent_outputs": {"market_news": json.dumps({"articles": news})},
+            "tool_registry": [{
+                "tool_name": "news:fetch_news",
+                "input_parameters": params,
+                "output_data": {"articles": news},
+                "extracted_metrics": {}
+            }]
+        }
+    except Exception as e:
+        logger.error(f"MarketNews node error: {e}")
+        return {"errors": [str(e)]}
+
+
+async def macro_indicators_node(state: ResearchGraphState) -> Dict[str, Any]:
+    """
+    Stateless node for MacroIndicators agent.
+    Fetches macroeconomic data.
+    """
+    resources = NodeResources()
+    current_step = state.get("current_step", {})
+    params = current_step.get("parameters", {})
+    
+    try:
+        indicators = resources.yf_fetcher.fetch_macro_indicators()
+        
+        return {
+            "agent_outputs": {"macro_indicators": json.dumps(indicators)},
+            "tool_registry": [{
+                "tool_name": "macro:fetch_macro_data",
+                "input_parameters": params,
+                "output_data": indicators,
+                "extracted_metrics": {}
+            }]
+        }
+    except Exception as e:
+        logger.error(f"MacroIndicators node error: {e}")
+        return {"errors": [str(e)]}
+
+
+async def fundamental_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
+    """
+    Stateless node for FundamentalAnalysis agent.
+    Uses FundamentalScanner for deterministic analysis.
+    """
+    resources = NodeResources()
+    current_step = state.get("current_step", {})
+    params = current_step.get("parameters", {})
+    raw_data = params.get("raw_data", {})
+    
+    try:
+        from quant.fundamentals import FundamentalScanner
+        scanner = FundamentalScanner()
+        scan_results = scanner.scan(raw_data)
+        
+        return {
+            "agent_outputs": {"fundamental_analysis": json.dumps(scan_results)},
+            "tool_registry": [{
+                "tool_name": "analysis:run_fundamental_scan",
+                "input_parameters": params,
+                "output_data": scan_results,
+                "extracted_metrics": {}
+            }]
+        }
+    except Exception as e:
+        logger.error(f"FundamentalAnalysis node error: {e}")
+        return {"errors": [str(e)]}
+
+
+async def technical_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
+    """
+    Stateless node for TechnicalAnalysis agent.
+    Uses TechnicalScanner for indicator calculations.
+    """
+    resources = NodeResources()
+    current_step = state.get("current_step", {})
+    params = current_step.get("parameters", {})
+    ohlcv_data = params.get("ohlcv_data", [])
+    
+    try:
+        import pandas as pd
+        from quant.indicators import TechnicalScanner
+        
+        df = pd.DataFrame(ohlcv_data)
+        scanner = TechnicalScanner()
+        scan_results = scanner.scan(df)
+        
+        return {
+            "agent_outputs": {"technical_analysis": json.dumps(scan_results)},
+            "tool_registry": [{
+                "tool_name": "analysis:run_technical_scan",
+                "input_parameters": params,
+                "output_data": scan_results,
+                "extracted_metrics": {}
+            }]
+        }
+    except Exception as e:
+        logger.error(f"TechnicalAnalysis node error: {e}")
+        return {"errors": [str(e)]}
+
+
+async def sentiment_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
+    """
+    Stateless node for SentimentAnalysis agent.
+    Uses LLM for sentiment analysis.
+    """
+    resources = NodeResources()
+    current_step = state.get("current_step", {})
+    params = current_step.get("parameters", {})
+    text = params.get("text", "")
+    
+    try:
+        prompt = f"Analyze the sentiment of this text: {text}"
+        response = await resources.llm.generate_message(
+            messages=[Message(role="user", content=prompt)],
+            model="mistral-8b"
+        )
+        
+        result = {"text": text, "analysis": response.content}
+        
+        return {
+            "agent_outputs": {"sentiment_analysis": json.dumps(result)},
+            "tool_registry": [{
+                "tool_name": "analysis:analyze_sentiment",
+                "input_parameters": params,
+                "output_data": result,
+                "extracted_metrics": {}
+            }]
+        }
+    except Exception as e:
+        logger.error(f"SentimentAnalysis node error: {e}")
+        return {"errors": [str(e)]}
+
+
+async def macro_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
+    """
+    Stateless node for MacroAnalysis agent.
+    Analyzes macroeconomic trends.
+    """
+    resources = NodeResources()
+    current_step = state.get("current_step", {})
+    params = current_step.get("parameters", {})
+    macro_data = params.get("macro_data", {})
+    
+    try:
+        prompt = f"Analyze these macroeconomic indicators: {json.dumps(macro_data)}"
+        response = await resources.llm.generate_message(
+            messages=[Message(role="user", content=prompt)],
+            model="mistral-8b"
+        )
+        
+        result = {"macro_data": macro_data, "analysis": response.content}
+        
+        return {
+            "agent_outputs": {"macro_analysis": json.dumps(result)},
+            "tool_registry": [{
+                "tool_name": "analysis:analyze_macro",
+                "input_parameters": params,
+                "output_data": result,
+                "extracted_metrics": {}
+            }]
+        }
+    except Exception as e:
+        logger.error(f"MacroAnalysis node error: {e}")
+        return {"errors": [str(e)]}
+
+
+async def contrarian_analysis_node(state: ResearchGraphState) -> Dict[str, Any]:
+    """
+    Stateless node for ContrarianAnalysis agent.
+    Generates contrarian investment signals.
+    """
+    resources = NodeResources()
+    current_step = state.get("current_step", {})
+    params = current_step.get("parameters", {})
+    market_data = params.get("market_data", {})
+    sentiment_data = params.get("sentiment_data", {})
+    
+    try:
+        prompt = f"Provide a contrarian analysis based on: Market Data: {json.dumps(market_data)}, Sentiment: {json.dumps(sentiment_data)}"
+        response = await resources.llm.generate_message(
+            messages=[Message(role="user", content=prompt)],
+            model="mistral-8b"
+        )
+        
+        result = {"market_data": market_data, "sentiment": sentiment_data, "analysis": response.content}
+        
+        return {
+            "agent_outputs": {"contrarian_analysis": json.dumps(result)},
+            "tool_registry": [{
+                "tool_name": "analysis:analyze_contrarian",
+                "input_parameters": params,
+                "output_data": result,
+                "extracted_metrics": {}
+            }]
+        }
+    except Exception as e:
+        logger.error(f"ContrarianAnalysis node error: {e}")
+        return {"errors": [str(e)]}
+
+
+async def retrieval_node(state: ResearchGraphState) -> Dict[str, Any]:
+    """
+    Stateless node for Retrieval agent.
+    Searches vector database for context.
+    """
+    resources = NodeResources()
+    current_step = state.get("current_step", {})
+    params = current_step.get("parameters", {})
+    query = params.get("query", "")
+    
+    try:
+        results = resources.vector_db.hybrid_search(query, limit=5)
+        
+        return {
+            "agent_outputs": {"retrieval": json.dumps({"results": results})},
+            "tool_registry": [{
+                "tool_name": "retrieval:hybrid_search",
+                "input_parameters": params,
+                "output_data": {"results": results},
+                "extracted_metrics": {}
+            }]
+        }
+    except Exception as e:
+        logger.error(f"Retrieval node error: {e}")
+        return {"errors": [str(e)]}
