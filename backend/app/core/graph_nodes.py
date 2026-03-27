@@ -14,19 +14,8 @@ from data.providers.yfinance import YFinanceFetcher
 from data.providers.rss_news import RSSNewsFetcher
 from common.state import ToolResult
 
-from agents.base import BaseAgent
 from agents.orchestration.planner import PlannerAgent
 from agents.orchestration.schemas import PlanData, ExecutionStep
-from agents.data_access.market_offline import MarketOfflineAgent
-from agents.data_access.price_and_fundamentals import PriceAndFundamentalsAgent
-from agents.data_access.market_news import MarketNewsAgent
-from agents.data_access.macro_indicators import MacroIndicatorsAgent
-from agents.retrieval.agent import RetrievalAgent
-from agents.analysis.fundamental import FundamentalAnalysisAgent
-from agents.analysis.sentiment import SentimentAnalysisAgent
-from agents.analysis.macro import MacroAnalysisAgent
-from agents.analysis.technical import TechnicalAnalysisAgent
-from agents.analysis.contrarian import ContrarianAgent
 from agents.quality_control.verification import VerificationAgent
 from agents.quality_control.validation import ValidationAgent
 from agents.data_access.schemas import AgentResponse
@@ -106,7 +95,7 @@ async def planner_node(state: ResearchGraphState) -> Dict[str, Any]:
 async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
     """Executes the next level of steps in parallel using stateless function nodes."""
     
-    # NEW: Map agent names to stateless function nodes
+    # Map agent names to stateless function nodes (NEW architecture)
     agent_node_map = {
         "market_offline": market_offline_node,
         "price_and_fundamentals": price_and_fundamentals_node,
@@ -118,33 +107,6 @@ async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
         "macro_analysis": macro_analysis_node,
         "technical_analysis": technical_analysis_node,
         "contrarian_analysis": contrarian_analysis_node,
-    }
-    
-    # For now, keep the old agents as fallback
-    # TODO: Remove old agent map after migration is complete
-    llm = LlamaCppService()
-    sql_db = PostgresClient()
-    vector_db = QdrantStorage()
-    yf_fetcher = YFinanceFetcher()
-    rss_fetcher = RSSNewsFetcher()
-
-    legacy_agent_map: Dict[str, BaseAgent] = {
-        "market_offline": MarketOfflineAgent(llm_service=llm, db_client=sql_db),
-        "price_and_fundamentals": PriceAndFundamentalsAgent(
-            llm_service=llm, yf_fetcher=yf_fetcher, sql_db=sql_db
-        ),
-        "market_news": MarketNewsAgent(
-            llm_service=llm, rss_fetcher=rss_fetcher, vector_db=vector_db
-        ),
-        "macro_indicators": MacroIndicatorsAgent(
-            llm_service=llm, yf_fetcher=yf_fetcher, sql_db=sql_db
-        ),
-        "retrieval": RetrievalAgent(llm_service=llm, qdrant_client=vector_db),
-        "fundamental_analysis": FundamentalAnalysisAgent(llm_service=llm),
-        "sentiment_analysis": SentimentAnalysisAgent(llm_service=llm),
-        "macro_analysis": MacroAnalysisAgent(llm_service=llm),
-        "technical_analysis": TechnicalAnalysisAgent(llm_service=llm),
-        "contrarian_analysis": ContrarianAgent(llm_service=llm),
     }
 
     plan_data = state.get("plan")
@@ -179,32 +141,16 @@ async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
     for step in next_level:
         agent_name = _get_agent_name(step)
         
-        # Try new function node first, fallback to legacy agent
+        # Get the stateless function node
         node_func = agent_node_map.get(agent_name)
-        agent = legacy_agent_map.get(agent_name)
         
-        if not node_func and not agent:
-            logger.error(f"Agent {agent_name} not found in agent map")
+        if not node_func:
+            logger.error(f"Agent {agent_name} not found in node map")
             return {"errors": [f"Agent {agent_name} not found"]}
 
-        user_query = state["user_query"]
-        context_from_prev = "\n".join(
-            f"Step {s}: {state.get('agent_outputs', {}).get(str(s), '')}"
-            for s in step.dependencies
-            if str(s) in state.get("agent_outputs", {})
-        )
-
-        agent_query = f"Original Query: '{user_query}'\nAction: {step.action}\nParameters: {step.parameters}"
-        if context_from_prev:
-            agent_query += f"\n\nContext from previous steps:\n{context_from_prev}"
-
-        # Use new node function if available, else legacy agent
-        if node_func:
-            # Create a modified state with current step info
-            modified_state = {**state, "current_step": step.model_dump()}
-            agent_tasks.append(node_func(modified_state))
-        else:
-            agent_tasks.append(_execute_single_step(agent, agent_query, step))
+        # Create a modified state with current step info
+        modified_state = {**state, "current_step": step.model_dump()}
+        agent_tasks.append(node_func(modified_state))
 
     if agent_tasks:
         results = await asyncio.gather(*agent_tasks, return_exceptions=True)
@@ -240,27 +186,6 @@ async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
         "executed_steps": new_executed_steps,
         "tool_registry": new_tool_results,  # Will be merged via reducer
     }
-
-
-async def _execute_single_step(
-    agent: BaseAgent, query: str, step: ExecutionStep
-) -> Dict[str, Any]:
-    """Executes a single agent step and returns output."""
-    try:
-        result = await agent.execute(query, step_number=step.step_number)
-        if result.status == "success":
-            output = ""
-            if isinstance(result.data, dict) and "response" in result.data:
-                output = result.data["response"]
-            elif isinstance(result.data, dict):
-                output = json.dumps(result.data)
-            else:
-                output = str(result.data)
-            return {"output": output, "data": result.data}
-        else:
-            return {"output": f"Error: {result.errors}", "data": None}
-    except Exception as e:
-        return {"output": f"Exception: {str(e)}", "data": None}
 
 
 async def synthesis_node(state: ResearchGraphState) -> Dict[str, Any]:
