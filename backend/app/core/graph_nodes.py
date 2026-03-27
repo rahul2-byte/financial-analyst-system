@@ -286,6 +286,7 @@ async def verification_node(state: ResearchGraphState) -> Dict[str, Any]:
             return {
                 "verification_passed": False,
                 "verification_retry_count": current_retry + 1,
+                "verification_feedback": feedback,
                 "errors": [feedback],
             }
 
