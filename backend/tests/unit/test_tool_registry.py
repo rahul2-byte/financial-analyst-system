@@ -13,14 +13,19 @@ def tool_registry():
 
 def create_mock_handler(name: str) -> Callable:
     """Create a mock async handler function."""
+
     async def handler(*args, **kwargs):
         return f"result from {name}"
+
     return handler
 
 
 def test_tool_definition_model():
     """Test ToolDefinition Pydantic model creation."""
-    params: Dict[str, Any] = {"type": "object", "properties": {"query": {"type": "string"}}}
+    params: Dict[str, Any] = {
+        "type": "object",
+        "properties": {"query": {"type": "string"}},
+    }
     handler = create_mock_handler("test_tool")
 
     tool = ToolDefinition(
@@ -61,12 +66,15 @@ def test_register_tool(tool_registry):
     params: Dict[str, Any] = {"type": "object", "properties": {}}
     handler = create_mock_handler("market_check")
 
-    tool_registry.register("market", ToolDefinition(
-        name="check_db_status",
-        description="Check database status",
-        parameters=params,
-        handler=handler,
-    ))
+    tool_registry.register(
+        "market",
+        ToolDefinition(
+            name="check_db_status",
+            description="Check database status",
+            parameters=params,
+            handler=handler,
+        ),
+    )
 
     tools = tool_registry.list_tools()
     assert len(tools) == 1
@@ -77,16 +85,22 @@ def test_register_multiple_tools_same_namespace(tool_registry):
     """Test registering multiple tools in the same namespace."""
     params: Dict[str, Any] = {"type": "object", "properties": {}}
 
-    tool_registry.register("market", ToolDefinition(
-        name="check_db_status",
-        description="Check database status",
-        parameters=params,
-    ))
-    tool_registry.register("market", ToolDefinition(
-        name="get_table_names",
-        description="Get table names",
-        parameters=params,
-    ))
+    tool_registry.register(
+        "market",
+        ToolDefinition(
+            name="check_db_status",
+            description="Check database status",
+            parameters=params,
+        ),
+    )
+    tool_registry.register(
+        "market",
+        ToolDefinition(
+            name="get_table_names",
+            description="Get table names",
+            parameters=params,
+        ),
+    )
 
     tools = tool_registry.list_tools()
     assert len(tools) == 2
@@ -96,21 +110,30 @@ def test_register_different_namespaces(tool_registry):
     """Test registering tools in different namespaces."""
     params: Dict[str, Any] = {"type": "object", "properties": {}}
 
-    tool_registry.register("market", ToolDefinition(
-        name="check_db_status",
-        description="Check database status",
-        parameters=params,
-    ))
-    tool_registry.register("data", ToolDefinition(
-        name="fetch_stock_price",
-        description="Fetch stock price",
-        parameters=params,
-    ))
-    tool_registry.register("analysis", ToolDefinition(
-        name="run_fundamental_scan",
-        description="Run fundamental scan",
-        parameters=params,
-    ))
+    tool_registry.register(
+        "market",
+        ToolDefinition(
+            name="check_db_status",
+            description="Check database status",
+            parameters=params,
+        ),
+    )
+    tool_registry.register(
+        "data",
+        ToolDefinition(
+            name="fetch_stock_price",
+            description="Fetch stock price",
+            parameters=params,
+        ),
+    )
+    tool_registry.register(
+        "analysis",
+        ToolDefinition(
+            name="run_fundamental_scan",
+            description="Run fundamental scan",
+            parameters=params,
+        ),
+    )
 
     tools = tool_registry.list_tools()
     assert len(tools) == 3
@@ -121,12 +144,15 @@ def test_get_tool_by_name(tool_registry):
     params: Dict[str, Any] = {"type": "object", "properties": {}}
     handler = create_mock_handler("check_db")
 
-    tool_registry.register("market", ToolDefinition(
-        name="check_db_status",
-        description="Check database status",
-        parameters=params,
-        handler=handler,
-    ))
+    tool_registry.register(
+        "market",
+        ToolDefinition(
+            name="check_db_status",
+            description="Check database status",
+            parameters=params,
+            handler=handler,
+        ),
+    )
 
     tool = tool_registry.get_tool("market:check_db_status")
     assert tool is not None
@@ -144,16 +170,22 @@ def test_list_tools_returns_all_tools(tool_registry):
     """Test list_tools returns all registered tools."""
     params: Dict[str, Any] = {"type": "object", "properties": {}}
 
-    tool_registry.register("market", ToolDefinition(
-        name="check_db_status",
-        description="Check DB",
-        parameters=params,
-    ))
-    tool_registry.register("data", ToolDefinition(
-        name="fetch_stock_price",
-        description="Fetch price",
-        parameters=params,
-    ))
+    tool_registry.register(
+        "market",
+        ToolDefinition(
+            name="check_db_status",
+            description="Check DB",
+            parameters=params,
+        ),
+    )
+    tool_registry.register(
+        "data",
+        ToolDefinition(
+            name="fetch_stock_price",
+            description="Fetch price",
+            parameters=params,
+        ),
+    )
 
     tools = tool_registry.list_tools()
     assert len(tools) == 2
@@ -166,11 +198,14 @@ def test_clear_removes_all_tools(tool_registry):
     """Test that clear() removes all registered tools."""
     params: Dict[str, Any] = {"type": "object", "properties": {}}
 
-    tool_registry.register("market", ToolDefinition(
-        name="check_db_status",
-        description="Check DB",
-        parameters=params,
-    ))
+    tool_registry.register(
+        "market",
+        ToolDefinition(
+            name="check_db_status",
+            description="Check DB",
+            parameters=params,
+        ),
+    )
 
     assert len(tool_registry.list_tools()) == 1
 
@@ -185,12 +220,15 @@ async def test_tool_handler_execution(tool_registry):
     params: Dict[str, Any] = {"type": "object", "properties": {}}
     handler = create_mock_handler("test_handler")
 
-    tool_registry.register("data", ToolDefinition(
-        name="test_handler_tool",
-        description="Test handler",
-        parameters=params,
-        handler=handler,
-    ))
+    tool_registry.register(
+        "data",
+        ToolDefinition(
+            name="test_handler_tool",
+            description="Test handler",
+            parameters=params,
+            handler=handler,
+        ),
+    )
 
     tool = tool_registry.get_tool("data:test_handler_tool")
     assert tool.handler is not None

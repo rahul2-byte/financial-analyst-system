@@ -1,5 +1,5 @@
 import logging
-from typing import Dict, Any
+from typing import Any
 
 from langgraph.graph import StateGraph, END
 
@@ -11,6 +11,7 @@ from app.core.graph_nodes import (
     verification_node,
     validation_node,
 )
+from app.core.error_handler import error_handler_node
 from agents.orchestration.schemas import PlannerResponseMode
 
 logger = logging.getLogger(__name__)
@@ -81,9 +82,9 @@ def route_after_validation(state: ResearchGraphState) -> str:
     return END
 
 
-def build_graph() -> Any:
-    """Build and compile the StateGraph with conditional edges."""
-    logger.info("Building StateGraph")
+def build_enhanced_graph() -> Any:
+    """Build the enhanced StateGraph with all improvements."""
+    logger.info("Building Enhanced StateGraph v2")
 
     graph = StateGraph(ResearchGraphState)
 
@@ -93,6 +94,7 @@ def build_graph() -> Any:
     graph.add_node("synthesis_node", synthesis_node)
     graph.add_node("verification_node", verification_node)
     graph.add_node("validation_node", validation_node)
+    graph.add_node("error_handler_node", error_handler_node)
 
     logger.info("Adding start edge to planner_node")
     graph.add_edge("__start__", "planner_node")
@@ -143,8 +145,8 @@ def build_graph() -> Any:
     logger.info("Compiling graph")
     compiled_graph = graph.compile()
 
-    logger.info("StateGraph compilation complete")
+    logger.info("Enhanced StateGraph v2 compilation complete")
     return compiled_graph
 
 
-research_graph = build_graph()
+enhanced_research_graph = build_enhanced_graph()
