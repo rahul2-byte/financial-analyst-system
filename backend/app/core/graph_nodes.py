@@ -87,6 +87,7 @@ async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
         "market_news": market_news_node,
         "macro_indicators": macro_indicators_node,
         "retrieval": retrieval_node,
+        "web_search": web_search_node,  # Web search capability
         "fundamental_analysis": fundamental_analysis_node,
         "sentiment_analysis": sentiment_analysis_node,
         "macro_analysis": macro_analysis_node,
@@ -783,3 +784,42 @@ async def retrieval_node(state: ResearchGraphState) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Retrieval node error: {e}")
         return {"errors": [str(e)]}
+
+
+async def web_search_node(state: ResearchGraphState) -> Dict[str, Any]:
+    """
+    Stateless node for web search using DuckDuckGo.
+    """
+    current_step = state.get("current_step", {})
+    params = current_step.get("parameters", {})
+    query = params.get("query", "")
+    time_range = params.get("time_range", "m")
+
+    try:
+        from data.providers.web_search import WebSearchProvider
+        
+        provider = WebSearchProvider()
+        results = provider.search(query, time_range=time_range)
+        
+        tool_result = ToolResult(
+            tool_name="web_search:search",
+            input_parameters=params,
+            output_data={"results": results},
+            extracted_metrics={},
+        )
+        tool_result.auto_extract_metrics()
+        
+        return {
+            "agent_outputs": {"web_search": json.dumps({"results": results})},
+            "tool_registry": [
+                {
+                    "tool_name": tool_result.tool_name,
+                    "input_parameters": tool_result.input_parameters,
+                    "output_data": tool_result.output_data,
+                    "extracted_metrics": tool_result.extracted_metrics,
+                }
+            ],
+        }
+    except Exception as e:
+        logger.error(f"Web search node error: {e}")
+        return {"errors": [f"Web search failed: {str(e)}"]}
