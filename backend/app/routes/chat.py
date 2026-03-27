@@ -41,7 +41,7 @@ async def chat_endpoint(request: ChatRequest):
                 async for event in orchestrator.execute_query(
                     user_query, conversation_history=request.messages
                 ):
-                    yield f"data: {json.dumps(event)}\n\n"
+                    yield f"data: {json.dumps(event.model_dump())}\n\n"
             except Exception as e_inner:
                 logger.error(f"Error in event generator: {e_inner}", exc_info=True)
                 err_event = StreamEvent(event="error", data=str(e_inner))
