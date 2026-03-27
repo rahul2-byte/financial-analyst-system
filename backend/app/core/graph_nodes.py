@@ -82,6 +82,7 @@ async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
     # Map agent names to stateless function nodes (NEW architecture)
     agent_node_map = {
         "market_offline": market_offline_node,
+        "market_online": price_and_fundamentals_node,  # Alias for price_and_fundamentals
         "price_and_fundamentals": price_and_fundamentals_node,
         "market_news": market_news_node,
         "macro_indicators": macro_indicators_node,
