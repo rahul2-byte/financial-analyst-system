@@ -104,14 +104,31 @@ async def planner_node(state: ResearchGraphState) -> Dict[str, Any]:
 
 
 async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
-    """Executes the next level of steps in parallel where dependencies are met."""
+    """Executes the next level of steps in parallel using stateless function nodes."""
+    
+    # NEW: Map agent names to stateless function nodes
+    agent_node_map = {
+        "market_offline": market_offline_node,
+        "price_and_fundamentals": price_and_fundamentals_node,
+        "market_news": market_news_node,
+        "macro_indicators": macro_indicators_node,
+        "retrieval": retrieval_node,
+        "fundamental_analysis": fundamental_analysis_node,
+        "sentiment_analysis": sentiment_analysis_node,
+        "macro_analysis": macro_analysis_node,
+        "technical_analysis": technical_analysis_node,
+        "contrarian_analysis": contrarian_analysis_node,
+    }
+    
+    # For now, keep the old agents as fallback
+    # TODO: Remove old agent map after migration is complete
     llm = LlamaCppService()
     sql_db = PostgresClient()
     vector_db = QdrantStorage()
     yf_fetcher = YFinanceFetcher()
     rss_fetcher = RSSNewsFetcher()
 
-    agent_map: Dict[str, BaseAgent] = {
+    legacy_agent_map: Dict[str, BaseAgent] = {
         "market_offline": MarketOfflineAgent(llm_service=llm, db_client=sql_db),
         "price_and_fundamentals": PriceAndFundamentalsAgent(
             llm_service=llm, yf_fetcher=yf_fetcher, sql_db=sql_db
@@ -161,8 +178,12 @@ async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
     agent_tasks = []
     for step in next_level:
         agent_name = _get_agent_name(step)
-        agent = agent_map.get(agent_name)
-        if not agent:
+        
+        # Try new function node first, fallback to legacy agent
+        node_func = agent_node_map.get(agent_name)
+        agent = legacy_agent_map.get(agent_name)
+        
+        if not node_func and not agent:
             logger.error(f"Agent {agent_name} not found in agent map")
             return {"errors": [f"Agent {agent_name} not found"]}
 
@@ -177,7 +198,13 @@ async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
         if context_from_prev:
             agent_query += f"\n\nContext from previous steps:\n{context_from_prev}"
 
-        agent_tasks.append(_execute_single_step(agent, agent_query, step))
+        # Use new node function if available, else legacy agent
+        if node_func:
+            # Create a modified state with current step info
+            modified_state = {**state, "current_step": step.model_dump()}
+            agent_tasks.append(node_func(modified_state))
+        else:
+            agent_tasks.append(_execute_single_step(agent, agent_query, step))
 
     if agent_tasks:
         results = await asyncio.gather(*agent_tasks, return_exceptions=True)
@@ -189,11 +216,20 @@ async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
 
     for step, result in zip(next_level, results):
         agent_name = _get_agent_name(step)
+        new_tool_results = []
+        
         if isinstance(result, Exception):
             logger.error(f"Step {step.step_number} failed: {result}")
             new_agent_outputs[str(step.step_number)] = f"Error: {str(result)}"
         else:
-            new_agent_outputs[str(step.step_number)] = result.get("output", "")
+            # Check if result is from new node function or legacy agent
+            if isinstance(result, dict) and "agent_outputs" in result:
+                # New node function result
+                new_agent_outputs[str(step.step_number)] = result.get("agent_outputs", {}).get(agent_name, "")
+                new_tool_results = result.get("tool_registry", [])
+            else:
+                # Legacy agent result
+                new_agent_outputs[str(step.step_number)] = result.get("output", "")
 
         new_executed_steps.append(
             {"step_number": step.step_number, "agent": agent_name}
@@ -202,6 +238,7 @@ async def execute_level_node(state: ResearchGraphState) -> Dict[str, Any]:
     return {
         "agent_outputs": new_agent_outputs,
         "executed_steps": new_executed_steps,
+        "tool_registry": new_tool_results,  # Will be merged via reducer
     }
 
 
