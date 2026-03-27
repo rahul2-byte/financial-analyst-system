@@ -6,7 +6,7 @@ from typing import Dict, Any
 from app.core.agent_factories import LLMServiceFactory
 from app.core.prompts import prompt_manager
 from app.models.request_models import Message
-from agents.orchestration.schemas import PlanData
+from app.core.orchestration_schemas import PlanData
 
 logger = logging.getLogger(__name__)
 

@@ -12,7 +12,7 @@ from app.core.graph_nodes import (
     validation_node,
 )
 from app.core.error_handler import error_handler_node
-from agents.orchestration.schemas import PlannerResponseMode
+from app.core.orchestration_schemas import PlannerResponseMode
 
 logger = logging.getLogger(__name__)
 

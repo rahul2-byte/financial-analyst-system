@@ -15,7 +15,7 @@ from data.providers.yfinance import YFinanceFetcher
 from data.providers.rss_news import RSSNewsFetcher
 from common.state import ToolResult
 
-from agents.orchestration.schemas import PlanData, ExecutionStep
+from app.core.orchestration_schemas import PlanData, ExecutionStep
 
 # Import new stateless nodes
 from app.core.nodes.planner_node import planner_node as planner_node_func
