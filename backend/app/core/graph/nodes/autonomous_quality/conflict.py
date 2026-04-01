@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.contracts.graph_node import finalize_node_output
+
 
 async def autonomous_conflict_resolution_node(state: dict[str, Any]) -> dict[str, Any]:
     results = dict(state.get("results", {}))
@@ -15,7 +17,7 @@ async def autonomous_conflict_resolution_node(state: dict[str, Any]) -> dict[str
         "method": "recency_and_evidence_weighting",
     }
 
-    return {
+    payload = {
         "results": results,
         "critic_decision": None,
         "status": "success",
@@ -25,3 +27,4 @@ async def autonomous_conflict_resolution_node(state: dict[str, Any]) -> dict[str
         "data": {"conflict_resolution": results["conflict_resolution"]},
         "errors": [],
     }
+    return finalize_node_output("autonomous_conflict_resolution_node", payload)

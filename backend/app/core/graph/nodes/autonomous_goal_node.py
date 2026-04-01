@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.contracts.graph_node import finalize_node_output
 from app.core.graph.ticker_extraction import extract_ticker
 
 
@@ -33,7 +34,7 @@ async def autonomous_goal_node(state: dict[str, Any]) -> dict[str, Any]:
         },
     ]
 
-    return {
+    payload = {
         "goal": goal,
         "hypotheses": hypotheses,
         "status": "success",
@@ -43,3 +44,4 @@ async def autonomous_goal_node(state: dict[str, Any]) -> dict[str, Any]:
         "data": {"goal": goal, "hypotheses": hypotheses},
         "errors": [],
     }
+    return finalize_node_output("autonomous_goal_node", payload)

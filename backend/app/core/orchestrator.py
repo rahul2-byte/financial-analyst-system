@@ -6,7 +6,7 @@ from typing import List, AsyncGenerator, Any, Optional, Dict
 from app.core.validators import sanitize_user_query, validate_query_not_malicious
 from app.core.observability import langfuse_context
 from app.core.logging import SessionLogger
-from app.core.graph.graph_builder import get_research_graph
+from app.core.graph.runtime.graph_builder import get_research_graph
 from app.models.request_models import Message
 from app.models.response_models import StreamEvent
 

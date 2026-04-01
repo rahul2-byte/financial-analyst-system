@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import Any
 
+from app.core.contracts.graph_node import finalize_node_output
 from app.core.node_resources import resources
 
 
@@ -82,7 +83,7 @@ async def autonomous_data_checker_node(state: dict[str, Any]) -> dict[str, Any]:
             stale.append(dataset)
 
     node_status = "success" if not missing and not stale else "partial"
-    return {
+    payload = {
         "data_check": {
             "missing_datasets": missing,
             "stale_datasets": stale,
@@ -98,6 +99,7 @@ async def autonomous_data_checker_node(state: dict[str, Any]) -> dict[str, Any]:
         },
         "errors": [],
     }
+    return finalize_node_output("autonomous_data_checker_node", payload)
 
 
 async def autonomous_data_planner_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -111,7 +113,7 @@ async def autonomous_data_planner_node(state: dict[str, Any]) -> dict[str, Any]:
     for dataset in stale:
         data_plan.append({"dataset": dataset, "priority": "P1", "action": "refresh"})
 
-    return {
+    payload = {
         "data_plan": data_plan,
         "status": "success",
         "reasoning": "Prioritized data operations: missing first, stale second.",
@@ -120,6 +122,7 @@ async def autonomous_data_planner_node(state: dict[str, Any]) -> dict[str, Any]:
         "data": {"data_plan": data_plan},
         "errors": [],
     }
+    return finalize_node_output("autonomous_data_planner_node", payload)
 
 
 async def autonomous_data_fetch_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -171,7 +174,7 @@ async def autonomous_data_fetch_node(state: dict[str, Any]) -> dict[str, Any]:
         dataset_state["error"] = error if error else (None if available else "INSUFFICIENT_DATA")
         current_status[dataset] = dataset_state
 
-    return {
+    payload = {
         "data_status": current_status,
         "retry_count_by_domain": retries,
         "status": "partial",
@@ -181,3 +184,4 @@ async def autonomous_data_fetch_node(state: dict[str, Any]) -> dict[str, Any]:
         "data": {"data_status": current_status},
         "errors": [],
     }
+    return finalize_node_output("autonomous_data_fetch_node", payload)

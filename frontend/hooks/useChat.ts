@@ -2,6 +2,7 @@ import { useState, useCallback, useRef } from "react";
 import { Message, StreamEvent } from "@/types";
 import { chatStream } from "@/lib/api";
 import { applyStreamEventToMessage } from "@/state/chat/messageReducer";
+import { normalizeStreamEvent } from "@/state/chat/eventNormalizer";
 
 const CHAT_DEBUG = process.env.NEXT_PUBLIC_CHAT_DEBUG === "true";
 
@@ -100,7 +101,8 @@ export function useChat() {
       
       await chatStream(
         historyForApi,
-        (event: StreamEvent) => {
+        (rawEvent: StreamEvent) => {
+          const event = normalizeStreamEvent(rawEvent);
           debugLog("Received event", event.type);
 
           if (event.type === "text_delta") {

@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from app.core.contracts.graph_node import finalize_node_output
+
 
 REQUIRED_FIELDS = {
     "decision",
@@ -20,7 +22,7 @@ REQUIRED_FIELDS = {
 async def autonomous_validation_node(state: dict[str, Any]) -> dict[str, Any]:
     synthesis = state.get("results", {}).get("synthesis", {})
     if not isinstance(synthesis, dict) or not synthesis:
-        return {
+        payload = {
             "status": "failure",
             "reasoning": "Validation failed: synthesis payload is missing.",
             "confidence_score": float(state.get("confidence_score", 0.0)),
@@ -29,10 +31,11 @@ async def autonomous_validation_node(state: dict[str, Any]) -> dict[str, Any]:
             "errors": ["Missing synthesis payload"],
             "validation_passed": False,
         }
+        return finalize_node_output("autonomous_validation_node", payload)
 
     claims = synthesis.get("claims", [])
     if not isinstance(claims, list):
-        return {
+        payload = {
             "status": "failure",
             "reasoning": "Validation failed: synthesis claims must be a list.",
             "confidence_score": float(state.get("confidence_score", 0.0)),
@@ -41,6 +44,7 @@ async def autonomous_validation_node(state: dict[str, Any]) -> dict[str, Any]:
             "errors": ["Invalid synthesis claims shape"],
             "validation_passed": False,
         }
+        return finalize_node_output("autonomous_validation_node", payload)
 
     missing_claim_evidence = [
         claim.get("claim_id", "unknown")
@@ -50,7 +54,7 @@ async def autonomous_validation_node(state: dict[str, Any]) -> dict[str, Any]:
         or len(claim.get("evidence_refs", [])) == 0
     ]
     if missing_claim_evidence:
-        return {
+        payload = {
             "status": "failure",
             "reasoning": "Validation failed: one or more claims have no evidence references.",
             "confidence_score": float(state.get("confidence_score", 0.0)),
@@ -61,6 +65,7 @@ async def autonomous_validation_node(state: dict[str, Any]) -> dict[str, Any]:
             ],
             "validation_passed": False,
         }
+        return finalize_node_output("autonomous_validation_node", payload)
 
     confidence_score = float(state.get("confidence_score", 0.0))
     final_confidence = float(min(1.0, max(0.0, confidence_score)))
@@ -86,7 +91,7 @@ async def autonomous_validation_node(state: dict[str, Any]) -> dict[str, Any]:
 
     missing = REQUIRED_FIELDS - set(final_output)
     if missing:
-        return {
+        payload = {
             "status": "failure",
             "reasoning": "Validation failed: output contract incomplete.",
             "confidence_score": confidence_score,
@@ -95,8 +100,9 @@ async def autonomous_validation_node(state: dict[str, Any]) -> dict[str, Any]:
             "errors": [f"Missing final output fields: {sorted(missing)}"],
             "validation_passed": False,
         }
+        return finalize_node_output("autonomous_validation_node", payload)
 
-    return {
+    payload = {
         "status": "success",
         "reasoning": "Validation completed with explicit insufficiency handling.",
         "confidence_score": confidence_score,
@@ -108,3 +114,4 @@ async def autonomous_validation_node(state: dict[str, Any]) -> dict[str, Any]:
         "final_report": json.dumps(final_output, ensure_ascii=True),
         "errors": [],
     }
+    return finalize_node_output("autonomous_validation_node", payload)

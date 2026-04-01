@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 import json
 
+from app.core.contracts.graph_node import finalize_node_output
 from app.core.graph.router_policy import decide_next_action
 
 
@@ -26,7 +27,7 @@ async def autonomous_router_node(state: dict[str, Any]) -> dict[str, Any]:
             "reasoning": f"Terminated via router decision '{decision}'.",
             "next_action": "complete",
         }
-    return {
+    payload = {
         "iteration_count": next_iteration,
         "router_decision": decision,
         "termination_reason": decision if decision.startswith("terminate_") else None,
@@ -42,3 +43,4 @@ async def autonomous_router_node(state: dict[str, Any]) -> dict[str, Any]:
         if terminal_output is not None
         else None,
     }
+    return finalize_node_output("autonomous_router_node", payload)
