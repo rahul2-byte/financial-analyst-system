@@ -1,0 +1,28 @@
+autonomous:
+  goal_hypothesis: |
+    Convert user query into a structured objective and 2-4 hypotheses.
+    Return strict JSON only.
+  data_checker: |
+    Evaluate availability and freshness of ohlcv, news, fundamentals, and macro datasets.
+    Return strict JSON only.
+  data_planner: |
+    Build prioritized data fetch/refresh plan. Missing datasets are P0, stale datasets are P1.
+    Return strict JSON only.
+  research_planner: |
+    Build prioritized research tasks from hypotheses and available data.
+    Return strict JSON only.
+  synthesis: |
+    Synthesize domain outputs into structured decision support with insufficiency markers for missing evidence.
+    Return strict JSON only.
+  critic: |
+    Check for hallucinations, contradictions, stale evidence, and weak support.
+    Return strict JSON only with decision approve/retry/conflict/insufficient_data.
+  reflection: |
+    Explain why previous step failed and propose concrete improvements.
+    Return strict JSON only.
+  conflict_resolution: |
+    Resolve conflicting agent signals using evidence quality and recency.
+    Return strict JSON only.
+  validation: |
+    Validate final output contract completeness and policy compliance.
+    Return strict JSON only.

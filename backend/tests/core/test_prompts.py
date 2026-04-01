@@ -22,4 +22,8 @@ def test_prompt_manager_loads_prompt_directory():
 
     assert "technical" in manager.prompts
     assert "planner" in manager.prompts
+    assert "autonomous_orchestrator" in manager.prompts
     assert isinstance(manager.get_prompt("technical.system"), str)
+    assert isinstance(
+        manager.get_prompt("autonomous_orchestrator.autonomous.critic"), str
+    )

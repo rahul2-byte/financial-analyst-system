@@ -1,214 +1,105 @@
-import logging
-from typing import Dict, Any
+from __future__ import annotations
 
-from langgraph.graph import StateGraph, END
+from typing import Any
+
+from langgraph.graph import END, StateGraph
 
 from app.core.graph_state import ResearchGraphState
-from app.core.graph_nodes import (
-    planner_node,
-    execute_level_node,
-    synthesis_node,
-    verification_node,
-    validation_node,
-)
-from app.core.error_handler import error_handler_node
-from app.core.orchestration_schemas import PlannerResponseMode
-
-logger = logging.getLogger(__name__)
-
-
-def route_after_planner(state: ResearchGraphState) -> str:
-    """Route after planner node based on errors or response mode."""
-    errors = state.get("errors", [])
-    if errors:
-        logger.warning(f"Planner has errors: {errors}, routing to error_handler")
-        return "error_handler"
-
-    plan = state.get("plan")
-    if not plan:
-        logger.warning("No plan found in state, ending graph")
-        return END
-
-    response_mode = plan.get("response_mode", PlannerResponseMode.EXECUTE_PLAN)
-
-    if response_mode != PlannerResponseMode.EXECUTE_PLAN:
-        logger.info(f"Response mode is '{response_mode}', ending graph")
-        return END
-
-    logger.info("Response mode is 'execute_plan', routing to execute_level_node")
-    return "execute_level_node"
+from app.core.nodes.autonomous_validation_node import autonomous_validation_node
+from app.core.nodes.conflict_resolution_node import conflict_resolution_node
+from app.core.nodes.critic_node import critic_node
+from app.core.nodes.data_checker_node import data_checker_node
+from app.core.nodes.data_fetch_node import data_fetch_node
+from app.core.nodes.data_planner_node import data_planner_node
+from app.core.nodes.goal_hypothesis_node import goal_hypothesis_node
+from app.core.nodes.reflection_node import reflection_node
+from app.core.nodes.research_execution_node import research_execution_node
+from app.core.nodes.research_planner_node import research_planner_node
+from app.core.nodes.router_node import router_node
+from app.core.nodes.synthesis_node import synthesis_node
 
 
-def route_after_execution(state: ResearchGraphState) -> str:
-    """Route after execution node - check errors, loop if more steps, else go to synthesis."""
-    errors = state.get("errors", [])
-    if errors:
-        logger.warning(f"Execution has errors: {errors}, routing to error_handler")
-        return "error_handler"
-
-    plan = state.get("plan")
-    executed_steps = state.get("executed_steps", [])
-
-    if not plan:
-        logger.warning("No plan found in state, ending graph")
-        return END
-
-    execution_steps = plan.get("execution_steps", [])
-    total_steps = len(execution_steps)
-    executed_count = len(executed_steps)
-
-    if executed_count >= total_steps:
-        logger.info(f"All {executed_count} steps executed, routing to synthesis_node")
-        return "synthesis_node"
-
-    logger.info(
-        f"Executed {executed_count}/{total_steps} steps, looping to execute_level_node"
-    )
-    return "execute_level_node"
+def _route_after_router(state: ResearchGraphState) -> str:
+    decision = state.get("router_decision")
+    if isinstance(decision, str):
+        return decision
+    return "terminate_failure"
 
 
-def route_after_verification(state: ResearchGraphState) -> str:
-    """Route after verification node based on errors, validity, or retry count."""
-    verification_passed = state.get("verification_passed", False)
-    verification_retry_count = state.get("verification_retry_count", 0)
-
-    if verification_passed:
-        logger.info("Verification passed, routing to validation_node")
-        return "validation_node"
-
-    if verification_retry_count < 3:
-        logger.warning(
-            f"Verification failed (retry {verification_retry_count}/3), routing to synthesis_node"
-        )
-        return "synthesis_node"
-
-    logger.error("Verification failed after 3 retries, ending graph")
-    return END
+def _route_to_router(_state: ResearchGraphState) -> str:
+    return "run_router"
 
 
-def route_after_validation(state: ResearchGraphState) -> str:
-    """Route after validation node - check errors or end."""
-    errors = state.get("errors", [])
-    if errors:
-        logger.warning(f"Validation has errors: {errors}, routing to error_handler")
-        return "error_handler"
-
-    logger.info("Validation complete, ending graph")
-    return END
+def _route_after_conflict_resolution(_state: ResearchGraphState) -> str:
+    return "run_synthesis"
 
 
-def route_after_synthesis(state: ResearchGraphState) -> str:
-    """Route after synthesis node - check errors or proceed to verification."""
-    # Always go to verification - even if there are downstream errors
-    # Verification will handle retry logic
-    logger.info("Synthesis complete, routing to verification_node")
-    return "verification_node"
-
-
-def route_after_error_handler(state: ResearchGraphState) -> str:
-    """Route after error handler - retry or end."""
-    should_retry = state.get("should_retry", False)
-    should_escalate = state.get("should_escalate", False)
-
-    if should_escalate:
-        logger.error("Error escalation triggered, ending graph")
-        return END
-
-    if should_retry:
-        logger.info("Retrying failed execution steps, routing to execute_level_node")
-        return "execute_level_node"
-
-    logger.error("Error handler returned no retry or escalate, ending graph")
-    return END
+def _route_after_synthesis(_state: ResearchGraphState) -> str:
+    return "run_critic"
 
 
 def build_graph() -> Any:
-    """Build and compile the StateGraph with conditional edges."""
-    logger.info("Building StateGraph")
-
     graph = StateGraph(ResearchGraphState)
 
-    logger.info("Adding nodes to graph")
-    graph.add_node("planner_node", planner_node)
-    graph.add_node("execute_level_node", execute_level_node)
+    graph.add_node("router_node", router_node)
+    graph.add_node("goal_hypothesis_node", goal_hypothesis_node)
+    graph.add_node("data_checker_node", data_checker_node)
+    graph.add_node("data_planner_node", data_planner_node)
+    graph.add_node("data_fetch_node", data_fetch_node)
+    graph.add_node("research_planner_node", research_planner_node)
+    graph.add_node("research_execution_node", research_execution_node)
     graph.add_node("synthesis_node", synthesis_node)
-    graph.add_node("verification_node", verification_node)
-    graph.add_node("validation_node", validation_node)
-    graph.add_node("error_handler", error_handler_node)
+    graph.add_node("critic_node", critic_node)
+    graph.add_node("reflection_node", reflection_node)
+    graph.add_node("conflict_resolution_node", conflict_resolution_node)
+    graph.add_node("validation_node", autonomous_validation_node)
 
-    logger.info("Adding start edge to planner_node")
-    graph.add_edge("__start__", "planner_node")
+    graph.set_entry_point("router_node")
 
-    logger.info("Adding conditional edges from planner_node")
     graph.add_conditional_edges(
-        "planner_node",
-        route_after_planner,
+        "router_node",
+        _route_after_router,
         {
-            "execute_level_node": "execute_level_node",
-            "error_handler": "error_handler",
-            END: END,
+            "run_goal_hypothesis": "goal_hypothesis_node",
+            "run_data_check": "data_checker_node",
+            "run_data_plan": "data_planner_node",
+            "run_data_fetch": "data_fetch_node",
+            "run_research_plan": "research_planner_node",
+            "run_research_exec": "research_execution_node",
+            "run_synthesis": "synthesis_node",
+            "run_critic": "critic_node",
+            "run_reflection": "reflection_node",
+            "run_conflict_resolution": "conflict_resolution_node",
+            "run_validation": "validation_node",
+            "terminate_success": END,
+            "terminate_insufficient_data": END,
+            "terminate_budget_exceeded": END,
+            "terminate_failure": END,
         },
     )
 
-    logger.info("Adding conditional edges from execute_level_node")
-    graph.add_conditional_edges(
-        "execute_level_node",
-        route_after_execution,
-        {
-            "synthesis_node": "synthesis_node",
-            "execute_level_node": "execute_level_node",
-            "error_handler": "error_handler",
-        },
-    )
+    graph.add_conditional_edges("goal_hypothesis_node", _route_to_router, {"run_router": "router_node"})
+    graph.add_conditional_edges("data_checker_node", _route_to_router, {"run_router": "router_node"})
+    graph.add_conditional_edges("data_planner_node", _route_to_router, {"run_router": "router_node"})
+    graph.add_conditional_edges("data_fetch_node", _route_to_router, {"run_router": "router_node"})
+    graph.add_conditional_edges("research_planner_node", _route_to_router, {"run_router": "router_node"})
+    graph.add_conditional_edges("research_execution_node", _route_to_router, {"run_router": "router_node"})
+    graph.add_conditional_edges("critic_node", _route_to_router, {"run_router": "router_node"})
+    graph.add_conditional_edges("reflection_node", _route_to_router, {"run_router": "router_node"})
+    graph.add_conditional_edges("validation_node", _route_to_router, {"run_router": "router_node"})
 
-    logger.info("Adding conditional edges from synthesis_node")
+    graph.add_conditional_edges(
+        "conflict_resolution_node",
+        _route_after_conflict_resolution,
+        {"run_synthesis": "synthesis_node"},
+    )
     graph.add_conditional_edges(
         "synthesis_node",
-        route_after_synthesis,
-        {
-            "verification_node": "verification_node",
-            "error_handler": "error_handler",
-        },
+        _route_after_synthesis,
+        {"run_critic": "critic_node"},
     )
 
-    logger.info("Adding conditional edges from verification_node")
-    graph.add_conditional_edges(
-        "verification_node",
-        route_after_verification,
-        {
-            "validation_node": "validation_node",
-            "synthesis_node": "synthesis_node",
-            "error_handler": "error_handler",
-            END: END,
-        },
-    )
-
-    logger.info("Adding conditional edges from validation_node")
-    graph.add_conditional_edges(
-        "validation_node",
-        route_after_validation,
-        {
-            END: END,
-            "error_handler": "error_handler",
-        },
-    )
-
-    logger.info("Adding conditional edges from error_handler")
-    graph.add_conditional_edges(
-        "error_handler",
-        route_after_error_handler,
-        {
-            "planner_node": "planner_node",
-            "execute_level_node": "execute_level_node",
-            END: END,
-        },
-    )
-
-    logger.info("Compiling graph")
-    compiled_graph = graph.compile()
-
-    logger.info("StateGraph compilation complete")
-    return compiled_graph
+    return graph.compile()
 
 
 research_graph = build_graph()
