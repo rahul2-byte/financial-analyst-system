@@ -19,7 +19,7 @@ SentimentAgent
 
 RetrievalAgent
 
-- Uses embedding model + FAISS
+- Uses embedding model + Qdrant
 - Only retrieves context
 
 ResearchAgent

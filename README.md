@@ -96,7 +96,7 @@ The governance layer that defines the system's behavior and ethics.
 ### 3. Infrastructure
 Start the required services using Docker:
 ```bash
-docker-compose up -d
+docker compose -f backend/docker-compose.yml up -d
 ```
 This will spin up **PostgreSQL**, **Qdrant**, and **Phoenix** (for observability).
 
@@ -104,9 +104,11 @@ This will spin up **PostgreSQL**, **Qdrant**, and **Phoenix** (for observability
 
 ## 🛡 Verification & Standards
 
-To ensure the platform meets its production-grade mandates, run the pipeline verification:
+To ensure the platform meets its production-grade mandates, run backend checks:
 ```bash
-python verify_pipeline.py
+pytest backend/tests
+ruff check backend/
+mypy backend/
 ```
 
 - **Testing**: Run tests using `pytest backend/tests`.

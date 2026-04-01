@@ -1,10 +1,12 @@
 from typing import Optional, Dict, Any
 from sqlmodel import Field, SQLModel, JSON, Column
 from datetime import datetime
+from sqlalchemy import UniqueConstraint
 
 
 class OHLCV(SQLModel, table=True):
     __tablename__ = "ohlcv_data"
+    __table_args__ = (UniqueConstraint("ticker", "date", name="uq_ohlcv_ticker_date"),)
 
     id: Optional[int] = Field(default=None, primary_key=True)
     ticker: str = Field(index=True)
@@ -63,3 +65,30 @@ class MacroIndicators(SQLModel, table=True):
     usd_inr: Optional[float] = None
     crude_oil: Optional[float] = None
     gold: Optional[float] = None
+
+
+class CacheIndex(SQLModel, table=True):
+    """System-wide cache index for tracking data freshness."""
+
+    __tablename__ = "cache_index"
+    __table_args__ = (UniqueConstraint("ticker", "dataset_type", name="uq_cache_ticker_dataset"),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    ticker: str = Field(index=True)
+    dataset_type: str = Field(index=True)  # "ohlcv", "fundamentals", "news"
+    last_updated: datetime = Field(default_factory=datetime.utcnow)
+    available_range: Optional[str] = None
+    extra_info: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+
+
+class ResearchAuditLog(SQLModel, table=True):
+    """Persistent storage for agent execution logs."""
+
+    __tablename__ = "research_audit_log"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    query_id: str = Field(index=True)
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    agent_name: str
+    action: str
+    data: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))

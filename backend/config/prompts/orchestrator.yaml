@@ -20,11 +20,20 @@ synthesis:
        If a metric is not present in the data above, state 'Data not available' instead of guessing.
     4. Do not mention the agents or the internal process.
   
+  feedback: |
+    PREVIOUS ATTEMPT FAILED VERIFICATION: {error}
+    Please correct the inaccuracies above. Ensure that you strictly use only the verified metrics provided.
+  
   redaction_note: |
     Note: Numeric values were omitted because consistency checks failed for this run.
 
     {redacted_text}
 
-feedback: |
-  PREVIOUS ATTEMPT FAILED VERIFICATION: {error}
-  Please correct the inaccuracies above. Ensure that you strictly use only the verified metrics provided.
+research_planner: |
+  User Query: {user_query}
+  Available Data: {manifest}
+  {conflict_context}
+  
+  Select the most relevant research agents from: {selected_agents}
+  
+  Return JSON: {{"selected_agents": ["agent1", "agent2"]}}

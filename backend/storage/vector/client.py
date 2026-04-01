@@ -3,7 +3,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from data.interfaces.storage import IVectorStorage
 from data.schemas.text import ProcessedChunk
-from config.settings import settings
+from app.config import settings
 import uuid
 import math
 from datetime import datetime
@@ -76,7 +76,7 @@ class QdrantStorage(IVectorStorage):
 
     def hybrid_search(
         self,
-        query_embedding: List[float],
+        query_embedding: Optional[List[float]],
         query_text: str,
         limit: int = 5,
         ticker: Optional[str] = None,
@@ -95,12 +95,14 @@ class QdrantStorage(IVectorStorage):
                 ]
             )
 
-        vector_results = self.client.search(
-            collection_name=self.collection_name,
-            query_vector=query_embedding,
-            query_filter=vector_filter,
-            limit=20,
-        )
+        vector_results = []
+        if query_embedding:
+            vector_results = self.client.search(
+                collection_name=self.collection_name,
+                query_vector=query_embedding,
+                query_filter=vector_filter,
+                limit=20,
+            )
 
         # 2. Text/Keyword Search (Top 20 candidates)
         text_filter = models.Filter(
@@ -188,7 +190,7 @@ class QdrantStorage(IVectorStorage):
 
     def search(
         self,
-        query_embedding: List[float],
+        query_embedding: Optional[List[float]] = None,
         limit: int = 5,
         query_text: Optional[str] = None,
         ticker: Optional[str] = None,
@@ -196,6 +198,9 @@ class QdrantStorage(IVectorStorage):
         # Use hybrid search if query text is provided
         if query_text:
             return self.hybrid_search(query_embedding, query_text, limit, ticker)
+
+        if not query_embedding:
+            return []
 
         # Fallback to standard vector search
         vector_filter = None

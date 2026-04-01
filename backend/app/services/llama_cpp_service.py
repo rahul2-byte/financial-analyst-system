@@ -5,10 +5,12 @@ import asyncio
 from typing import AsyncGenerator, List, Dict, Any
 
 from app.core.observability import observe, langfuse_context
+from app.core.cache import cached_llm_response
 from app.services.llm_interface import LLMServiceInterface
 from app.models.request_models import Message
 from app.config import settings
 from app.core.llama_manager import llama_manager
+from app.core.policies.retry_policy import MAX_RETRIES, exponential_backoff_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +59,7 @@ class LlamaCppService(LLMServiceInterface):
             payload["response_format"] = kwargs["response_format"]
 
         last_error = None
-        for attempt in range(3):
+        for attempt in range(MAX_RETRIES):
             try:
                 await llama_manager.ensure_server_running()
                 async with httpx.AsyncClient(timeout=settings.api.timeout) as client:
@@ -87,7 +89,9 @@ class LlamaCppService(LLMServiceInterface):
                         logger.warning(
                             f"Llama.cpp 500 error (attempt {attempt+1}): {last_error}"
                         )
-                        await asyncio.sleep(2**attempt)  # Exponential backoff
+                        await asyncio.sleep(
+                            exponential_backoff_seconds(attempt)
+                        )  # Exponential backoff
                     else:
                         raise Exception(
                             f"Llama.cpp API Error: {response.status_code} - {response.text}"
@@ -95,15 +99,16 @@ class LlamaCppService(LLMServiceInterface):
             except Exception as e:
                 last_error = str(e)
                 logger.error(f"Error in Llama.cpp generate (attempt {attempt+1}): {e}")
-                if attempt < 2:
-                    await asyncio.sleep(2**attempt)
+                if attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(exponential_backoff_seconds(attempt))
                 else:
                     raise Exception(
-                        f"Failed after 3 attempts. Last error: {last_error}"
+                        f"Failed after {MAX_RETRIES} attempts. Last error: {last_error}"
                     )
 
         return f"System Error: LLM request failed after retries. ({last_error})"
 
+    @cached_llm_response(ttl=300)
     @observe(name="LLM:GenerateMessage")
     async def generate_message(
         self, messages: List[Message], model: str, **kwargs
@@ -126,7 +131,7 @@ class LlamaCppService(LLMServiceInterface):
             payload["tools"] = kwargs["tools"]
 
         last_error = None
-        for attempt in range(3):
+        for attempt in range(MAX_RETRIES):
             try:
                 await llama_manager.ensure_server_running()
                 async with httpx.AsyncClient(timeout=settings.api.timeout) as client:
@@ -151,21 +156,21 @@ class LlamaCppService(LLMServiceInterface):
                         )
                     elif response.status_code == 500:
                         last_error = f"API 500: {response.text}"
-                        await asyncio.sleep(2**attempt)
+                        await asyncio.sleep(exponential_backoff_seconds(attempt))
                     else:
                         raise Exception(
                             f"Llama.cpp API Error: {response.status_code} - {response.text}"
                         )
             except Exception as e:
                 last_error = str(e)
-                if attempt < 2:
-                    await asyncio.sleep(2**attempt)
+                if attempt < MAX_RETRIES - 1:
+                    await asyncio.sleep(exponential_backoff_seconds(attempt))
                 else:
                     raise Exception(
-                        f"Failed after 3 attempts. Last error: {last_error}"
+                        f"Failed after {MAX_RETRIES} attempts. Last error: {last_error}"
                     )
 
-        raise Exception(f"Failed after 3 attempts. Last error: {last_error}")
+        raise Exception(f"Failed after {MAX_RETRIES} attempts. Last error: {last_error}")
 
     def generate_stream(
         self, messages: List[Message], model: str, **kwargs

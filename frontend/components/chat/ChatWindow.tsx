@@ -10,9 +10,10 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 
 interface ChatWindowProps {
   messages: Message[];
+  onPromptSelect?: (prompt: string) => void;
 }
 
-export const ChatWindow: React.FC<ChatWindowProps> = ({ messages }) => {
+export const ChatWindow: React.FC<ChatWindowProps> = ({ messages, onPromptSelect }) => {
   const scrollRef = useRef<HTMLDivElement>(null);
   const [showScrollButton, setShowScrollButton] = useState(false);
   const [shouldAutoScroll, setShouldAutoScroll] = useState(true);
@@ -88,6 +89,7 @@ export const ChatWindow: React.FC<ChatWindowProps> = ({ messages }) => {
               ].map((prompt) => (
                 <button 
                   key={prompt} 
+                  onClick={() => onPromptSelect?.(prompt)}
                   className="p-4 rounded-xl border border-border-subtle bg-bg-secondary text-sm font-medium text-text-secondary hover:border-accent/40 hover:bg-accent/5 hover:text-text-primary transition-all text-left group"
                 >
                   <span className="opacity-70 group-hover:opacity-100">{prompt}</span>

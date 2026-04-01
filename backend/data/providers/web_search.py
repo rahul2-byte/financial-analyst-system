@@ -50,6 +50,23 @@ class WebSearchProvider:
         }
         return aliases.get(normalized, default)
 
+    def search(
+        self,
+        query: str,
+        max_results: int = 5,
+        time_range: Optional[str] = "m",
+        mode: str = "general",
+    ) -> List[Dict[str, Any]]:
+        """Unified search facade used by graph nodes."""
+        normalized_mode = (mode or "general").strip().lower()
+        if normalized_mode in {"news", "latest_news", "latest-news"}:
+            return self.search_latest_news(
+                query, max_results=max_results, time_range=time_range
+            )
+        return self.search_general_web(
+            query, max_results=max_results, time_range=time_range
+        )
+
     @observe(name="Tool:WebSearch:General")
     def search_general_web(
         self, query: str, max_results: int = 5, time_range: Optional[str] = None
@@ -58,21 +75,6 @@ class WebSearchProvider:
         Perform a standard text search on DuckDuckGo.
         time_range can be 'd' (day), 'w' (week), 'm' (month), 'y' (year).
         """
-        import asyncio
-
-        async def _run_search():
-            try:
-                safe_time_range = self.normalize_time_range(time_range, default=None)
-                results = self.ddgs.text(
-                    query,
-                    max_results=max_results,
-                    timelimit=safe_time_range,
-                )
-                return list(results)
-            except Exception as e:
-                logger.error(f"DuckDuckGo Search error: {e}")
-                return [{"error": str(e)}]
-
         try:
             # We can't use asyncio.wait_for directly here because it's synchronous code
             # But the orchestrator makes it async. Let's just catch exceptions from ddgs properly.

@@ -1,9 +1,9 @@
-import os
 import logging
 import functools
 import inspect
 import json
 from typing import Any, Optional
+from app.config import settings
 
 # OpenTelemetry Imports
 from opentelemetry import trace
@@ -16,7 +16,7 @@ from opentelemetry.trace import Status, StatusCode
 logger = logging.getLogger(__name__)
 
 # --- Initialization ---
-PHOENIX_HOST = os.getenv("PHOENIX_HOST", "http://localhost:6006")
+PHOENIX_HOST = settings.PHOENIX_HOST
 PHOENIX_ENDPOINT = f"{PHOENIX_HOST}/v1/traces"
 
 # Initialize Tracer

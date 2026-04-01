@@ -4,7 +4,7 @@ from typing import List, Optional, Literal, Dict, Any
 
 class Message(BaseModel):
     role: Literal["user", "assistant", "system", "tool"]
-    content: Optional[str] = None
+    content: str = Field(min_length=0, max_length=50000)
     name: Optional[str] = None
     tool_call_id: Optional[str] = None
     tool_calls: Optional[List[Dict[str, Any]]] = None

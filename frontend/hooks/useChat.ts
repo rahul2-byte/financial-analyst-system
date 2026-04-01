@@ -1,26 +1,14 @@
 import { useState, useCallback, useRef } from "react";
-import { Message, StreamEvent, ToolStatus } from "@/types";
+import { Message, StreamEvent } from "@/types";
 import { chatStream } from "@/lib/api";
+import { applyStreamEventToMessage } from "@/state/chat/messageReducer";
 
-const STATUS_NOISE_PATTERNS: RegExp[] = [
-  /^Executing:/i,
-  /^Step\s+\d+:\s+.+\s+running\.{0,3}$/i,
-  /^Step\s+\d+:\s+.+\s+completed\.{0,3}$/i,
-];
+const CHAT_DEBUG = process.env.NEXT_PUBLIC_CHAT_DEBUG === "true";
 
-const STATUS_PRIORITY_PATTERNS: RegExp[] = [
-  /initializing/i,
-  /planning/i,
-  /synthesizing|synthesis/i,
-  /verifying|verification/i,
-  /compliance/i,
-  /failed|error|crashed/i,
-];
-
-function shouldDisplayStatus(message: string): boolean {
-  const isPriority = STATUS_PRIORITY_PATTERNS.some((pattern) => pattern.test(message));
-  if (isPriority) return true;
-  return !STATUS_NOISE_PATTERNS.some((pattern) => pattern.test(message));
+function debugLog(...args: unknown[]) {
+  if (CHAT_DEBUG) {
+    console.log("[useChat]", ...args);
+  }
 }
 
 export function useChat() {
@@ -35,7 +23,7 @@ export function useChat() {
   messagesRef.current = messages;
 
   const sendMessage = useCallback(async (content: string) => {
-    console.log("[useChat] sendMessage called:", content);
+    debugLog("sendMessage called", content);
     if (!content.trim() || isLoading) return;
 
     // Use a robust UUID generator fallback for non-secure contexts
@@ -108,12 +96,12 @@ export function useChat() {
 
     try {
       const historyForApi = [...messagesRef.current, userMessage];
-      console.log("[useChat] Calling chatStream...");
+      debugLog("Calling chatStream");
       
       await chatStream(
         historyForApi,
         (event: StreamEvent) => {
-          console.log(`[useChat] Received event: ${event.type}`);
+          debugLog("Received event", event.type);
 
           if (event.type === "text_delta") {
             pendingTextRef.current += event.content || "";
@@ -128,63 +116,7 @@ export function useChat() {
             const targetIndex = prev.findIndex((m) => m.id === assistantMessageId);
             if (targetIndex === -1) return prev;
 
-            const updatedMsg = { ...prev[targetIndex] };
-
-            if (event.type === "chart") {
-              const chartPayload = {
-                title: event.title,
-                chartType: event.chartType,
-                data: event.data,
-                xAxisKey: event.xAxisKey,
-                seriesKeys: event.seriesKeys,
-              };
-              updatedMsg.charts = [...(updatedMsg.charts || []), chartPayload];
-            } else if (event.type === "status") {
-              const statusMessage = event.message?.trim() || "";
-              if (!statusMessage || !shouldDisplayStatus(statusMessage)) {
-                return prev;
-              }
-
-              // Add generic status updates to reasoning steps for immediate feedback
-              const steps = [...(updatedMsg.reasoning_steps || [])];
-              // Only add if not already present
-              if (!steps.find(s => s.input === statusMessage)) {
-                steps.push({
-                  tool_id: `status-${steps.length}`,
-                  step_number: -1, // Use -1 to keep system status at top
-                  agent: "System",
-                  tool_name: "Orchestrator",
-                  status: "completed",
-                  input: statusMessage,
-                });
-                updatedMsg.reasoning_steps = steps;
-              }
-            } else if (event.type === "tool_status") {
-              const stepData: ToolStatus = {
-                tool_id: event.tool_id,
-                step_number: event.step_number,
-                agent: event.agent,
-                tool_name: event.tool_name,
-                status: event.status,
-                input: event.input,
-                output: event.output,
-              };
-              const steps = [...(updatedMsg.reasoning_steps || [])];
-              const existingIndex = steps.findIndex((s) => s.tool_id === stepData.tool_id);
-              
-              if (existingIndex !== -1) {
-                steps[existingIndex] = { ...steps[existingIndex], ...stepData };
-              } else {
-                steps.push(stepData as ToolStatus);
-              }
-              updatedMsg.reasoning_steps = steps.sort((a, b) => a.step_number - b.step_number);
-            } else if (event.type === "done") {
-              updatedMsg.isStreaming = false;
-            } else if (event.type === "error") {
-              const errorMessage = event.message || event.content || "Unknown error";
-              updatedMsg.content = (updatedMsg.content || "") + `\n\n*Error: ${errorMessage}*`;
-              updatedMsg.isStreaming = false;
-            }
+            const updatedMsg = applyStreamEventToMessage(prev[targetIndex], event);
 
             const next = [...prev];
             next[targetIndex] = updatedMsg;

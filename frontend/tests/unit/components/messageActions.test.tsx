@@ -21,12 +21,9 @@ describe("MessageActions", () => {
     expect(screen.queryByTitle("Copy message")).not.toBeInTheDocument();
   });
 
-  it("shows assistant action controls after streaming completes", () => {
+  it("shows copy action after streaming completes", () => {
     render(<MessageActions message={baseMessage} isUser={false} isStreaming={false} />);
 
-    expect(screen.getByTitle("Helpful")).toBeInTheDocument();
-    expect(screen.getByTitle("Not helpful")).toBeInTheDocument();
     expect(screen.getByTitle("Copy message")).toBeInTheDocument();
-    expect(screen.getByTitle("Regenerate")).toBeInTheDocument();
   });
 });

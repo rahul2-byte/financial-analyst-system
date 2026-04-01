@@ -1,5 +1,7 @@
 # REQUEST VALIDATION AGENT
 
+This document is the canonical source for request/error pre-execution validation behavior.
+
 Purpose:
 Validate user request before pipeline execution.
 

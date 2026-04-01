@@ -44,7 +44,7 @@ async def chat_endpoint(request: ChatRequest):
                     yield f"data: {json.dumps(event.model_dump())}\n\n"
             except Exception as e_inner:
                 logger.error(f"Error in event generator: {e_inner}", exc_info=True)
-                err_event = StreamEvent(event="error", data=str(e_inner))
+                err_event = StreamEvent(type="error", message=str(e_inner))
                 yield f"data: {json.dumps(err_event.model_dump())}\n\n"
             finally:
                 yield "data: [DONE]\n\n"
@@ -64,7 +64,7 @@ async def chat_endpoint(request: ChatRequest):
         err_msg = str(e)
 
         async def error_generator():
-            err_event = StreamEvent(event="error", data=err_msg)
+            err_event = StreamEvent(type="error", message=err_msg)
             yield f"data: {json.dumps(err_event.model_dump())}\n\n"
             yield "data: [DONE]\n\n"
 

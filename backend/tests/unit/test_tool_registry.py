@@ -1,6 +1,6 @@
 import pytest
 from typing import Any, Dict, Callable
-from app.core.tool_registry import ToolRegistry, ToolDefinition
+from app.core.tools.tool_system import ToolRegistry, ToolDefinition, ToolNamespace
 
 
 @pytest.fixture
@@ -20,8 +20,8 @@ def create_mock_handler(name: str) -> Callable:
     return handler
 
 
-def test_tool_definition_model():
-    """Test ToolDefinition Pydantic model creation."""
+def test_tool_definition_dataclass():
+    """Test ToolDefinition dataclass creation."""
     params: Dict[str, Any] = {
         "type": "object",
         "properties": {"query": {"type": "string"}},
@@ -33,12 +33,14 @@ def test_tool_definition_model():
         description="A test tool",
         parameters=params,
         handler=handler,
+        namespace=ToolNamespace.DATA,
     )
 
     assert tool.name == "test_tool"
     assert tool.description == "A test tool"
     assert tool.parameters == params
     assert tool.handler is not None
+    assert tool.full_name == "data:test_tool"
 
 
 def test_tool_definition_optional_handler():
@@ -53,12 +55,16 @@ def test_tool_definition_optional_handler():
     assert tool.handler is None
 
 
-def test_singleton_behavior():
-    """Test that ToolRegistry is a singleton."""
-    registry1 = ToolRegistry()
-    registry2 = ToolRegistry()
+def test_tool_definition_default_namespace():
+    """Test ToolDefinition defaults to DATA namespace."""
+    tool = ToolDefinition(
+        name="test",
+        description="Test",
+        parameters={"type": "object"},
+    )
 
-    assert registry1 is registry2
+    assert tool.namespace == ToolNamespace.DATA
+    assert tool.full_name == "data:test"
 
 
 def test_register_tool(tool_registry):
@@ -67,12 +73,12 @@ def test_register_tool(tool_registry):
     handler = create_mock_handler("market_check")
 
     tool_registry.register(
-        "market",
         ToolDefinition(
             name="check_db_status",
             description="Check database status",
             parameters=params,
             handler=handler,
+            namespace=ToolNamespace.MARKET,
         ),
     )
 
@@ -86,19 +92,19 @@ def test_register_multiple_tools_same_namespace(tool_registry):
     params: Dict[str, Any] = {"type": "object", "properties": {}}
 
     tool_registry.register(
-        "market",
         ToolDefinition(
             name="check_db_status",
             description="Check database status",
             parameters=params,
+            namespace=ToolNamespace.MARKET,
         ),
     )
     tool_registry.register(
-        "market",
         ToolDefinition(
             name="get_table_names",
             description="Get table names",
             parameters=params,
+            namespace=ToolNamespace.MARKET,
         ),
     )
 
@@ -111,27 +117,27 @@ def test_register_different_namespaces(tool_registry):
     params: Dict[str, Any] = {"type": "object", "properties": {}}
 
     tool_registry.register(
-        "market",
         ToolDefinition(
             name="check_db_status",
             description="Check database status",
             parameters=params,
+            namespace=ToolNamespace.MARKET,
         ),
     )
     tool_registry.register(
-        "data",
         ToolDefinition(
             name="fetch_stock_price",
             description="Fetch stock price",
             parameters=params,
+            namespace=ToolNamespace.DATA,
         ),
     )
     tool_registry.register(
-        "analysis",
         ToolDefinition(
             name="run_fundamental_scan",
             description="Run fundamental scan",
             parameters=params,
+            namespace=ToolNamespace.ANALYSIS,
         ),
     )
 
@@ -145,12 +151,12 @@ def test_get_tool_by_name(tool_registry):
     handler = create_mock_handler("check_db")
 
     tool_registry.register(
-        "market",
         ToolDefinition(
             name="check_db_status",
             description="Check database status",
             parameters=params,
             handler=handler,
+            namespace=ToolNamespace.MARKET,
         ),
     )
 
@@ -171,19 +177,19 @@ def test_list_tools_returns_all_tools(tool_registry):
     params: Dict[str, Any] = {"type": "object", "properties": {}}
 
     tool_registry.register(
-        "market",
         ToolDefinition(
             name="check_db_status",
             description="Check DB",
             parameters=params,
+            namespace=ToolNamespace.MARKET,
         ),
     )
     tool_registry.register(
-        "data",
         ToolDefinition(
             name="fetch_stock_price",
             description="Fetch price",
             parameters=params,
+            namespace=ToolNamespace.DATA,
         ),
     )
 
@@ -199,11 +205,11 @@ def test_clear_removes_all_tools(tool_registry):
     params: Dict[str, Any] = {"type": "object", "properties": {}}
 
     tool_registry.register(
-        "market",
         ToolDefinition(
             name="check_db_status",
             description="Check DB",
             parameters=params,
+            namespace=ToolNamespace.MARKET,
         ),
     )
 
@@ -214,33 +220,32 @@ def test_clear_removes_all_tools(tool_registry):
     assert len(tool_registry.list_tools()) == 0
 
 
-@pytest.mark.asyncio
-async def test_tool_handler_execution(tool_registry):
-    """Test that tool handler can be executed."""
-    params: Dict[str, Any] = {"type": "object", "properties": {}}
-    handler = create_mock_handler("test_handler")
+def test_get_tools_by_namespace(tool_registry):
+    """Test filtering tools by namespace."""
+    params = {"type": "object", "properties": {}}
 
     tool_registry.register(
-        "data",
-        ToolDefinition(
-            name="test_handler_tool",
-            description="Test handler",
-            parameters=params,
-            handler=handler,
-        ),
+        ToolDefinition(name="tool1", description="T1", parameters=params, namespace=ToolNamespace.MARKET)
+    )
+    tool_registry.register(
+        ToolDefinition(name="tool2", description="T2", parameters=params, namespace=ToolNamespace.DATA)
+    )
+    tool_registry.register(
+        ToolDefinition(name="tool3", description="T3", parameters=params, namespace=ToolNamespace.DATA)
     )
 
-    tool = tool_registry.get_tool("data:test_handler_tool")
-    assert tool.handler is not None
+    market_tools = tool_registry.get_tools_by_namespace(ToolNamespace.MARKET)
+    assert len(market_tools) == 1
+    assert market_tools[0].name == "tool1"
 
-    result = await tool.handler()
-    assert result == "result from test_handler"
+    data_tools = tool_registry.get_tools_by_namespace(ToolNamespace.DATA)
+    assert len(data_tools) == 2
 
 
 def test_predefined_tools_registered():
     """Test that all predefined tools are registered."""
     registry = ToolRegistry()
-    registry.register_predefined_tools()
+    registry.initialize()
 
     expected_tools = [
         "market:check_db_status",

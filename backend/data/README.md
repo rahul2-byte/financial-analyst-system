@@ -9,7 +9,7 @@ This module handles the fetching, processing, and storage of financial data.
 - **Storage**:
   - **Structured**: Postgres (via SQLAlchemy/SQLModel). Stores OHLCV.
   - **Vector**: Qdrant. Stores News/Text chunks.
-- **Orchestrator**: `DataPipeline` in `backend/data/pipeline.py`. Handles synchronization, batching, and gap analysis.
+- **Orchestration**: Data sync orchestration is handled by application services and scheduled jobs; keep data interfaces/providers focused on fetch/validate/normalize/store responsibilities.
 
 ## Setup
 
@@ -25,7 +25,9 @@ This module handles the fetching, processing, and storage of financial data.
 
 3. Run Verification:
    ```bash
-   python verify_pipeline.py
+   pytest backend/tests
+   ruff check backend/
+   mypy backend/
    ```
 
 ## Configuration

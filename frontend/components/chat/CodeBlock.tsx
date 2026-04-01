@@ -4,6 +4,7 @@ import React, { useState, useEffect, useRef } from "react";
 import { Check, Copy } from "lucide-react";
 import { codeToHtml } from "shiki";
 import { motion, AnimatePresence } from "framer-motion";
+import { useClipboard } from "@/hooks/useClipboard";
 
 interface CodeBlockProps {
   code: string;
@@ -12,9 +13,9 @@ interface CodeBlockProps {
 
 export const CodeBlock: React.FC<CodeBlockProps> = ({ code, language = "text" }) => {
   const [highlightedHtml, setHighlightedHtml] = useState<string>("");
-  const [copied, setCopied] = useState(false);
   const [isHighlighting, setIsHighlighting] = useState(false);
   const highlightTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const { copied, copyText } = useClipboard();
 
   useEffect(() => {
     const highlight = async () => {
@@ -52,9 +53,7 @@ export const CodeBlock: React.FC<CodeBlockProps> = ({ code, language = "text" })
 
   const handleCopy = async () => {
     try {
-      await navigator.clipboard.writeText(code);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      await copyText(code);
     } catch (err) {
       console.error("Failed to copy:", err);
     }

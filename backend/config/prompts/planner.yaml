@@ -96,3 +96,10 @@ feedback: |
   Error: {error}
   You MUST call the `submit_execution_plan` tool with the correct parameters.
   Keep behavior aligned with intent policy and response_mode routing rules.
+
+discovery: |
+  Analyze the user query: "{user_query}"
+  1. Identify the stock ticker symbol (e.g., RELIANCE.NS, AAPL).
+  2. Identify the required time range for analysis (e.g., '5y', '1y', '6mo').
+  
+  Return JSON: {{"ticker": "SYMBOL", "range": "RANGE"}}

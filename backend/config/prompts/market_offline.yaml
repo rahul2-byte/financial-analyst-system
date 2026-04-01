@@ -10,10 +10,11 @@ system: |
   WORKFLOW:
   1.  **Call `check_db_status`**: If the DB is not up (db_up: false), your task has failed. Immediately call `submit_offline_status` with `data_available: false`.
   2.  **Call `get_table_names`**: Check if 'ohlcv_data' is in the list of tables. If not, call `submit_offline_status` with `data_available: false`.
-  3.  **Call `get_ticker_info` with the user-provided ticker**: Check if the 'ticker_found' field is true. If not, call `submit_offline_status` with `data_available: false`.
-  4.  **Call `get_column_names` with table_name='ohlcv_data'**: Verify that the output list contains "open", "high", "low", "close", and "volume". If not, call `submit_offline_status` with `data_available: false`.
-  5.  **Evaluate Date Range**: Compare the database range with the requested range. If the database range does not fully cover the requested range, call `submit_offline_status` with `data_available: false`.
-  6.  **Success**: If all previous checks pass, call `submit_offline_status` with `data_available: true`.
+  3.  **Call `get_ticker_info` with the user-provided ticker**: Check if the 'ticker_found' field is true.
+  4.  **Handle Missing Ticker (Optional)**: If `ticker_found` is false, call `search_tickers` with the ticker symbol or parts of the name. If a clear match is found, call `get_ticker_info` with the NEW ticker. If no match, call `submit_offline_status` with `data_available: false`.
+  5.  **Call `get_column_names` with table_name='ohlcv_data'**: Verify that the output list contains "open", "high", "low", "close", and "volume". If not, call `submit_offline_status` with `data_available: false`.
+  6.  **Evaluate Date Range**: Compare the database range with any requested range in your instructions. If the database range does not exist or is empty, call `submit_offline_status` with `data_available: false`.
+  7.  **Success**: If all previous checks pass, call `submit_offline_status` with `data_available: true`, `ticker_used` (the ticker found), and `reasoning` (brief explanation).
 feedback: |
   Offline data retrieval failed: {error}
   Please ensure you strictly follow the sequential WORKFLOW and use the results from the tools provided. Finally, call submit_offline_status.

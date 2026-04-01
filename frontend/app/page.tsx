@@ -31,7 +31,7 @@ export default function Home() {
       {/* Chat Area / Layout Structure */}
       <div className="chat-layout relative flex flex-1 flex-col overflow-hidden">
         {/* Message Viewport (Independent Scrolling) */}
-        <ChatWindow messages={messages} />
+        <ChatWindow messages={messages} onPromptSelect={sendMessage} />
         
         {/* Chat Input (Sticky Overlay) */}
         <div className="absolute bottom-0 left-0 right-0 z-40 bg-gradient-to-t from-bg-primary via-bg-primary/95 to-transparent pt-12 pointer-events-none">

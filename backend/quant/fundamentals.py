@@ -1,5 +1,72 @@
-from typing import Dict, Any
+"""
+Deterministic fundamental analysis for the Financial Intelligence Platform.
+
+This module provides:
+- Valuation analysis (P/E, P/B ratios)
+- Financial health evaluation (debt levels, leverage)
+- Profitability analysis (margins, ROE)
+
+All calculations are deterministic - no LLM math allowed.
+
+Usage:
+    from quant.fundamentals import FundamentalScanner
+
+    scanner = FundamentalScanner()
+    results = scanner.scan({"peRatio": 15.5, "priceToBook": 2.3, ...})
+"""
+
+from typing import Dict, Any, Optional
+from dataclasses import dataclass
 from app.core.observability import observe
+
+
+@dataclass
+class ValuationResult:
+    """Result of valuation analysis."""
+
+    pe_ratio: Optional[float]
+    pb_ratio: Optional[float]
+    analysis: str
+
+
+@dataclass
+class HealthResult:
+    """Result of financial health analysis."""
+
+    debt_to_equity: Optional[float]
+    analysis: str
+
+
+@dataclass
+class ProfitabilityResult:
+    """Result of profitability analysis."""
+
+    profit_margin: Optional[float]
+    roe: Optional[float]
+    analysis: str
+
+
+def _evaluate_ratio(
+    value: Optional[float],
+    none_message: str,
+    thresholds: list[tuple[float, str]],
+    final_message: str = "",
+) -> str:
+    """Helper to evaluate a ratio against thresholds and build evaluation text."""
+    messages = []
+
+    if value is None:
+        messages.append(none_message)
+    else:
+        for threshold, message in thresholds:
+            if value < threshold:
+                messages.append(message.format(value=value))
+                break
+        else:
+            if final_message:
+                messages.append(final_message.format(value=value))
+
+    return " ".join(messages)
 
 
 class FundamentalScanner:
@@ -9,11 +76,19 @@ class FundamentalScanner:
     """
 
     @staticmethod
-    def evaluate_valuation(pe_ratio: float, pb_ratio: float) -> str:
-        """Evaluates Price/Earnings and Price/Book ratios."""
-        eval_text = []
+    def evaluate_valuation(pe_ratio: Optional[float], pb_ratio: Optional[float]) -> str:
+        """
+        Evaluates Price/Earnings and Price/Book ratios.
 
-        # P/E Evaluation
+        Args:
+            pe_ratio: Price-to-Earnings ratio
+            pb_ratio: Price-to-Book ratio
+
+        Returns:
+            Human-readable valuation analysis
+        """
+        eval_text: list[str] = []
+
         if pe_ratio is None:
             eval_text.append("P/E ratio is unavailable.")
         elif pe_ratio < 0:
@@ -37,7 +112,6 @@ class FundamentalScanner:
                 f"Extremely high P/E ratio of {pe_ratio} suggests significant overvaluation or high growth expectations."
             )
 
-        # P/B Evaluation
         if pb_ratio is not None:
             if pb_ratio < 1:
                 eval_text.append(
@@ -51,9 +125,17 @@ class FundamentalScanner:
         return " ".join(eval_text)
 
     @staticmethod
-    def evaluate_health(debt_to_equity: float, current_ratio: float = None) -> str:
-        """Evaluates financial risk and debt levels."""
-        eval_text = []
+    def evaluate_health(debt_to_equity: Optional[float]) -> str:
+        """
+        Evaluates financial risk and debt levels.
+
+        Args:
+            debt_to_equity: Debt-to-Equity ratio
+
+        Returns:
+            Human-readable financial health analysis
+        """
+        eval_text: list[str] = []
 
         if debt_to_equity is None:
             eval_text.append("Debt data is unavailable.")
@@ -77,9 +159,20 @@ class FundamentalScanner:
         return " ".join(eval_text)
 
     @staticmethod
-    def evaluate_profitability(profit_margin: float, roe: float) -> str:
-        """Evaluates margins and Return on Equity."""
-        eval_text = []
+    def evaluate_profitability(
+        profit_margin: Optional[float], roe: Optional[float]
+    ) -> str:
+        """
+        Evaluates margins and Return on Equity.
+
+        Args:
+            profit_margin: Profit margin (decimal, e.g., 0.15 for 15%)
+            roe: Return on Equity (decimal, e.g., 0.20 for 20%)
+
+        Returns:
+            Human-readable profitability analysis
+        """
+        eval_text: list[str] = []
 
         if profit_margin is not None:
             pm_pct = profit_margin * 100
@@ -106,7 +199,7 @@ class FundamentalScanner:
                 eval_text.append(
                     f"Strong Return on Equity ({roe_pct:.2f}%) showing effective use of shareholder capital."
                 )
-            elif roe_pct < 5 and roe_pct > 0:
+            elif 0 < roe_pct < 5:
                 eval_text.append(
                     f"Weak Return on Equity ({roe_pct:.2f}%), indicating poor capital utilization."
                 )
@@ -116,22 +209,34 @@ class FundamentalScanner:
     @classmethod
     @observe(name="Logic:FundamentalScanner:Scan")
     def scan(cls, data: Dict[str, Any]) -> Dict[str, str]:
-        """Runs the full suite of fundamental evaluations on raw data."""
+        """
+        Runs the full suite of fundamental evaluations on raw data.
+
+        Args:
+            data: Dictionary containing fundamental data from yfinance
+
+        Returns:
+            Dictionary with valuation, health, and profitability analysis
+        """
         pe = data.get("peRatio") or data.get("forwardPE")
         pb = data.get("priceToBook")
         debt_eq = data.get("debtToEquity")
 
-        # Debt to equity from yfinance is sometimes expressed as a percentage (e.g., 50 means 0.5)
-        # We normalize it here if it looks abnormally large
-        if debt_eq and debt_eq > 10:
+        if debt_eq is not None and debt_eq > 10:
             debt_eq = debt_eq / 100.0
 
         margin = data.get("profitMargins")
         roe = data.get("returnOnEquity")
 
+        pe_val = float(pe) if pe is not None else None
+        pb_val = float(pb) if pb is not None else None
+        debt_val = float(debt_eq) if debt_eq is not None else None
+        margin_val = float(margin) if margin is not None else None
+        roe_val = float(roe) if roe is not None else None
+
         return {
-            "valuation_analysis": cls.evaluate_valuation(pe, pb),
-            "financial_health_analysis": cls.evaluate_health(debt_eq),
-            "profitability_analysis": cls.evaluate_profitability(margin, roe),
+            "valuation_analysis": cls.evaluate_valuation(pe_val, pb_val),
+            "financial_health_analysis": cls.evaluate_health(debt_val),
+            "profitability_analysis": cls.evaluate_profitability(margin_val, roe_val),
             "raw_data_context": f"Company: {data.get('name', 'Unknown')}, Sector: {data.get('sector', 'Unknown')}, Market Cap: {data.get('marketCap', 'Unknown')}",
         }

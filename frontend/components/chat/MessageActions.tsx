@@ -1,8 +1,9 @@
 "use client";
 
-import React, { useState, useCallback } from "react";
+import React, { useCallback } from "react";
 import { Message } from "@/types";
-import { Copy, RotateCcw, ThumbsUp, ThumbsDown } from "lucide-react";
+import { Copy } from "lucide-react";
+import { useClipboard } from "@/hooks/useClipboard";
 
 interface MessageActionsProps {
   message: Message;
@@ -10,18 +11,16 @@ interface MessageActionsProps {
   isStreaming: boolean;
 }
 
-export const MessageActions = React.memo(({ message, isUser, isStreaming }: MessageActionsProps) => {
-  const [copied, setCopied] = useState(false);
+export const MessageActions = React.memo(({ message, isStreaming }: MessageActionsProps) => {
+  const { copied, copyText } = useClipboard();
 
   const handleCopy = useCallback(async () => {
     try {
-      await navigator.clipboard.writeText(message.content);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+      await copyText(message.content);
     } catch (err) {
       console.error("Failed to copy:", err);
     }
-  }, [message.content]);
+  }, [copyText, message.content]);
 
   // Actions Bar
   if (isStreaming || message.content === "") {
@@ -30,18 +29,11 @@ export const MessageActions = React.memo(({ message, isUser, isStreaming }: Mess
 
   return (
     <div className="message-actions flex gap-1 mt-6 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity duration-200 border-t border-border-subtle/20 pt-4">
-      {!isUser && (
-        <>
-          <ActionButton icon={<ThumbsUp size={14} />} title="Helpful" />
-          <ActionButton icon={<ThumbsDown size={14} />} title="Not helpful" />
-        </>
-      )}
       <ActionButton 
         icon={copied ? <span className="text-[10px] font-bold">COPIED</span> : <Copy size={14} />} 
         title="Copy message" 
         onClick={handleCopy} 
       />
-      {!isUser && <ActionButton icon={<RotateCcw size={14} />} title="Regenerate" />}
     </div>
   );
 });

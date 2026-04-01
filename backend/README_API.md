@@ -34,12 +34,9 @@ The path resolution is designed to be portable. The application can be run from 
       model_path: "/home/user/models/mistral-7b-instruct-v0.2.Q4_K_M.gguf"
     ```
 
-3. **Download FinBERT locally (offline runtime)**:
-    ```bash
-    python scripts/download_finbert.py
-    ```
-    This stores FinBERT in `backend/ai-lab/models/finbert`.
-    At runtime, sentiment analysis loads only from local files and does not call Hugging Face.
+3. **Model assets and runtime setup**:
+    Ensure all required local model assets are present and that `backend/config/llm_config.yaml`
+    points to valid local paths. Keep runtime dependencies local/offline for deterministic behavior.
 
 ## Running the Server
 

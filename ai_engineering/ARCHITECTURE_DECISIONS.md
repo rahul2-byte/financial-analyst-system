@@ -25,11 +25,11 @@ To support this high-speed, memory-optimized, open-source architecture, we selec
 1.  **Agent Execution & Validation: `Instructor` + `LiteLLM`**
     *   **Why:** `Instructor` wraps LLM clients and forces them to return data that perfectly validates against Pydantic schemas (zero-overhead compliance with the "Structured JSON" rule). `LiteLLM` standardizes API calls across 100+ models, handles rate limiting, and supports local models like `llama.cpp`.
 
-2.  **Orchestration: `Prefect`**
-    *   **Why:** A production-grade orchestrator that defines workflows as deterministic Python DAGs. It provides execution time logging, state management, and built-in retries. It ensures the pipeline runs exactly as designed (e.g., Fetch Data → Quant Engine → Agent) without hallucinated detours.
+2.  **Orchestration: `LangGraph` deterministic state graph**
+    *   **Why:** The runtime uses explicit graph nodes and dependency-aware execution with deterministic routing and retries. This keeps execution auditable and prevents autonomous agent drift.
 
-3.  **Observability & Tracing: `Langfuse`**
-    *   **Why:** The best open-source tool for hierarchical execution traces. It logs exact prompts, tool calls, latencies, and token costs asynchronously in the background. It integrates natively with `LiteLLM` and does not slow down the main execution thread.
+3.  **Observability & Tracing: OpenTelemetry + Phoenix**
+    *   **Why:** The backend emits structured tracing spans via OTLP to Phoenix, enabling request-level execution auditability for node transitions, LLM calls, and tool execution events.
 
 4.  **Vector Storage: `Qdrant`**
     *   **Why:** Already in the stack. Blazing fast (Rust-based) and memory-efficient, perfect for storing and retrieving chunked financial reports with complex payload filtering.
