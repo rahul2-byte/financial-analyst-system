@@ -1,4 +1,4 @@
-from app.core.graph import graph_builder
+from app.core.graph.runtime import graph_builder
 
 
 class _RecordingGraph:
@@ -220,6 +220,20 @@ def test_router_maps_critic(monkeypatch):
     graph_builder.build_graph()
 
     assert recorder.conditional_edges["router_node"]["run_critic"] == "critic_node"
+
+
+def test_runtime_graph_builder_has_no_legacy_route_exports() -> None:
+    from app.core.graph.runtime import graph_builder as runtime_graph_builder
+
+    assert not hasattr(runtime_graph_builder, "route_after_planner")
+    assert not hasattr(runtime_graph_builder, "route_after_execution")
+    assert not hasattr(runtime_graph_builder, "route_after_validation")
+
+
+def test_orchestrator_uses_runtime_graph_builder() -> None:
+    from app.core import orchestrator
+
+    assert orchestrator.get_research_graph.__module__ == "app.core.graph.runtime.graph_builder"
 
 
 def test_router_maps_data_plan(monkeypatch):

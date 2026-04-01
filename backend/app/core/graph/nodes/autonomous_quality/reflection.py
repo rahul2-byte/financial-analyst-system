@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.contracts.graph_node import finalize_node_output
+
 
 async def autonomous_reflection_node(state: dict[str, Any]) -> dict[str, Any]:
     retry_counts = dict(state.get("retry_count_by_domain", {}))
@@ -15,7 +17,7 @@ async def autonomous_reflection_node(state: dict[str, Any]) -> dict[str, Any]:
             updated_task["priority"] = "P0"
         reprioritized.append(updated_task)
 
-    return {
+    payload = {
         "retry_count_by_domain": retry_counts,
         "tasks": [],
         "replanned_tasks": reprioritized,
@@ -35,3 +37,4 @@ async def autonomous_reflection_node(state: dict[str, Any]) -> dict[str, Any]:
         "data": {"tasks": [], "replanned_tasks": reprioritized},
         "errors": [],
     }
+    return finalize_node_output("autonomous_reflection_node", payload)

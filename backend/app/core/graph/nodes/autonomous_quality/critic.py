@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.contracts.graph_node import finalize_node_output
 from app.core.graph.nodes.autonomous_quality.evidence import (
     build_contradiction_records,
     evidence_count_by_agent,
@@ -89,7 +90,7 @@ async def autonomous_critic_node(state: dict[str, Any]) -> dict[str, Any]:
     if hallucination_issues:
         decision = "retry"
 
-    return {
+    payload = {
         "critic_decision": decision,
         "hallucination_issues": hallucination_issues,
         "contradiction_records": contradiction_records,
@@ -109,3 +110,4 @@ async def autonomous_critic_node(state: dict[str, Any]) -> dict[str, Any]:
         "data": {"critic_decision": decision},
         "errors": [],
     }
+    return finalize_node_output("autonomous_critic_node", payload)

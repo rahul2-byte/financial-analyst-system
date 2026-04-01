@@ -1,10 +1,4 @@
-"""Compatibility facade for runtime graph builder.
-
-Runtime imports should use `app.core.graph.runtime.graph_builder`.
-"""
-
-from app.core.graph.runtime.graph_builder import build_graph, get_research_graph
-from app.core.graph.legacy_routes import (
+from app.core.graph.legacy.routes import (
     route_after_discovery,
     route_after_error_handler,
     route_after_execution,
@@ -15,8 +9,6 @@ from app.core.graph.legacy_routes import (
 )
 
 __all__ = [
-    "build_graph",
-    "get_research_graph",
     "route_after_discovery",
     "route_after_error_handler",
     "route_after_execution",

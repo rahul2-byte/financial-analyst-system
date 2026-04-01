@@ -18,7 +18,6 @@ from datetime import datetime
 from contextlib import contextmanager
 from sqlmodel import SQLModel, Session, create_engine, select, func, text
 from sqlalchemy.pool import QueuePool
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from app.config import settings
 from data.interfaces.storage import IStructuredStorage
 from data.schemas.market import OHLCVData
@@ -28,6 +27,9 @@ from storage.sql.models import (
     FinancialStatements,
     MacroIndicators,
 )
+from storage.sql.health_repo import HealthRepository
+from storage.sql.admin_repo import AdminRepository
+from storage.sql.market_repo import MarketRepository
 
 POOL_SIZE = 5
 MAX_OVERFLOW = 10
@@ -49,6 +51,17 @@ class PostgresClient(IStructuredStorage):
     def __init__(self):
         self._engine = self._create_engine()
         self._create_tables()
+        self._health_repo = HealthRepository(self.get_session)
+        self._admin_repo = AdminRepository(self.get_session)
+        self._market_repo = MarketRepository(self.get_session)
+
+    def _ensure_repositories(self) -> None:
+        if not hasattr(self, "_health_repo"):
+            self._health_repo = HealthRepository(self.get_session)
+        if not hasattr(self, "_market_repo"):
+            self._market_repo = MarketRepository(self.get_session)
+        if not hasattr(self, "_admin_repo"):
+            self._admin_repo = AdminRepository(self.get_session)
 
     @classmethod
     def _create_engine(cls):
@@ -90,17 +103,13 @@ class PostgresClient(IStructuredStorage):
 
     def is_db_up(self) -> bool:
         """Check if the database is up and running."""
-        try:
-            with self.get_session() as session:
-                session.execute(text("SELECT 1")).first()
-            return True
-        except Exception:
-            return False
+        self._ensure_repositories()
+        return self._health_repo.is_db_up()
 
     def check_db_status(self) -> Dict[str, Any]:
         """Check if the database is up and running (agent tool version)."""
-        is_up = self.is_db_up()
-        return {"db_up": is_up, "status": "online" if is_up else "offline"}
+        self._ensure_repositories()
+        return self._health_repo.check_db_status()
 
     def search_tickers(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
         """Fuzzy search for tickers by symbol or company name."""
@@ -117,9 +126,8 @@ class PostgresClient(IStructuredStorage):
 
     def has_any_data(self) -> bool:
         """Check if the OHLCV table has any data."""
-        with self.get_session() as session:
-            result = session.execute(text("SELECT 1 FROM ohlcv_data LIMIT 1")).first()
-            return result is not None
+        self._ensure_repositories()
+        return self._market_repo.has_any_data()
 
     def get_ticker_info(self, ticker: str) -> Dict[str, Any]:
         """Get date range, row count, and data presence for a specific ticker."""
@@ -167,39 +175,23 @@ class PostgresClient(IStructuredStorage):
 
     def get_table_count(self) -> int:
         """Get the number of tables in the public schema."""
-        with self.get_session() as session:
-            statement = text(
-                "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public';"
-            )
-            result = session.execute(statement).first()
-            return result[0] if result else 0
+        self._ensure_repositories()
+        return self._admin_repo.get_table_count()
 
     def get_table_names(self) -> List[str]:
         """Get the names of all tables in the public schema."""
-        with self.get_session() as session:
-            statement = text(
-                "SELECT table_name FROM information_schema.tables WHERE table_schema = 'public';"
-            )
-            results = session.execute(statement).fetchall()
-            return [row[0] for row in results] if results else []
+        self._ensure_repositories()
+        return self._admin_repo.get_table_names()
 
     def get_column_names(self, table_name: str) -> List[str]:
         """Get the column names for a specific table."""
-        with self.get_session() as session:
-            statement = text(
-                "SELECT column_name FROM information_schema.columns WHERE table_name = :table_name;"
-            )
-            results = session.execute(statement, {"table_name": table_name}).fetchall()
-            return [row[0] for row in results] if results else []
+        self._ensure_repositories()
+        return self._admin_repo.get_column_names(table_name)
 
     def get_db_size(self) -> str:
         """Get the size of the current database as a human-readable string."""
-        with self.get_session() as session:
-            statement = text(
-                "SELECT pg_size_pretty(pg_database_size(current_database()));"
-            )
-            result = session.execute(statement).first()
-            return result[0] if result else "0 bytes"
+        self._ensure_repositories()
+        return self._admin_repo.get_db_size()
 
     def delete_ticker_data(self, ticker: str) -> int:
         """Delete all data for a specific ticker and return the number of rows deleted."""
@@ -214,27 +206,8 @@ class PostgresClient(IStructuredStorage):
 
     def save_ohlcv(self, data: List[OHLCVData]) -> None:
         """Save OHLCV data to database."""
-        if not data:
-            return
-
-        with self.get_session() as session:
-            rows = [
-                {
-                    "ticker": item.ticker,
-                    "date": item.date,
-                    "open": item.open,
-                    "high": item.high,
-                    "low": item.low,
-                    "close": item.close,
-                    "volume": item.volume,
-                    "adjusted_close": item.adjusted_close,
-                }
-                for item in data
-            ]
-
-            stmt = pg_insert(OHLCV).values(rows)
-            stmt = stmt.on_conflict_do_nothing(index_elements=["ticker", "date"])
-            session.execute(stmt)
+        self._ensure_repositories()
+        self._market_repo.save_ohlcv(data)
 
     def upsert_fundamentals(self, data: Dict[str, Any]) -> None:
         """Upsert company fundamentals."""

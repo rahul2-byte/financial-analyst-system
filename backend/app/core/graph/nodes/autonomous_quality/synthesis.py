@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.contracts.graph_node import finalize_node_output
 from app.core.graph.nodes.autonomous_quality.evidence import (
     evidence_ref_set,
     evidence_strength_from_outputs,
@@ -52,7 +53,7 @@ async def autonomous_synthesis_node(state: dict[str, Any]) -> dict[str, Any]:
         ],
     }
 
-    return {
+    payload = {
         "results": {**results, "synthesis": synthesis},
         "evidence_strength": evidence_strength,
         "synthesis_confidence": synthesis_confidence,
@@ -63,3 +64,4 @@ async def autonomous_synthesis_node(state: dict[str, Any]) -> dict[str, Any]:
         "data": {"synthesis": synthesis},
         "errors": [],
     }
+    return finalize_node_output("autonomous_synthesis_node", payload)

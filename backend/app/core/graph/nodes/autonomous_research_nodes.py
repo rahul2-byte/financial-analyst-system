@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from app.core.contracts.graph_node import finalize_node_output
 from app.core.graph.agent_map import AGENT_NODE_MAP
 from app.core.graph.async_control import run_parallel_with_timeout
 from app.core.node_resources import resources
@@ -40,7 +41,7 @@ async def autonomous_research_planner_node(state: dict[str, Any]) -> dict[str, A
         ]
 
     tasks = sorted(tasks, key=_task_sort_key)
-    return {
+    payload = {
         "tasks": tasks,
         "force_replan": False,
         "replanned_tasks": [],
@@ -51,6 +52,7 @@ async def autonomous_research_planner_node(state: dict[str, Any]) -> dict[str, A
         "data": {"tasks": tasks},
         "errors": [],
     }
+    return finalize_node_output("autonomous_research_planner_node", payload)
 
 
 async def autonomous_research_execution_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -107,7 +109,7 @@ async def autonomous_research_execution_node(state: dict[str, Any]) -> dict[str,
             continue
         results[agent] = payload if payload is not None else result.get("agent_outputs", {})
 
-    return {
+    payload = {
         "results": {**state.get("results", {}), **results},
         "tool_registry": tool_registry,
         "status": "partial" if errors else "success",
@@ -117,3 +119,4 @@ async def autonomous_research_execution_node(state: dict[str, Any]) -> dict[str,
         "data": {"results": results, "tool_registry_count": len(tool_registry)},
         "errors": errors,
     }
+    return finalize_node_output("autonomous_research_execution_node", payload)
