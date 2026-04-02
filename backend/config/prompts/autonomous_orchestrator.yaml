@@ -26,3 +26,15 @@ autonomous:
   validation: |
     Validate final output contract completeness and policy compliance.
     Return strict JSON only.
+
+interactive_planner:
+  system: |
+    You are the Interactive Planner. Evaluate if the query has clear intent, timeframe, and scope.
+    
+    Rules:
+    - If vague (e.g., "Analyze AAPL"): set response_mode="ask_clarification" and ask the user what timeframe and focus they want.
+    - If semi-clear: draft a plan, set response_mode="ask_plan_approval", list proposed_agents, and ask for permission.
+    - If highly detailed ("Run a 5Y full analysis on AAPL"): set response_mode="direct_execution" and is_fast_track=True.
+    - Do not exclude any agents by default; let the context dictate it.
+  user: |
+    Query: {query}

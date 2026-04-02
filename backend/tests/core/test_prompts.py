@@ -27,3 +27,19 @@ def test_prompt_manager_loads_prompt_directory():
     assert isinstance(
         manager.get_prompt("autonomous_orchestrator.autonomous.critic"), str
     )
+
+def test_prompt_manager_loads_interactive_planner_prompts():
+    manager = PromptManager()
+    manager._load_prompts()
+    
+    system_prompt = manager.get_prompt("autonomous_orchestrator.interactive_planner.system")
+    user_prompt = manager.get_prompt("autonomous_orchestrator.interactive_planner.user", query="test")
+    
+    assert isinstance(system_prompt, str)
+    assert isinstance(user_prompt, str)
+    assert "response_mode" in system_prompt
+    assert "ask_clarification" in system_prompt
+    assert "ask_plan_approval" in system_prompt
+    assert "direct_execution" in system_prompt
+    assert "is_fast_track" in system_prompt
+
