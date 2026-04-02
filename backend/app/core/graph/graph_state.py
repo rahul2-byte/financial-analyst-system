@@ -48,6 +48,9 @@ class ResearchGraphState(TypedDict):
     failed_step_number: Annotated[Optional[int], replace_value]
     current_step: Annotated[Optional[Dict[str, Any]], replace_value]
     selected_agents: Annotated[List[str], replace_value]
+    plan_status: Annotated[Optional[str], replace_value]
+    timeframe: Annotated[Optional[str], replace_value]
+    approved_agents: Annotated[List[str], replace_value]
 
     # Autonomous orchestration fields
     goal: Annotated[Optional[Dict[str, Any]], replace_value]
@@ -83,3 +86,68 @@ class ResearchGraphState(TypedDict):
     termination_reason: Annotated[Optional[str], replace_value]
     final_output: Annotated[Optional[Dict[str, Any]], replace_value]
     validation_passed: Annotated[bool, replace_value]
+
+
+def build_initial_graph_state(
+    user_query: str,
+    conversation_history: Optional[List[Dict[str, Any]]] = None,
+) -> ResearchGraphState:
+    history = conversation_history or []
+    return {
+        "user_query": user_query,
+        "conversation_history": history,
+        "plan": None,
+        "executed_steps": [],
+        "agent_outputs": {},
+        "tool_registry": [],
+        "draft_report": None,
+        "final_report": None,
+        "synthesis_retry_count": 0,
+        "verification_retry_count": 0,
+        "verification_passed": False,
+        "verification_feedback": "",
+        "data_manifest": None,
+        "conflict_record": None,
+        "conflict_iteration_count": 0,
+        "status": "initializing",
+        "errors": [],
+        "retry_count": 0,
+        "should_retry": False,
+        "should_escalate": False,
+        "failed_node": None,
+        "failed_step_number": None,
+        "current_step": None,
+        "selected_agents": [],
+        "plan_status": None,
+        "timeframe": None,
+        "approved_agents": [],
+        "goal": None,
+        "hypotheses": [],
+        "data_status": {},
+        "data_check": {},
+        "data_plan": [],
+        "tasks": [],
+        "replanned_tasks": [],
+        "force_replan": False,
+        "results": {},
+        "synthesis_confidence": 0.0,
+        "adjusted_confidence": 0.0,
+        "smoothed_confidence": 0.0,
+        "confidence_score": 0.0,
+        "final_confidence": 0.0,
+        "confidence_history": [],
+        "confidence_components": {},
+        "critic_decision": None,
+        "router_decision": None,
+        "iteration_count": 0,
+        "retry_count_by_domain": {},
+        "freshness_policy": {},
+        "evidence_strength": 0.0,
+        "execution_budget": {},
+        "timeouts": {"task_timeout_s": 10.0, "stage_timeout_s": 20.0},
+        "errors_detail": [],
+        "history": [],
+        "termination_reason": None,
+        "final_output": None,
+        "validation_passed": False,
+    }

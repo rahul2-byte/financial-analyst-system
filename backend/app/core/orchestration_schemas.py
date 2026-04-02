@@ -54,13 +54,27 @@ class PlanData(BaseModel):
     execution_steps: List[ExecutionStep] = Field(default_factory=list)
 
 
+class InteractivePlanPayload(BaseModel):
+    """Schema for the Planner Agent LLM output when proposing an interactive plan."""
+
+    response_mode: str = Field(description="Mode of response: ask_clarification, ask_plan_approval, direct_execution")
+    assistant_response: str = Field(description="Text to show the user")
+    proposed_timeframe: Optional[str] = Field(default=None, description="Proposed timeframe (e.g., '1y', '5y', '1m')")
+    proposed_agents: List[str] = Field(default_factory=list, description="List of proposed agents")
+    is_fast_track: bool = Field(default=False, description="True if user query is detailed enough to skip approval")
+
+
 class OfflineStatus(BaseModel):
     """Result from the intelligent market offline agent."""
 
-    data_available: bool = Field(description="Whether the requested data is in the database")
+    data_available: bool = Field(
+        description="Whether the requested data is in the database"
+    )
     ticker_used: str = Field(description="The ticker symbol that was finally verified")
     reasoning: str = Field(description="Brief explanation of the availability check")
-    extra_info: dict = Field(default_factory=dict, description="Additional context from tools")
+    extra_info: dict = Field(
+        default_factory=dict, description="Additional context from tools"
+    )
 
 
 class DataStatus(str, Enum):
@@ -86,7 +100,9 @@ class DataManifest(BaseModel):
     ticker: str
     is_grounded: bool = False
     datasets: List[DatasetManifest] = Field(default_factory=list)
-    recommended_range: str = Field(description="Planner's recommended time range (e.g., '5y')")
+    recommended_range: str = Field(
+        description="Planner's recommended time range (e.g., '5y')"
+    )
     user_approved: bool = False
     missing_required: List[str] = Field(default_factory=list)
 
