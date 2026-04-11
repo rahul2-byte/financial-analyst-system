@@ -1,7 +1,9 @@
-from typing import List, Dict
-from data.schemas.text import ProcessedChunk
-from app.services.embedding_service import EmbeddingService
+from datetime import datetime
+from typing import Dict, List
 import uuid
+
+from app.services.embedding_service import EmbeddingService
+from data.schemas.text import MetadataValue, ProcessedChunk
 
 
 class TextProcessor:
@@ -16,14 +18,38 @@ class TextProcessor:
         self.use_embeddings = use_embeddings
         self.embedding_service = EmbeddingService() if use_embeddings else None
 
+    @staticmethod
+    def _serialize_metadata(metadata: Dict[str, object] | None) -> Dict[str, MetadataValue]:
+        if not metadata:
+            return {}
+
+        serialized: Dict[str, MetadataValue] = {}
+        for key, value in metadata.items():
+            if isinstance(value, datetime):
+                serialized[key] = value.isoformat()
+            elif isinstance(value, (str, int, float, bool)) or value is None:
+                serialized[key] = value
+            else:
+                raise TypeError(f"Unsupported metadata value for '{key}'")
+        return serialized
+
+    @staticmethod
+    def _require_ticker(metadata: Dict[str, MetadataValue]) -> str:
+        ticker = metadata.get("ticker")
+        if not isinstance(ticker, str) or not ticker.strip():
+            raise ValueError("metadata must include a non-empty ticker")
+        return ticker
+
     def chunk_text(
-        self, text: str, metadata: Dict[str, str] = {}
+        self, text: str, metadata: Dict[str, object] | None = None
     ) -> List[ProcessedChunk]:
         """
         Splits text into chunks recursively (Paragraph -> Sentence -> Word).
         This is a simplified implementation.
         """
         chunks = []
+        serialized_metadata = self._serialize_metadata(metadata)
+        ticker = self._require_ticker(serialized_metadata)
         start = 0
         text_len = len(text)
 
@@ -62,9 +88,9 @@ class TextProcessor:
                 chunks.append(
                     ProcessedChunk(
                         chunk_id=str(uuid.uuid4()),
-                        ticker=metadata.get("ticker", "UNKNOWN"),
+                        ticker=ticker,
                         text=chunk_text,
-                        metadata=metadata,
+                        metadata=serialized_metadata,
                     )
                 )
 
@@ -74,7 +100,7 @@ class TextProcessor:
         return chunks
 
     def process_and_embed(
-        self, text: str, metadata: Dict[str, str] = {}
+        self, text: str, metadata: Dict[str, object] | None = None
     ) -> List[ProcessedChunk]:
         """Chunks text and applies embeddings to each chunk."""
         chunks = self.chunk_text(text, metadata)

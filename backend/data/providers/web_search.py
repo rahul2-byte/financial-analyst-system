@@ -3,9 +3,24 @@ from ddgs import DDGS
 import requests
 from bs4 import BeautifulSoup
 import logging
+import re
 from app.core.observability import observe
+from data.providers.search_time_range import normalize_ddgs_time_range
 
 logger = logging.getLogger(__name__)
+
+
+NOISE_SELECTORS = (
+    ".related",
+    ".related-stories",
+    ".newsletter",
+    ".newsletter-signup",
+    ".share",
+    ".social-share",
+    ".cookie",
+    ".advertisement",
+    ".ads",
+)
 
 
 class WebSearchProvider:
@@ -26,29 +41,7 @@ class WebSearchProvider:
     def normalize_time_range(
         time_range: Optional[str], default: Optional[str] = "m"
     ) -> Optional[str]:
-        """Normalizes timelimit values for DDGS to supported set: d, w, m, y."""
-        if not time_range:
-            return default
-
-        normalized = str(time_range).strip().lower()
-        if normalized in {"d", "w", "m", "y"}:
-            return normalized
-
-        aliases = {
-            "day": "d",
-            "daily": "d",
-            "week": "w",
-            "weekly": "w",
-            "month": "m",
-            "monthly": "m",
-            "year": "y",
-            "yearly": "y",
-            "90d": "m",
-            "d90": "m",
-            "3m": "m",
-            "last_90_days": "m",
-        }
-        return aliases.get(normalized, default)
+        return normalize_ddgs_time_range(time_range, default=default)
 
     def search(
         self,
@@ -94,7 +87,7 @@ class WebSearchProvider:
             return results
         except Exception as e:
             logger.error(f"DuckDuckGo Search error: {e}")
-            return [{"error": str(e)}]
+            return []
 
     @observe(name="Tool:WebSearch:News")
     def search_latest_news(
@@ -119,7 +112,7 @@ class WebSearchProvider:
             return results
         except Exception as e:
             logger.error(f"DuckDuckGo News Search error: {e}")
-            return [{"error": str(e)}]
+            return []
 
     @observe(name="Tool:WebSearch:Scrape")
     def scrape_webpage(self, url: str) -> str:
@@ -133,13 +126,27 @@ class WebSearchProvider:
 
             soup = BeautifulSoup(response.content, "html.parser")
 
-            # Remove scripts, styles, header, footer, nav
+            # Remove scripts, styles, and structural layout blocks.
             for element in soup(
                 ["script", "style", "header", "footer", "nav", "aside"]
             ):
                 element.decompose()
 
-            text = soup.get_text(separator="\n")
+            for selector in NOISE_SELECTORS:
+                for element in soup.select(selector):
+                    element.decompose()
+
+            content_root = soup.find("article") or soup.find("main") or soup.body or soup
+            text_blocks = [
+                element.get_text(separator=" ", strip=True)
+                for element in content_root.find_all(
+                    ["h1", "h2", "h3", "h4", "h5", "h6", "p", "li", "blockquote"]
+                )
+            ]
+            text = "\n".join(block for block in text_blocks if block)
+            if not text:
+                text = content_root.get_text(separator=" ")
+            text = re.sub(r"\s+([.,;:!?])", r"\1", text)
 
             # Clean up whitespace
             lines = (line.strip() for line in text.splitlines())
