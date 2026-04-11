@@ -11,7 +11,14 @@ import logging
 from typing import Any
 
 from app.config.loader import load_yaml_config
-from app.config.models import ApiConfig, EnvSettings, LlamaServerConfig, ModelConfig, YamlAppSettings
+from app.config.models import (
+    ApiConfig,
+    EnvSettings,
+    LlamaServerConfig,
+    ModelConfig,
+    ModelInfo,
+    YamlAppSettings,
+)
 
 Settings = EnvSettings
 

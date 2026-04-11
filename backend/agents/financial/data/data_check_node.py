@@ -6,7 +6,6 @@ import json
 import logging
 from typing import Any
 
-from app.config import settings
 from app.core.contracts.graph_node import finalize_node_output
 from app.core.node_resources import resources
 from app.core.orchestration_schemas import OfflineStatus
