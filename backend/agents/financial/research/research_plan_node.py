@@ -24,21 +24,6 @@ def _primary_symbol_payload(payload: dict[str, Any], symbol: str | None) -> Any:
     return payload
 
 
-def _news_text(news_payload: Any) -> str:
-    if not isinstance(news_payload, list):
-        return ""
-    parts: list[str] = []
-    for item in news_payload:
-        if not isinstance(item, dict):
-            continue
-        title = str(item.get("title", "")).strip()
-        summary = str(item.get("summary", item.get("content", ""))).strip()
-        combined = " - ".join(part for part in (title, summary) if part)
-        if combined:
-            parts.append(combined)
-    return "\n".join(parts)
-
-
 def _task_specific_parameters(
     agent: str,
     ticker: str | None,
@@ -52,7 +37,6 @@ def _task_specific_parameters(
         fetched_data.get("fundamentals", {}), ticker
     )
     macro_payload = fetched_data.get("macro", {})
-    news_payload = fetched_data.get("news", [])
 
     if agent == "fundamental_analysis":
         return {"raw_data": fundamentals_payload or {}}
@@ -61,7 +45,10 @@ def _task_specific_parameters(
             return {"ohlcv_data": ohlcv_payload.get("data", [])}
         return {"ohlcv_data": []}
     if agent == "sentiment_analysis":
-        return {"text": rag_context or _news_text(news_payload) or query}
+        return {
+            "text": rag_context
+            or "Insufficient qualitative evidence found for research analysis."
+        }
     if agent == "macro_analysis":
         return {"macro_data": macro_payload or {}}
     if agent == "contrarian_analysis":
@@ -70,7 +57,7 @@ def _task_specific_parameters(
             "fundamentals": fundamentals_payload or {},
             "macro": macro_payload or {},
         }
-        sentiment_data = news_payload if isinstance(news_payload, list) else []
+        sentiment_data = []
         if rag_chunks:
             sentiment_data = [
                 {
@@ -85,6 +72,16 @@ def _task_specific_parameters(
                     ),
                 }
                 for chunk in rag_chunks
+            ]
+        else:
+            sentiment_data = [
+                {
+                    "title": "Insufficient Data",
+                    "summary": "Insufficient qualitative evidence found for research analysis",
+                    "content": "Insufficient qualitative evidence found for research analysis",
+                    "source": "None",
+                    "published_date": "",
+                }
             ]
         return {
             "market_data": market_data,

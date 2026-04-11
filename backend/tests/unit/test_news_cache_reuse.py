@@ -57,6 +57,28 @@ class _FixedDateTime(datetime):
         return fixed.astimezone(tz)
 
 
+class _StubWebSearchProvider:
+    def search(
+        self,
+        query: str,
+        mode: str = "general",
+        max_results: int = 5,
+        time_range: str | None = None,
+    ):
+        return [
+            {
+                "title": f"Article for {query}",
+                "body": "Body",
+                "url": "https://news.example.com/story",
+                "date": "2026-04-10T11:00:00+00:00",
+                "source": "DuckDuckGo",
+            }
+        ]
+
+    def scrape_webpage(self, url: str) -> str:
+        return f"Scraped content for {url}"
+
+
 class _StubRSSFetcher:
     def fetch_market_news(
         self,
@@ -291,15 +313,13 @@ def test_store_data_updates_news_cache_summary_even_when_no_chunks_created(monke
 @pytest.mark.asyncio
 async def test_data_fetch_node_stamps_fetched_at_on_yfinance_fallback_articles(monkeypatch):
     previous_yf = resources._yf_fetcher
-    previous_rss = resources._rss_fetcher
     previous_web = resources._web_search
     previous_sql = resources._sql_db
     previous_vector = resources._vector_db
     try:
         monkeypatch.setattr(data_fetch_module, "datetime", _FixedDateTime)
         monkeypatch.setattr(data_fetch_module.resources, "_yf_fetcher", _StubYFinanceFallbackFetcher())
-        monkeypatch.setattr(data_fetch_module.resources, "_rss_fetcher", _StubRSSFetcher())
-        monkeypatch.setattr(data_fetch_module.resources, "_web_search", object())
+        monkeypatch.setattr(data_fetch_module.resources, "_web_search", _StubWebSearchProvider())
         monkeypatch.setattr(data_fetch_module.resources, "_sql_db", _StubSQLDB())
         monkeypatch.setattr(data_fetch_module.resources, "_vector_db", _StubVectorDB())
 
@@ -314,7 +334,6 @@ async def test_data_fetch_node_stamps_fetched_at_on_yfinance_fallback_articles(m
         )
     finally:
         setattr(resources, "_yf_fetcher", previous_yf)
-        setattr(resources, "_rss_fetcher", previous_rss)
         setattr(resources, "_web_search", previous_web)
         setattr(resources, "_sql_db", previous_sql)
         setattr(resources, "_vector_db", previous_vector)

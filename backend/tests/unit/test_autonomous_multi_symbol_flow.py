@@ -1,4 +1,5 @@
 import pytest
+from typing import Any
 from datetime import UTC, datetime, timedelta
 from email.utils import format_datetime
 
@@ -61,6 +62,43 @@ class _StubYFinanceFetcher:
         }
 
 
+class _StubWebSearchProvider:
+    def __init__(self, results=None):
+        self.calls: list[dict[str, Any]] = []
+        self.results = results
+        self.scrape_calls: list[str] = []
+
+    def search(
+        self,
+        query: str,
+        mode: str = "general",
+        max_results: int = 5,
+        time_range: str | None = None,
+    ):
+        self.calls.append(
+            {
+                "query": query,
+                "mode": mode,
+                "max_results": max_results,
+                "time_range": time_range,
+            }
+        )
+        recent = datetime.now(UTC) - timedelta(hours=1)
+        return self.results or [
+            {
+                "title": f"Recent news about {query}",
+                "body": f"Recent content for {query}",
+                "url": "https://example.com/recent",
+                "date": recent.isoformat(),
+                "source": "DuckDuckGo",
+            }
+        ]
+
+    def scrape_webpage(self, url: str) -> str:
+        self.scrape_calls.append(url)
+        return f"Scraped content for {url}"
+
+
 class _StubRSSFetcher:
     def __init__(self, articles=None):
         self.calls: list[dict[str, object]] = []
@@ -87,16 +125,16 @@ class _StubRSSFetcher:
         older = datetime.now(UTC) - timedelta(days=3)
         articles = self.articles or [
             {
-                "title": "Older",
-                "summary": "Older summary",
-                "content": "Older content",
+                "title": f"Older news for {query}",
+                "summary": f"Older summary for {query}",
+                "content": f"Older content for {query}",
                 "link": "https://example.com/older",
                 "published": format_datetime(older),
             },
             {
-                "title": "Recent",
-                "summary": "Recent summary",
-                "content": "Recent content",
+                "title": f"Recent news for {query}",
+                "summary": f"Recent summary for {query}",
+                "content": f"Recent content for {query}",
                 "link": "https://example.com/recent",
                 "published": format_datetime(recent),
             },
@@ -105,13 +143,14 @@ class _StubRSSFetcher:
 
 
 class _StubNewsArticle:
-    def __init__(self, published_date: datetime) -> None:
+    def __init__(self, ticker: str, published_date: datetime) -> None:
+        self.ticker = ticker
         self.published_date = published_date
 
     def model_dump(self, mode: str = "python"):
         return {
-            "title": "Fallback article",
-            "summary": "Fallback summary",
+            "title": f"Fallback article for {self.ticker}",
+            "summary": f"Fallback summary for {self.ticker}",
             "link": "https://example.com/fallback",
             "published_date": (
                 self.published_date.isoformat()
@@ -119,7 +158,7 @@ class _StubNewsArticle:
                 else self.published_date
             ),
             "source": "Yahoo Finance",
-            "content": "fallback",
+            "content": f"fallback content for {self.ticker}",
         }
 
 
@@ -130,7 +169,7 @@ class _StubYFinanceNewsFetcher(_StubYFinanceFetcher):
 
     def fetch_news(self, ticker: str, limit: int = 10):
         self.news_calls.append((ticker, limit))
-        return [_StubNewsArticle(datetime.now(UTC) - timedelta(minutes=30))]
+        return [_StubNewsArticle(ticker, datetime.now(UTC) - timedelta(minutes=30))]
 
 
 class _StubSQLDB:
@@ -336,9 +375,9 @@ async def test_data_fetch_node_persists_multi_symbol_ohlcv_and_fundamentals() ->
 @pytest.mark.asyncio
 async def test_data_fetch_node_updates_freshness_for_provider_payload_shapes() -> None:
     previous_yf = resources._yf_fetcher
-    previous_rss = resources._rss_fetcher
+    previous_web = resources._web_search
     setattr(resources, "_yf_fetcher", _StubYFinanceFetcher())
-    setattr(resources, "_rss_fetcher", _StubRSSFetcher())
+    setattr(resources, "_web_search", _StubWebSearchProvider())
     try:
         result = await data_fetch_node(
             {
@@ -351,6 +390,7 @@ async def test_data_fetch_node_updates_freshness_for_provider_payload_shapes() -
                         "dataset": "fundamentals",
                         "priority": "P1",
                         "action": "fetch",
+                        "requirements": {"stale_after_days": 90},
                     },
                     {"dataset": "macro", "priority": "P1", "action": "fetch"},
                 ],
@@ -360,7 +400,7 @@ async def test_data_fetch_node_updates_freshness_for_provider_payload_shapes() -
         )
     finally:
         setattr(resources, "_yf_fetcher", previous_yf)
-        setattr(resources, "_rss_fetcher", previous_rss)
+        setattr(resources, "_web_search", previous_web)
 
     assert result["data_status"]["news"]["freshness"] > 0.9
     assert result["data_status"]["fundamentals"]["freshness"] > 0.9
@@ -370,9 +410,9 @@ async def test_data_fetch_node_updates_freshness_for_provider_payload_shapes() -
 @pytest.mark.asyncio
 async def test_data_fetch_node_uses_dataset_specific_coverage_rules() -> None:
     previous_yf = resources._yf_fetcher
-    previous_rss = resources._rss_fetcher
+    previous_web = resources._web_search
     setattr(resources, "_yf_fetcher", _StubYFinanceFetcher())
-    setattr(resources, "_rss_fetcher", _StubRSSFetcher())
+    setattr(resources, "_web_search", _StubWebSearchProvider())
     try:
         result = await data_fetch_node(
             {
@@ -457,9 +497,9 @@ async def test_data_fetch_node_uses_dataset_specific_coverage_rules() -> None:
         )
     finally:
         setattr(resources, "_yf_fetcher", previous_yf)
-        setattr(resources, "_rss_fetcher", previous_rss)
+        setattr(resources, "_web_search", previous_web)
 
-    assert result["data_status"]["news"]["coverage"] == 0.2
+    assert result["data_status"]["news"]["coverage"] == 0.1
     assert result["data_status"]["macro"]["coverage"] == 1.0
     assert result["data_status"]["fundamentals"]["coverage"] == 0.5
 
@@ -467,9 +507,9 @@ async def test_data_fetch_node_uses_dataset_specific_coverage_rules() -> None:
 @pytest.mark.asyncio
 async def test_data_fetch_node_falls_back_to_timeframe_policy_when_requirements_missing() -> None:
     previous_yf = resources._yf_fetcher
-    previous_rss = resources._rss_fetcher
+    previous_web = resources._web_search
     setattr(resources, "_yf_fetcher", _StubYFinanceFetcher())
-    setattr(resources, "_rss_fetcher", _StubRSSFetcher())
+    setattr(resources, "_web_search", _StubWebSearchProvider())
     try:
         result = await data_fetch_node(
             {
@@ -519,37 +559,37 @@ async def test_data_fetch_node_falls_back_to_timeframe_policy_when_requirements_
         )
     finally:
         setattr(resources, "_yf_fetcher", previous_yf)
-        setattr(resources, "_rss_fetcher", previous_rss)
+        setattr(resources, "_web_search", previous_web)
 
-    assert result["data_status"]["news"]["coverage"] == 0.2
+    assert result["data_status"]["news"]["coverage"] == 0.1
     assert result["data_status"]["macro"]["coverage"] == 1.0
     assert result["data_status"]["fundamentals"]["coverage"] > 0.0
 
 
 @pytest.mark.asyncio
-async def test_data_fetch_node_uses_query_aware_rss_fetcher_and_yfinance_fallback(monkeypatch) -> (
+async def test_data_fetch_node_uses_query_aware_web_search_and_yfinance_fallback(monkeypatch) -> (
     None
 ):
     previous_yf = resources._yf_fetcher
-    previous_rss = resources._rss_fetcher
+    previous_web = resources._web_search
     stale_articles = [
         {
-            "title": "Stale",
-            "summary": "Stale summary",
-            "link": "https://example.com/stale",
-            "published": format_datetime(datetime.now(UTC) - timedelta(days=500)),
+            "title": "Stale HDFCBANK News",
+            "body": "Stale content for HDFCBANK",
+            "url": "https://example.com/stale",
+            "date": (datetime.now(UTC) - timedelta(days=500)).isoformat(),
         }
     ]
-    rss_stub = _StubRSSFetcher(articles=stale_articles)
+    web_stub = _StubWebSearchProvider(results=stale_articles)
     yf_stub = _StubYFinanceNewsFetcher()
-    
+
     # Mock freshness to force fallback since fetched_at usually overrides it to 1.0
     # Must patch where it's imported in the node being tested
     import agents.financial.data.data_fetch_node as dfn
     monkeypatch.setattr(dfn, "derive_news_freshness_score", lambda payload, stale_after_days: 0.0 if any("Stale" in str(a.get("title")) for a in payload if isinstance(a, dict)) else 1.0)
 
     setattr(resources, "_yf_fetcher", yf_stub)
-    setattr(resources, "_rss_fetcher", rss_stub)
+    setattr(resources, "_web_search", web_stub)
     try:
         result = await data_fetch_node(
             {
@@ -565,7 +605,7 @@ async def test_data_fetch_node_uses_query_aware_rss_fetcher_and_yfinance_fallbac
         )
     finally:
         setattr(resources, "_yf_fetcher", previous_yf)
-        setattr(resources, "_rss_fetcher", previous_rss)
+        setattr(resources, "_web_search", previous_web)
 
     expected_plan = build_news_query_plan(
         objective="HDFC Bank latest earnings",
@@ -574,13 +614,13 @@ async def test_data_fetch_node_uses_query_aware_rss_fetcher_and_yfinance_fallbac
         timeframe=None,
         conversation_history=None,
     )
-    assert [call["query"] for call in rss_stub.calls] == [
+    assert [call["query"] for call in web_stub.calls] == [
         item["query"] for item in expected_plan["queries"]
     ]
-    # Check for new news semantics: limit=20, include_body=True
-    assert [call["limit"] for call in rss_stub.calls] == [20] * len(expected_plan["queries"])
-    assert [call["include_body"] for call in rss_stub.calls] == [True] * len(expected_plan["queries"])
-    
+    # Check for new news semantics: max_results=20, mode="news"
+    assert [call["max_results"] for call in web_stub.calls] == [20] * len(expected_plan["queries"])
+    assert [call["mode"] for call in web_stub.calls] == ["news"] * len(expected_plan["queries"])
+
     assert yf_stub.news_calls == [("HDFCBANK", 10)]
     assert result["data_status"]["news"]["freshness"] > 0.9
     assert result["data_status"]["news"]["source"] == "yfinance_fallback"
@@ -589,10 +629,10 @@ async def test_data_fetch_node_uses_query_aware_rss_fetcher_and_yfinance_fallbac
 @pytest.mark.asyncio
 async def test_data_fetch_node_uses_five_planned_news_queries_with_twenty_results_each() -> None:
     previous_yf = resources._yf_fetcher
-    previous_rss = resources._rss_fetcher
-    rss_stub = _StubRSSFetcher()
+    previous_web = resources._web_search
+    web_stub = _StubWebSearchProvider()
     setattr(resources, "_yf_fetcher", _StubYFinanceFetcher())
-    setattr(resources, "_rss_fetcher", rss_stub)
+    setattr(resources, "_web_search", web_stub)
 
     goal = {"ticker": "HDFCBANK", "objective": "Analyse the HDFC stock"}
     user_query = "Timeframe: 1 year Scope full stock analysis"
@@ -619,7 +659,7 @@ async def test_data_fetch_node_uses_five_planned_news_queries_with_twenty_result
         )
     finally:
         setattr(resources, "_yf_fetcher", previous_yf)
-        setattr(resources, "_rss_fetcher", previous_rss)
+        setattr(resources, "_web_search", previous_web)
 
     expected_plan = build_news_query_plan(
         objective=goal["objective"],
@@ -629,9 +669,9 @@ async def test_data_fetch_node_uses_five_planned_news_queries_with_twenty_result
         conversation_history=None,
     )
 
-    assert [call["query"] for call in rss_stub.calls] == [
+    assert [call["query"] for call in web_stub.calls] == [
         item["query"] for item in expected_plan["queries"]
     ]
-    assert [call["limit"] for call in rss_stub.calls] == [20, 20, 20, 20, 20]
-    assert [call["time_range"] for call in rss_stub.calls] == ["y", "y", "y", "y", "y"]
-    assert [call["include_body"] for call in rss_stub.calls] == [True, True, True, True, True]
+    assert [call["max_results"] for call in web_stub.calls] == [20, 20, 20, 20, 20]
+    assert [call["time_range"] for call in web_stub.calls] == ["y", "y", "y", "y", "y"]
+    assert [call["mode"] for call in web_stub.calls] == ["news", "news", "news", "news", "news"]

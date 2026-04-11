@@ -118,11 +118,24 @@ class WebSearchProvider:
     def scrape_webpage(self, url: str) -> str:
         """
         Fetches a URL and extracts visible text using BeautifulSoup.
-        Gracefully handles errors if scraping is blocked.
+        Gracefully handles errors if scraping is blocked or paywalled.
         """
         try:
             response = requests.get(url, headers=self.headers, timeout=10)
             response.raise_for_status()
+
+            # Detect paywall markers in HTML content
+            html_content = response.text.lower()
+            paywall_patterns = [
+                "subscription required",
+                "sign in to continue",
+                "paywall",
+                "create an account to continue reading",
+                "subscribe to unlock",
+                "exclusive for subscribers",
+            ]
+            if any(pattern in html_content for pattern in paywall_patterns):
+                return f"PAYWALL_BLOCKED: {url}"
 
             soup = BeautifulSoup(response.content, "html.parser")
 
@@ -152,6 +165,11 @@ class WebSearchProvider:
             lines = (line.strip() for line in text.splitlines())
             chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
             text = "\n".join(chunk for chunk in chunks if chunk)
+
+            # Detect very short text as a potential paywall/block
+            if len(text) < 300:
+                logger.warning(f"Scraped content too short ({len(text)} chars) for {url}")
+                return f"PAYWALL_BLOCKED: {url}"
 
             # Limit the size to avoid overwhelming the LLM
             return text[:10000]

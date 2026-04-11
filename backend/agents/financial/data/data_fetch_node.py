@@ -13,8 +13,8 @@ from app.core.node_resources import resources
 from data.schemas.market import OHLCVData
 from data.providers.news_query_planner import build_news_query_plan
 from data.providers.news_query_planner import QUERY_SPECS
-from data.providers.rss_news import deduplicate_articles
-from data.processors.text import TextProcessor
+from data.providers.rss_news import deduplicate_articles, enrich_article_with_body
+from data.processors.text import TextProcessor, is_article_relevant
 from agents.shared.utils import (
     derive_news_coverage_score,
     derive_news_freshness_score,
@@ -230,6 +230,7 @@ def _build_news_chunk_metadata(article: dict[str, Any], ticker: str | None) -> d
         "timeframe",
         "run_id",
         "fetched_at",
+        "original_blocked_url",
     ):
         if key in article:
             metadata[key] = article.get(key)
@@ -332,20 +333,68 @@ def _normalize_news_payload(payload: Any) -> Any:
     for item in payload:
         if isinstance(item, dict):
             normalized_item = dict(item)
-            normalized_item.setdefault("url", str(normalized_item.get("link", "")))
-            normalized_item.setdefault(
-                "published_date", str(normalized_item.get("published", ""))
+            # Ensure both 'url' and 'link' exist
+            url = (
+                normalized_item.get("url")
+                or normalized_item.get("link")
+                or normalized_item.get("canonical_url")
+                or ""
             )
+            normalized_item["url"] = str(url)
+            normalized_item["link"] = str(url)
+
+            # Map published dates
+            published_date = (
+                normalized_item.get("published_date")
+                or normalized_item.get("published")
+                or normalized_item.get("date")
+                or ""
+            )
+            normalized_item["published_date"] = str(published_date)
+
+            # Map content
+            content = (
+                normalized_item.get("content")
+                or normalized_item.get("body")
+                or normalized_item.get("summary")
+                or ""
+            )
+            normalized_item["content"] = str(content)
+
             normalized.append(normalized_item)
             continue
         model_dump = getattr(item, "model_dump", None)
         if callable(model_dump):
             normalized_item = model_dump(mode="json")
             if isinstance(normalized_item, dict):
-                normalized_item.setdefault("url", str(normalized_item.get("link", "")))
-                normalized_item.setdefault(
-                    "published_date", str(normalized_item.get("published", ""))
+                # Ensure both 'url' and 'link' exist
+                url = (
+                    normalized_item.get("url")
+                    or normalized_item.get("link")
+                    or normalized_item.get("canonical_url")
+                    or ""
                 )
+                normalized_item["url"] = str(url)
+                normalized_item["link"] = str(url)
+
+                # Map published dates
+                published_date = (
+                    normalized_item.get("published_date")
+                    or normalized_item.get("published")
+                    or normalized_item.get("date")
+                    or ""
+                )
+                normalized_item["published_date"] = str(published_date)
+
+                # Map content
+                content = (
+                    normalized_item.get("content")
+                    or normalized_item.get("body")
+                    or normalized_item.get("summary")
+                    or ""
+                )
+                normalized_item["content"] = str(content)
+
             normalized.append(normalized_item)
             continue
         normalized.append(item)
@@ -413,16 +462,80 @@ def _fetch_planned_news(
         query_text = str(query_spec.get("query", "")).strip()
         if not query_text:
             continue
-        fetched_articles = _normalize_news_payload(
-            resources.rss_fetcher.fetch_market_news(
-                query=query_text,
-                limit=20,
-                time_range=str(query_spec.get("time_range", "m")),
-                include_body=True,
-                scraper=resources.web_search,
-            )
+
+        # Use web search instead of RSS
+        raw_results = resources.web_search.search(
+            query=query_text,
+            mode="news",
+            max_results=20,
+            time_range=str(query_spec.get("time_range", "m")),
         )
-        for rank, article in enumerate(fetched_articles, start=1):
+
+        # Normalize results (maps 'url', 'date', 'body' to 'url', 'published_date', 'content')
+        fetched_articles = _normalize_news_payload(raw_results)
+
+        # Enrich with full body content via scraper and handle paywall fallbacks
+        enriched_articles = []
+        for article in fetched_articles:
+            if not isinstance(article, dict):
+                continue
+
+            enriched = enrich_article_with_body(article, resources.web_search)
+            content = enriched.get("content", "")
+
+            if content.startswith("PAYWALL_BLOCKED:"):
+                original_url = enriched.get("url") or enriched.get("link")
+                title = enriched.get("title")
+
+                if title:
+                    logger.info(f"Paywall detected for '{title}'. Attempting fallback search...")
+                    # Perform a new search using title
+                    fallback_results = resources.web_search.search(
+                        query=f"{title} news",
+                        mode="news",
+                        max_results=3,
+                    )
+
+                    # Filter out the original blocked URL
+                    alternative_articles = [
+                        alt
+                        for alt in fallback_results
+                        if (alt.get("url") or alt.get("link")) != original_url
+                    ]
+
+                    # Try to scrape alternative results until success or exhausted
+                    for alt_article in alternative_articles:
+                        # Normalize alternative article
+                        norm_alt_list = _normalize_news_payload([alt_article])
+                        if not norm_alt_list:
+                            continue
+                        norm_alt = norm_alt_list[0]
+                        enriched_alt = enrich_article_with_body(norm_alt, resources.web_search)
+                        alt_content = enriched_alt.get("content", "")
+
+                        if (
+                            alt_content
+                            and not alt_content.startswith("PAYWALL_BLOCKED:")
+                            and not alt_content.startswith("Failed to scrape")
+                        ):
+                            logger.info(
+                                f"Successfully retrieved alternative content for '{title}' from {enriched_alt.get('url')}"
+                            )
+                            # Update original article with alternative data
+                            enriched["content"] = alt_content
+                            enriched["url"] = enriched_alt.get("url")
+                            enriched["link"] = enriched_alt.get("link")
+                            enriched["source"] = enriched_alt.get("source")
+                            if "article_hash" in enriched_alt:
+                                enriched["article_hash"] = enriched_alt["article_hash"]
+                            enriched["original_blocked_url"] = original_url
+                            break
+                    else:
+                        logger.warning(f"Could not find non-paywalled alternative for '{title}'")
+
+            enriched_articles.append(enriched)
+
+        for rank, article in enumerate(enriched_articles, start=1):
             if not isinstance(article, dict):
                 continue
             enriched_article = dict(article)
@@ -433,7 +546,7 @@ def _fetch_planned_news(
                 "intent_type", str(query_spec.get("intent_type", "")).strip()
             )
             enriched_article.setdefault("search_rank", rank)
-            enriched_article.setdefault("search_provider", "rss_google")
+            enriched_article.setdefault("search_provider", "ddgs_news")
             enriched_article.setdefault("source_domain", source_domain)
             enriched_article.setdefault("source_type", "open_web")
             enriched_article.setdefault(
@@ -441,6 +554,13 @@ def _fetch_planned_news(
             )
             if "is_trusted_domain" not in enriched_article:
                 enriched_article["is_trusted_domain"] = source_domain in TRUSTED_NEWS_DOMAINS
+            
+            # Relevance Guard Check
+            if ticker or company_name:
+                if not is_article_relevant(enriched_article, ticker=ticker or "", company_name=company_name):
+                    logger.debug(f"Filtering out irrelevant article: {enriched_article.get('title')}")
+                    continue
+
             merged_articles.append(enriched_article)
 
     return _stamp_news_fetched_at(
