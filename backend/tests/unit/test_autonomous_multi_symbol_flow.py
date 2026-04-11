@@ -69,7 +69,7 @@ class _StubRSSFetcher:
     def fetch_market_news(
         self,
         query: str = "",
-        limit: int = 10,
+        limit: int = 20,
         time_range: str | None = None,
         include_body: bool = False,
         scraper=None,
@@ -89,12 +89,14 @@ class _StubRSSFetcher:
             {
                 "title": "Older",
                 "summary": "Older summary",
+                "content": "Older content",
                 "link": "https://example.com/older",
                 "published": format_datetime(older),
             },
             {
                 "title": "Recent",
                 "summary": "Recent summary",
+                "content": "Recent content",
                 "link": "https://example.com/recent",
                 "published": format_datetime(recent),
             },
@@ -525,7 +527,7 @@ async def test_data_fetch_node_falls_back_to_timeframe_policy_when_requirements_
 
 
 @pytest.mark.asyncio
-async def test_data_fetch_node_uses_query_aware_rss_fetcher_and_yfinance_fallback() -> (
+async def test_data_fetch_node_uses_query_aware_rss_fetcher_and_yfinance_fallback(monkeypatch) -> (
     None
 ):
     previous_yf = resources._yf_fetcher
@@ -540,6 +542,12 @@ async def test_data_fetch_node_uses_query_aware_rss_fetcher_and_yfinance_fallbac
     ]
     rss_stub = _StubRSSFetcher(articles=stale_articles)
     yf_stub = _StubYFinanceNewsFetcher()
+    
+    # Mock freshness to force fallback since fetched_at usually overrides it to 1.0
+    # Must patch where it's imported in the node being tested
+    import agents.financial.data.data_fetch_node as dfn
+    monkeypatch.setattr(dfn, "derive_news_freshness_score", lambda payload, stale_after_days: 0.0 if any("Stale" in str(a.get("title")) for a in payload if isinstance(a, dict)) else 1.0)
+
     setattr(resources, "_yf_fetcher", yf_stub)
     setattr(resources, "_rss_fetcher", rss_stub)
     try:
@@ -569,6 +577,10 @@ async def test_data_fetch_node_uses_query_aware_rss_fetcher_and_yfinance_fallbac
     assert [call["query"] for call in rss_stub.calls] == [
         item["query"] for item in expected_plan["queries"]
     ]
+    # Check for new news semantics: limit=20, include_body=True
+    assert [call["limit"] for call in rss_stub.calls] == [20] * len(expected_plan["queries"])
+    assert [call["include_body"] for call in rss_stub.calls] == [True] * len(expected_plan["queries"])
+    
     assert yf_stub.news_calls == [("HDFCBANK", 10)]
     assert result["data_status"]["news"]["freshness"] > 0.9
     assert result["data_status"]["news"]["source"] == "yfinance_fallback"
