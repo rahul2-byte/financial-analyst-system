@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
@@ -440,7 +441,7 @@ def _resolve_company_name(goal: dict[str, Any]) -> str | None:
     return None
 
 
-def _fetch_planned_news(
+async def _fetch_planned_news(
     *,
     objective: str,
     ticker: str | None,
@@ -458,29 +459,25 @@ def _fetch_planned_news(
 
     merged_articles: list[Any] = []
     fetched_at = datetime.now(UTC).isoformat()
-    for query_spec in query_plan.get("queries", []):
-        query_text = str(query_spec.get("query", "")).strip()
-        if not query_text:
-            continue
+    
+    semaphore = asyncio.Semaphore(10)
 
-        # Use web search instead of RSS
-        raw_results = resources.web_search.search(
-            query=query_text,
-            mode="news",
-            max_results=20,
-            time_range=str(query_spec.get("time_range", "m")),
-        )
+    async def process_article(
+        article: dict[str, Any], query_text: str, query_spec: dict[str, Any], rank: int
+    ) -> dict[str, Any] | None:
+        async with semaphore:
+            # Preserve initial snippet from 'content' (set by _normalize_news_payload)
+            initial_snippet = article.get("content", "")
 
-        # Normalize results (maps 'url', 'date', 'body' to 'url', 'published_date', 'content')
-        fetched_articles = _normalize_news_payload(raw_results)
+            # Enrich with full body content via scraper and handle paywall fallbacks
+            try:
+                enriched = await asyncio.to_thread(
+                    enrich_article_with_body, article, resources.web_search
+                )
+            except Exception as e:
+                logger.error(f"Error enriching article {article.get('url')}: {e}")
+                enriched = article
 
-        # Enrich with full body content via scraper and handle paywall fallbacks
-        enriched_articles = []
-        for article in fetched_articles:
-            if not isinstance(article, dict):
-                continue
-
-            enriched = enrich_article_with_body(article, resources.web_search)
             content = enriched.get("content", "")
 
             if content.startswith("PAYWALL_BLOCKED:"):
@@ -488,13 +485,20 @@ def _fetch_planned_news(
                 title = enriched.get("title")
 
                 if title:
-                    logger.info(f"Paywall detected for '{title}'. Attempting fallback search...")
-                    # Perform a new search using title
-                    fallback_results = resources.web_search.search(
-                        query=f"{title} news",
-                        mode="news",
-                        max_results=3,
+                    logger.info(
+                        f"Paywall detected for '{title}'. Attempting fallback search..."
                     )
+                    # Perform a new search using title
+                    try:
+                        fallback_results = await asyncio.to_thread(
+                            resources.web_search.search,
+                            query=f"{title} news",
+                            mode="news",
+                            max_results=3,
+                        )
+                    except Exception as e:
+                        logger.error(f"Error during fallback search for '{title}': {e}")
+                        fallback_results = []
 
                     # Filter out the original blocked URL
                     alternative_articles = [
@@ -510,7 +514,14 @@ def _fetch_planned_news(
                         if not norm_alt_list:
                             continue
                         norm_alt = norm_alt_list[0]
-                        enriched_alt = enrich_article_with_body(norm_alt, resources.web_search)
+                        try:
+                            enriched_alt = await asyncio.to_thread(
+                                enrich_article_with_body, norm_alt, resources.web_search
+                            )
+                        except Exception as e:
+                            logger.error(f"Error enriching alternative article: {e}")
+                            continue
+
                         alt_content = enriched_alt.get("content", "")
 
                         if (
@@ -531,37 +542,125 @@ def _fetch_planned_news(
                             enriched["original_blocked_url"] = original_url
                             break
                     else:
-                        logger.warning(f"Could not find non-paywalled alternative for '{title}'")
+                        logger.warning(
+                            f"Could not find non-paywalled alternative for '{title}'"
+                        )
 
-            enriched_articles.append(enriched)
+            final_content = enriched.get("content", "")
+            is_failure = (
+                final_content.startswith("PAYWALL_BLOCKED:") or 
+                final_content.startswith("Failed to scrape") or
+                not final_content.strip()
+            )
 
-        for rank, article in enumerate(enriched_articles, start=1):
-            if not isinstance(article, dict):
+            if rank <= 2 and is_failure and initial_snippet:
+                logger.info(
+                    f"Applying snippet fallback for rank {rank} article: {enriched.get('title')}"
+                )
+                enriched["content"] = initial_snippet
+                enriched["is_snippet_fallback"] = True
+            elif rank > 2 and is_failure:
+                # If rank > 2 and we failed to get full text, we return None to filter it out
+                return None
+
+            return enriched
+
+    async def process_query(query_spec: dict[str, Any]) -> list[dict[str, Any]]:
+        query_text = str(query_spec.get("query", "")).strip()
+        if not query_text:
+            return []
+
+        # Use web search instead of RSS
+        try:
+            raw_results = await asyncio.to_thread(
+                resources.web_search.search,
+                query=query_text,
+                mode="news",
+                max_results=20,
+                time_range=str(query_spec.get("time_range", "m")),
+            )
+        except Exception as e:
+            logger.error(f"Error searching for query '{query_text}': {e}")
+            return []
+
+        # Normalize results (maps 'url', 'date', 'body' to 'url', 'published_date', 'content')
+        fetched_articles = _normalize_news_payload(raw_results)
+
+        article_tasks = []
+        for i, article in enumerate(fetched_articles):
+            if isinstance(article, dict):
+                article_tasks.append(process_article(article, query_text, query_spec, rank=i + 1))
+
+        results = await asyncio.gather(*article_tasks, return_exceptions=True)
+
+        valid_articles = []
+        for i, enriched in enumerate(results):
+            if not isinstance(enriched, dict):
+                if isinstance(enriched, Exception):
+                    logger.error(
+                        f"Unexpected error in process_article for query '{query_text}': {enriched}"
+                    )
                 continue
-            enriched_article = dict(article)
-            source_domain = _resolve_source_domain(enriched_article)
-            enriched_article.setdefault("query_objective", objective)
-            enriched_article.setdefault("query_variant", query_text)
-            enriched_article.setdefault(
+
+            # Post-processing and relevance check
+            source_domain = _resolve_source_domain(enriched)
+            enriched.setdefault("query_objective", objective)
+            enriched.setdefault("query_variant", query_text)
+            enriched.setdefault(
                 "intent_type", str(query_spec.get("intent_type", "")).strip()
             )
-            enriched_article.setdefault("search_rank", rank)
-            enriched_article.setdefault("search_provider", "ddgs_news")
-            enriched_article.setdefault("source_domain", source_domain)
-            enriched_article.setdefault("source_type", "open_web")
-            enriched_article.setdefault(
+            enriched.setdefault("search_rank", i + 1)
+            enriched.setdefault("search_provider", "ddgs_news")
+            enriched.setdefault("source_domain", source_domain)
+            enriched.setdefault("source_type", "open_web")
+            enriched.setdefault(
                 "timeframe", str(timeframe or query_spec.get("time_range", "")).strip()
             )
-            if "is_trusted_domain" not in enriched_article:
-                enriched_article["is_trusted_domain"] = source_domain in TRUSTED_NEWS_DOMAINS
-            
+            if "is_trusted_domain" not in enriched:
+                enriched["is_trusted_domain"] = source_domain in TRUSTED_NEWS_DOMAINS
+
             # Relevance Guard Check
+            # ADR aliases for common Indian stocks (HDFC Bank trades as HDB on US exchanges)
+            adr_aliases: list[str] = []
+            if ticker:
+                adr_alias_map = {
+                    "HDFC": ["HDB"],
+                    "HDFCBANK": ["HDB"],
+                    "TCS": ["TCS"],
+                    "INFY": ["INFY"],
+                    "RELANCE": ["RELiance", "RJio"],
+                }
+                adr_aliases = adr_alias_map.get(ticker.upper(), [])
+
+            search_rank = enriched.get("search_rank", i + 1)
+            use_lenient = search_rank <= 2
+
             if ticker or company_name:
-                if not is_article_relevant(enriched_article, ticker=ticker or "", company_name=company_name):
-                    logger.debug(f"Filtering out irrelevant article: {enriched_article.get('title')}")
+                if not is_article_relevant(
+                    enriched,
+                    ticker=ticker or "",
+                    company_name=company_name,
+                    adr_aliases=adr_aliases,
+                    lenient=use_lenient,
+                ):
+                    logger.debug(
+                        f"Filtering out irrelevant article: {enriched.get('title')}"
+                    )
                     continue
 
-            merged_articles.append(enriched_article)
+            valid_articles.append(enriched)
+
+        return valid_articles
+
+    query_tasks = [process_query(qs) for qs in query_plan.get("queries", [])]
+    query_results = await asyncio.gather(*query_tasks, return_exceptions=True)
+
+    for res in query_results:
+        if not isinstance(res, list):
+            if isinstance(res, Exception):
+                logger.error(f"Error processing query in news fetch: {res}")
+            continue
+        merged_articles.extend(res)
 
     return _stamp_news_fetched_at(
         deduplicate_articles(
@@ -661,7 +760,7 @@ async def data_fetch_node(state: dict[str, Any]) -> dict[str, Any]:
                 objective = goal_objective or query or (
                     ", ".join(symbols) if symbols else (ticker or "")
                 )
-                fetched = _fetch_planned_news(
+                fetched = await _fetch_planned_news(
                     objective=objective,
                     ticker=ticker,
                     company_name=_resolve_company_name(goal),

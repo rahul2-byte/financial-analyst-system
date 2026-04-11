@@ -128,7 +128,11 @@ RELEVANCE_LEAD_CHARS = 500
 
 
 def is_article_relevant(
-    article: Dict[str, Any], ticker: str, company_name: str | None = None
+    article: Dict[str, Any],
+    ticker: str,
+    company_name: str | None = None,
+    adr_aliases: List[str] | None = None,
+    lenient: bool = False,
 ) -> bool:
     """
     Evaluates if an article is relevant to the target ticker or company.
@@ -137,6 +141,15 @@ def is_article_relevant(
     1. Ticker or company name in title.
     2. Ticker or company name in the first 500 characters of content.
     3. Minimum frequency of ticker/company name in the full text.
+       (Skipped in lenient mode for top-ranked results.)
+
+    Args:
+        article: Article dict with 'title' and 'content' keys.
+        ticker: Primary ticker symbol (e.g., "HDFC").
+        company_name: Full company name (e.g., "HDFC Bank").
+        adr_aliases: Optional list of ADR ticker aliases (e.g., ["HDB"]).
+        lenient: If True, skip frequency threshold check; require title or lead
+                  content match only. Use for top-ranked search results.
     """
     title = str(article.get("title", "")).strip()
     content = str(article.get("content", "")).strip()
@@ -147,33 +160,35 @@ def is_article_relevant(
     targets = [ticker]
     if company_name:
         targets.append(company_name)
+    if adr_aliases:
+        for alias in adr_aliases:
+            if alias and str(alias).strip():
+                targets.append(str(alias).strip())
 
-    # Compile regex patterns for whole word matching
-    # Ensure targets are strings and skip empty ones
     valid_targets = [str(t) for t in targets if t and str(t).strip()]
     if not valid_targets:
         return False
-        
+
     patterns = [re.compile(rf"\b{re.escape(t)}\b", re.IGNORECASE) for t in valid_targets]
 
-    # 1. Title Check
     if title:
         for pattern in patterns:
             if pattern.search(title):
                 return True
 
-    # 2. Lead Content Check
     if content:
         lead_content = content[:RELEVANCE_LEAD_CHARS]
         for pattern in patterns:
             if pattern.search(lead_content):
                 return True
 
-        # 3. Frequency Check
+        if lenient:
+            return False
+
         total_count = 0
         for pattern in patterns:
             total_count += len(pattern.findall(content))
-        
+
         if total_count >= RELEVANCE_FREQUENCY_THRESHOLD:
             return True
 
