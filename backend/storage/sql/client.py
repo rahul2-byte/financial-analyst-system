@@ -17,6 +17,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from contextlib import contextmanager
 from sqlmodel import SQLModel, Session, create_engine, select, func, text
+from sqlalchemy import desc
 from sqlalchemy.pool import QueuePool
 from app.config import settings
 from data.interfaces.storage import IStructuredStorage
@@ -26,6 +27,10 @@ from storage.sql.models import (
     CompanyFundamentals,
     FinancialStatements,
     MacroIndicators,
+    ErrorLog,
+    InteractionLog,
+    InstrumentMaster,
+    PerformanceMetric,
 )
 from storage.sql.health_repo import HealthRepository
 from storage.sql.admin_repo import AdminRepository
@@ -80,7 +85,50 @@ class PostgresClient(IStructuredStorage):
 
     def _create_tables(self) -> None:
         """Create all tables if they don't exist."""
+        with self._engine.begin() as conn:
+            conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm;"))
         SQLModel.metadata.create_all(self._engine)
+
+        with self._engine.begin() as conn:
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS ix_trgm_company_name 
+                ON instrument_master USING gin (company_name gin_trgm_ops);
+            """))
+            conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS ix_trgm_trading_symbol 
+                ON instrument_master USING gin (trading_symbol gin_trgm_ops);
+            """))
+
+            # Ensure unique constraints for ON CONFLICT operations
+            conn.execute(text("""
+                DO $$ 
+                BEGIN 
+                    -- Clean up and add constraint for ohlcv_data
+                    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_ohlcv_ticker_date') THEN
+                        -- Remove duplicates before adding constraint to prevent failure
+                        DELETE FROM ohlcv_data a USING ohlcv_data b 
+                        WHERE a.id < b.id AND a.ticker = b.ticker AND a.date = b.date;
+                        
+                        ALTER TABLE ohlcv_data ADD CONSTRAINT uq_ohlcv_ticker_date UNIQUE (ticker, date);
+                    END IF;
+                    
+                    -- Clean up and add constraint for cache_index
+                    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_cache_ticker_dataset') THEN
+                        DELETE FROM cache_index a USING cache_index b 
+                        WHERE a.id < b.id AND a.ticker = b.ticker AND a.dataset_type = b.dataset_type;
+                        
+                        ALTER TABLE cache_index ADD CONSTRAINT uq_cache_ticker_dataset UNIQUE (ticker, dataset_type);
+                    END IF;
+                    
+                    -- Clean up and add constraint for instrument_master
+                    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_instrument_exchange_symbol') THEN
+                        DELETE FROM instrument_master a USING instrument_master b 
+                        WHERE a.instrument_key < b.instrument_key AND a.exchange = b.exchange AND a.trading_symbol = b.trading_symbol;
+                        
+                        ALTER TABLE instrument_master ADD CONSTRAINT uq_instrument_exchange_symbol UNIQUE (exchange, trading_symbol);
+                    END IF;
+                END $$;
+            """))
 
     @contextmanager
     def get_session(self):
@@ -111,18 +159,243 @@ class PostgresClient(IStructuredStorage):
         self._ensure_repositories()
         return self._health_repo.check_db_status()
 
-    def search_tickers(self, query: str, limit: int = 5) -> List[Dict[str, Any]]:
-        """Fuzzy search for tickers by symbol or company name."""
+    def bulk_upsert_instruments(self, rows: List[Dict[str, Any]]) -> Dict[str, int]:
+        """Upsert instrument master rows."""
+        if not rows:
+            return {"inserted_or_updated": 0}
+
+        deduped: dict[tuple[str, str], Dict[str, Any]] = {}
+        for row in rows:
+            exchange = str(row.get("exchange", "")).strip().upper()
+            symbol = str(row.get("trading_symbol", "")).strip().upper()
+            if not exchange or not symbol:
+                continue
+            normalized = dict(row)
+            normalized["exchange"] = exchange
+            normalized["trading_symbol"] = symbol
+            deduped[(exchange, symbol)] = normalized
+
+        payload_rows = list(deduped.values())
+        if not payload_rows:
+            return {"inserted_or_updated": 0}
+
         with self.get_session() as session:
-            # We check in ohlcv_data for existing tickers
             statement = text("""
-                SELECT DISTINCT ticker 
-                FROM ohlcv_data 
-                WHERE ticker ILIKE :query 
+                INSERT INTO instrument_master (
+                    instrument_key, exchange, segment, trading_symbol, underlying_symbol,
+                    company_name, sector, industry, instrument_type, expiry,
+                    strike, option_type, lot_size, tick_size, is_active,
+                    as_of_date, source_snapshot_id
+                ) VALUES (
+                    :instrument_key, :exchange, :segment, :trading_symbol, :underlying_symbol,
+                    :company_name, :sector, :industry, :instrument_type, :expiry,
+                    :strike, :option_type, :lot_size, :tick_size, :is_active,
+                    :as_of_date, :source_snapshot_id
+                )
+                ON CONFLICT ON CONSTRAINT uq_instrument_exchange_symbol DO UPDATE SET
+                    instrument_key = EXCLUDED.instrument_key,
+                    exchange = EXCLUDED.exchange,
+                    segment = EXCLUDED.segment,
+                    trading_symbol = EXCLUDED.trading_symbol,
+                    underlying_symbol = EXCLUDED.underlying_symbol,
+                    company_name = EXCLUDED.company_name,
+                    sector = EXCLUDED.sector,
+                    industry = EXCLUDED.industry,
+                    instrument_type = EXCLUDED.instrument_type,
+                    expiry = EXCLUDED.expiry,
+                    strike = EXCLUDED.strike,
+                    option_type = EXCLUDED.option_type,
+                    lot_size = EXCLUDED.lot_size,
+                    tick_size = EXCLUDED.tick_size,
+                    is_active = EXCLUDED.is_active,
+                    as_of_date = EXCLUDED.as_of_date,
+                    source_snapshot_id = EXCLUDED.source_snapshot_id
+                """)
+            session.execute(statement, payload_rows)
+
+        return {"inserted_or_updated": len(payload_rows)}
+
+    def search_instruments(
+        self,
+        query: str,
+        limit: int = 10,
+        segment: Optional[str] = None,
+        exchange: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Search active instruments by symbol/company/underlying."""
+        with self.get_session() as session:
+            where_parts = ["is_active = true"]
+            params: Dict[str, Any] = {"query": f"%{query}%", "limit": limit}
+            if segment:
+                where_parts.append("segment = :segment")
+                params["segment"] = segment
+            if exchange:
+                where_parts.append("exchange = :exchange")
+                params["exchange"] = exchange
+
+            where_clause = " AND ".join(where_parts)
+            statement = text(f"""
+                SELECT instrument_key, exchange, segment, trading_symbol, underlying_symbol,
+                       company_name, sector, industry, instrument_type, expiry,
+                       strike, option_type, lot_size, tick_size, is_active
+                FROM instrument_master
+                WHERE {where_clause}
+                  AND (
+                    trading_symbol ILIKE :query
+                    OR COALESCE(underlying_symbol, '') ILIKE :query
+                    OR COALESCE(company_name, '') ILIKE :query
+                  )
+                ORDER BY trading_symbol ASC
                 LIMIT :limit
+                """)
+            rows = session.execute(statement, params).mappings().all()
+            return [dict(row) for row in rows]
+
+    def search_instruments_ranked(
+        self,
+        query: str,
+        limit: int = 10,
+        exchange: Optional[str] = None,
+        segment: Optional[str] = None,
+        instrument_type: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """Ranked fuzzy lookup for instrument resolution."""
+        candidate = (query or "").strip()
+        if not candidate:
+            return []
+
+        with self.get_session() as session:
+            where_parts = ["is_active = true"]
+            params: Dict[str, Any] = {
+                "candidate": candidate,
+                "candidate_upper": candidate.upper(),
+                "candidate_prefix": f"{candidate}%",
+                "candidate_like": f"%{candidate}%",
+                "limit": limit,
+            }
+            if exchange:
+                where_parts.append("exchange = :exchange")
+                params["exchange"] = exchange
+            if segment:
+                where_parts.append("segment = :segment")
+                params["segment"] = segment
+            if instrument_type:
+                where_parts.append("instrument_type = :instrument_type")
+                params["instrument_type"] = instrument_type
+
+            where_clause = " AND ".join(where_parts)
+            statement = text(f"""
+                SELECT instrument_key, exchange, segment, trading_symbol, underlying_symbol,
+                       company_name, sector, industry, instrument_type, expiry,
+                       strike, option_type, lot_size, tick_size, is_active,
+                       GREATEST(
+                           similarity(UPPER(trading_symbol), :candidate_upper),
+                           similarity(UPPER(COALESCE(company_name, '')), :candidate_upper),
+                           similarity(UPPER(COALESCE(underlying_symbol, '')), :candidate_upper)
+                       ) AS score,
+                       CASE 
+                           WHEN UPPER(trading_symbol) = :candidate_upper THEN 'exact_symbol'
+                           WHEN similarity(UPPER(trading_symbol), :candidate_upper) > 0.6 THEN 'trigram_symbol'
+                           WHEN similarity(UPPER(COALESCE(company_name, '')), :candidate_upper) > 0.6 THEN 'trigram_company'
+                           ELSE 'trigram_weak'
+                       END AS match_reason
+                FROM instrument_master
+                WHERE {where_clause}
+                  AND (
+                      UPPER(trading_symbol) % :candidate_upper 
+                      OR UPPER(COALESCE(company_name, '')) % :candidate_upper
+                      OR UPPER(COALESCE(underlying_symbol, '')) % :candidate_upper
+                  )
+                ORDER BY score DESC, trading_symbol ASC
+                LIMIT :limit
+                """)
+            rows = session.execute(statement, params).mappings().all()
+            return [dict(row) for row in rows]
+
+    def resolve_alias(self, alias_text: str) -> Optional[Dict[str, Any]]:
+        """Check if candidate exactly matches a known alias and return the instrument."""
+        candidate = (alias_text or "").strip().upper()
+        if not candidate:
+            return None
+
+        with self.get_session() as session:
+            stmt = text("""
+                SELECT im.* 
+                FROM instrument_alias ia
+                JOIN instrument_master im ON ia.instrument_key = im.instrument_key
+                WHERE UPPER(ia.alias_text) = :candidate AND im.is_active = true
+                LIMIT 1
             """)
-            results = session.execute(statement, {"query": f"%{query}%", "limit": limit}).fetchall()
-            return [{"ticker": row[0]} for row in results] if results else []
+            row = session.execute(stmt, {"candidate": candidate}).mappings().first()
+            return dict(row) if row else None
+
+    def resolve_exact_symbol(self, symbol: str) -> Optional[Dict[str, Any]]:
+        """Resolve exact instrument by trading_symbol or instrument_key."""
+        candidate = (symbol or "").strip().upper()
+        if not candidate:
+            return None
+
+        with self.get_session() as session:
+            statement = (
+                select(InstrumentMaster)
+                .where(InstrumentMaster.is_active == True)  # noqa: E712
+                .where(
+                    (func.upper(InstrumentMaster.trading_symbol) == candidate)
+                    | (func.upper(InstrumentMaster.instrument_key) == candidate)
+                )
+            )
+            row = session.exec(statement).first()
+            return row.model_dump() if row else None
+
+    def resolve_underlying(
+        self,
+        name_or_symbol: str,
+        limit: int = 5,
+        exchange: Optional[str] = None,
+        segment: str = "EQ",
+    ) -> List[Dict[str, Any]]:
+        """Resolve likely underlying instruments for a name/symbol."""
+        return self.search_instruments(
+            query=name_or_symbol,
+            limit=limit,
+            segment=segment,
+            exchange=exchange,
+        )
+
+    def get_derivative_chain(
+        self,
+        underlying_symbol: str,
+        expiry: Optional[datetime] = None,
+        limit: int = 50,
+    ) -> List[Dict[str, Any]]:
+        """Get active derivative contracts for an underlying symbol."""
+        symbol = (underlying_symbol or "").strip().upper()
+        if not symbol:
+            return []
+
+        with self.get_session() as session:
+            where_parts = [
+                "is_active = true",
+                "UPPER(COALESCE(underlying_symbol, '')) = :symbol",
+                "segment IN ('FUT', 'OPT')",
+            ]
+            params: Dict[str, Any] = {"symbol": symbol, "limit": limit}
+            if expiry is not None:
+                where_parts.append("expiry = :expiry")
+                params["expiry"] = expiry
+
+            where_clause = " AND ".join(where_parts)
+            statement = text(f"""
+                SELECT instrument_key, exchange, segment, trading_symbol, underlying_symbol,
+                       company_name, sector, industry, instrument_type, expiry,
+                       strike, option_type, lot_size, tick_size, is_active
+                FROM instrument_master
+                WHERE {where_clause}
+                ORDER BY expiry ASC NULLS LAST, strike ASC NULLS LAST
+                LIMIT :limit
+                """)
+            rows = session.execute(statement, params).mappings().all()
+            return [dict(row) for row in rows]
 
     def has_any_data(self) -> bool:
         """Check if the OHLCV table has any data."""
@@ -331,7 +604,9 @@ class PostgresClient(IStructuredStorage):
 
         status = {}
         with self.get_session() as session:
-            results = session.exec(select(CacheIndex).where(CacheIndex.ticker == ticker)).all()
+            results = session.exec(
+                select(CacheIndex).where(CacheIndex.ticker == ticker)
+            ).all()
             for row in results:
                 status[row.dataset_type] = {
                     "last_updated": row.last_updated.isoformat(),
@@ -341,14 +616,20 @@ class PostgresClient(IStructuredStorage):
         return status
 
     def update_cache_index(
-        self, ticker: str, dataset_type: str, available_range: Optional[str] = None, extra_info: Optional[Dict[str, Any]] = None
+        self,
+        ticker: str,
+        dataset_type: str,
+        available_range: Optional[str] = None,
+        extra_info: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Update or create a cache index entry."""
         from storage.sql.models import CacheIndex
 
         with self.get_session() as session:
             existing = session.exec(
-                select(CacheIndex).where(CacheIndex.ticker == ticker, CacheIndex.dataset_type == dataset_type)
+                select(CacheIndex).where(
+                    CacheIndex.ticker == ticker, CacheIndex.dataset_type == dataset_type
+                )
             ).first()
 
             if existing:
@@ -367,7 +648,13 @@ class PostgresClient(IStructuredStorage):
                 )
                 session.add(new_entry)
 
-    def log_research_action(self, query_id: str, agent_name: str, action: str, data: Optional[Dict[str, Any]] = None) -> None:
+    def log_research_action(
+        self,
+        query_id: str,
+        agent_name: str,
+        action: str,
+        data: Optional[Dict[str, Any]] = None,
+    ) -> None:
         """Log an agent action to the persistent audit log."""
         from storage.sql.models import ResearchAuditLog
 
@@ -379,3 +666,79 @@ class PostgresClient(IStructuredStorage):
                 data=data or {},
             )
             session.add(log_entry)
+
+    def log_interaction(
+        self,
+        *,
+        query_id: str,
+        input: str,
+        output: str,
+        score: float,
+        retries: int,
+        error_type: str | None,
+        correction_applied: str | None = None,
+    ) -> None:
+        with self.get_session() as session:
+            session.add(
+                InteractionLog(
+                    query_id=query_id,
+                    input=input,
+                    output=output,
+                    score=score,
+                    retries=retries,
+                    error_type=error_type,
+                    correction_applied=correction_applied,
+                )
+            )
+
+    def log_error(
+        self,
+        *,
+        query_id: str,
+        error_type: str,
+        correction_applied: str,
+        details: str | None = None,
+    ) -> None:
+        with self.get_session() as session:
+            session.add(
+                ErrorLog(
+                    query_id=query_id,
+                    error_type=error_type,
+                    correction_applied=correction_applied,
+                    details=details,
+                )
+            )
+
+    def record_performance_metric(
+        self,
+        *,
+        agent_name: str,
+        success_rate: float,
+        average_score: float,
+    ) -> None:
+        with self.get_session() as session:
+            session.add(
+                PerformanceMetric(
+                    agent_name=agent_name,
+                    success_rate=success_rate,
+                    average_score=average_score,
+                )
+            )
+
+    def get_recent_interactions(self, limit: int = 20) -> List[Dict[str, Any]]:
+        with self.get_session() as session:
+            rows = session.exec(
+                select(InteractionLog)
+                .order_by(desc(InteractionLog.timestamp))
+                .limit(limit)
+            ).all()
+        return [
+            {
+                "query_id": row.query_id,
+                "score": row.score,
+                "error_type": row.error_type,
+                "retries": row.retries,
+                "correction_applied": row.correction_applied,
+            }
+            for row in rows
+        ]

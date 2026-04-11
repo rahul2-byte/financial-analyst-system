@@ -28,18 +28,23 @@ def load_yaml_config() -> YamlAppSettings:
 
     llama_config = raw_data.get("llama_server", {})
     binary_path = backend_root / str(llama_config.get("binary_path", ""))
-    model_path = backend_root / str(llama_config.get("model_path", ""))
 
     raw_data["llama_server"]["binary_path"] = _resolve_required_file(
         binary_path,
         "Llama.cpp binary not found",
     )
-    raw_data["llama_server"]["model_path"] = _resolve_required_file(
-        model_path,
-        "Model file not found",
-    )
 
-    logfile = backend_root / str(raw_data.get("server_logfile", "logs/llama_server.log"))
+    models_config = raw_data.get("models", {})
+    for model_key, model_info in models_config.items():
+        model_path = backend_root / str(model_info.get("path", ""))
+        raw_data["models"][model_key]["path"] = _resolve_required_file(
+            model_path,
+            f"Model file not found for '{model_key}'",
+        )
+
+    logfile = backend_root / str(
+        raw_data.get("server_logfile", "logs/llama_server.log")
+    )
     raw_data["server_logfile"] = str(logfile.resolve())
 
     return YamlAppSettings(**raw_data)

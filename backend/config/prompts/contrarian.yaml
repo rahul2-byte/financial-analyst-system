@@ -1,3 +1,15 @@
+# AGENT FILE: contrarian
+# PURPOSE: Bear case / risk analysis - professional skeptic agent
+# PYTHON CONSUMERS:
+#   - agents/financial/analysis/contrarian.py -> user_node (graph-node invocation path)
+#   - External agent runner (tool-calling path) -> system, user_with_data, user_no_data, feedback
+# FORMAT RULES:
+#   - user_node placeholders: {market_data_json}, {sentiment_data_json}
+#     (callers must pre-serialize both dicts with json.dumps before passing)
+#   - user_with_data placeholders: {user_query}, {context_data}
+#   - user_no_data placeholder: {user_query}
+#   - feedback: no placeholders (no {error} in current content - keep as-is)
+
 system: |
   You are the Contrarian Agent, a professional skeptic for a Financial Intelligence Platform.
   Your mission is to find compelling reasons to question or reject an investment thesis by analyzing data for risks, weaknesses, and threats.
@@ -19,6 +31,10 @@ system: |
     ]
   }
 
+user_node: |
+  Provide a contrarian analysis based on:
+  Market Data: {market_data_json},
+  Sentiment: {sentiment_data_json}
 user_with_data: |
   {user_query}
   

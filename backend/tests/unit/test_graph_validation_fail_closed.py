@@ -1,11 +1,11 @@
 import pytest
 
-from app.core.graph.nodes.autonomous_validation_node import autonomous_validation_node
+from agents.orchestration.validation_node import validation_node
 
 
 @pytest.mark.asyncio
 async def test_validation_fails_when_synthesis_payload_missing() -> None:
-    result = await autonomous_validation_node(
+    result = await validation_node(
         {
             "confidence_score": 0.8,
             "results": {},
@@ -19,7 +19,7 @@ async def test_validation_fails_when_synthesis_payload_missing() -> None:
 
 @pytest.mark.asyncio
 async def test_validation_fails_when_claim_has_no_evidence_refs() -> None:
-    result = await autonomous_validation_node(
+    result = await validation_node(
         {
             "confidence_score": 0.82,
             "goal": {"objective": "test"},

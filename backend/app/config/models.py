@@ -10,11 +10,19 @@ class LlamaServerConfig(BaseModel):
     """Llama.cpp server settings from YAML."""
 
     binary_path: str
-    model_path: str
     host: str
     port: int
     args: dict[str, Any] = Field(default_factory=dict)
 
+
+class ModelInfo(BaseModel):
+    """Information about a specific model."""
+    name: str
+    path: str
+    best_for: str
+    parameters_billions: float | None = None
+    gpu_layers: int | None = None
+    args: dict[str, Any] = Field(default_factory=dict)
 
 class ApiConfig(BaseModel):
     """API runtime settings from YAML."""
@@ -37,6 +45,7 @@ class YamlAppSettings(BaseModel):
     API_VERSION: str = "v1"
     DEBUG: bool = False
     llama_server: LlamaServerConfig
+    models: dict[str, ModelInfo]
     api: ApiConfig
     model: ModelConfig
     server_logfile: str

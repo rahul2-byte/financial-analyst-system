@@ -6,9 +6,13 @@ from typing import Any
 
 
 async def run_parallel_with_timeout(
-    coroutines: list[Coroutine[Any, Any, Any]], task_timeout_s: float, stage_timeout_s: float
+    coroutines: list[Coroutine[Any, Any, Any]],
+    task_timeout_s: float,
+    stage_timeout_s: float,
 ) -> tuple[list[Any | None], list[str]]:
-    async def _run_one(index: int, coroutine: Coroutine[Any, Any, Any]) -> tuple[int, Any | None, str | None]:
+    async def _run_one(
+        index: int, coroutine: Coroutine[Any, Any, Any]
+    ) -> tuple[int, Any | None, str | None]:
         try:
             result = await asyncio.wait_for(coroutine, timeout=task_timeout_s)
             return index, result, None

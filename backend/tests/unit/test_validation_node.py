@@ -2,12 +2,12 @@ import pytest
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from app.core.graph.nodes.validation_node import validation_node
-from app.core.graph.nodes.verification_node import verification_node
+from agents.orchestration.validation import validation_node
+from agents.orchestration.verification import verification_node
 
 
 @pytest.mark.asyncio
-@patch("app.core.graph.nodes.validation_node.ReportValidator")
+@patch("agents.orchestration.validation.ReportValidator")
 async def test_validation_node_makes_single_llm_call(mock_validator_cls):
     mock_validator = mock_validator_cls.return_value
     mock_validator.run_checks.return_value = {
@@ -28,7 +28,9 @@ async def test_validation_node_makes_single_llm_call(mock_validator_cls):
     )
 
     resources = SimpleNamespace(
-        llm_service=SimpleNamespace(generate_message=AsyncMock(return_value=llm_response))
+        llm_service=SimpleNamespace(
+            generate_message=AsyncMock(return_value=llm_response)
+        )
     )
 
     state = {

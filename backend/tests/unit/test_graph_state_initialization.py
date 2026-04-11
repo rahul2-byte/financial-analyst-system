@@ -18,10 +18,11 @@ def test_build_initial_graph_state_includes_required_union_fields() -> None:
     assert state["validation_passed"] is False
     assert state["timeouts"] == {"task_timeout_s": 10.0, "stage_timeout_s": 20.0}
 
+
 def test_build_initial_graph_state_includes_interactive_planning_fields() -> None:
     state = build_initial_graph_state("Analyze AAPL")
 
     assert state["plan_status"] is None
     assert state["timeframe"] is None
+    assert state["timeframe_policy"] == {}
     assert state["approved_agents"] == []
-

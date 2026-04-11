@@ -19,8 +19,8 @@ Usage:
 
 import json
 import logging
-from typing import Any, Dict, Optional, Callable, Awaitable, Union
-from dataclasses import dataclass, field
+from typing import Any, Dict, Optional, Callable, Union
+from dataclasses import dataclass
 from enum import Enum
 
 logger = logging.getLogger(__name__)
@@ -64,7 +64,7 @@ class ToolResult:
     delegate_to_agent: Optional[str] = None
 
     def to_dict(self) -> Dict[str, Any]:
-        result = {"success": self.success}
+        result: Dict[str, Any] = {"success": self.success}
         if self.data is not None:
             result["data"] = self.data
         if self.error:
@@ -170,17 +170,46 @@ class ToolRegistry:
                 namespace=ToolNamespace.MARKET,
             ),
             ToolDefinition(
-                name="search_tickers",
-                description="Fuzzy search for tickers in the database if the exact one is not found.",
+                name="resolve_instrument_exact",
+                description="Resolve exact instrument by trading symbol or instrument key from local instrument master.",
                 parameters={
                     "type": "object",
                     "properties": {
-                        "query": {
+                        "symbol": {
                             "type": "string",
-                            "description": "Search query (ticker or company name)",
+                            "description": "Trading symbol or instrument key",
                         }
                     },
+                    "required": ["symbol"],
+                },
+                namespace=ToolNamespace.MARKET,
+            ),
+            ToolDefinition(
+                name="search_instruments",
+                description="Search local instrument master by symbol, underlying symbol, or company name.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string"},
+                        "limit": {"type": "integer"},
+                        "segment": {"type": "string"},
+                        "exchange": {"type": "string"},
+                    },
                     "required": ["query"],
+                },
+                namespace=ToolNamespace.MARKET,
+            ),
+            ToolDefinition(
+                name="get_derivative_chain",
+                description="Get derivative contracts from local instrument master for an underlying symbol.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "underlying_symbol": {"type": "string"},
+                        "expiry": {"type": "string"},
+                        "limit": {"type": "integer"},
+                    },
+                    "required": ["underlying_symbol"],
                 },
                 namespace=ToolNamespace.MARKET,
             ),
@@ -247,38 +276,6 @@ class ToolRegistry:
                     "required": ["data"],
                 },
                 namespace=ToolNamespace.DATA,
-            ),
-            ToolDefinition(
-                name="fetch_news",
-                description="Fetches latest market news from RSS feeds.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "query": {
-                            "type": "string",
-                            "description": "Topic to search for",
-                        },
-                        "limit": {
-                            "type": "integer",
-                            "description": "Number of articles to fetch",
-                        },
-                    },
-                    "required": ["query"],
-                },
-                namespace=ToolNamespace.NEWS,
-            ),
-            ToolDefinition(
-                name="search_vector_db",
-                description="Searches vector database for relevant context.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "query": {"type": "string", "description": "Search query"},
-                        "limit": {"type": "integer", "description": "Max results"},
-                    },
-                    "required": ["query"],
-                },
-                namespace=ToolNamespace.NEWS,
             ),
             ToolDefinition(
                 name="submit_news_summary",
@@ -353,6 +350,23 @@ class ToolRegistry:
                 namespace=ToolNamespace.ANALYSIS,
             ),
             ToolDefinition(
+                name="submit_macro_report",
+                description="Submits the macroeconomic analysis report.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "outlook": {"type": "string"},
+                        "key_factors": {"type": "array", "items": {"type": "string"}},
+                        "impact": {
+                            "type": "string",
+                            "enum": ["positive", "negative", "neutral"],
+                        },
+                    },
+                    "required": ["outlook", "impact"],
+                },
+                namespace=ToolNamespace.ANALYSIS,
+            ),
+            ToolDefinition(
                 name="run_technical_scan",
                 description="Calculates technical indicators like RSI, MACD, and Bollinger Bands from OHLCV price data.",
                 parameters={
@@ -400,18 +414,6 @@ class ToolRegistry:
                 namespace=ToolNamespace.ANALYSIS,
             ),
             ToolDefinition(
-                name="analyze_sentiment",
-                description="Analyzes sentiment from text data.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "text": {"type": "string", "description": "Text to analyze"}
-                    },
-                    "required": ["text"],
-                },
-                namespace=ToolNamespace.ANALYSIS,
-            ),
-            ToolDefinition(
                 name="submit_sentiment",
                 description="Submits the sentiment analysis results.",
                 parameters={
@@ -425,46 +427,6 @@ class ToolRegistry:
                         "summary": {"type": "string"},
                     },
                     "required": ["sentiment", "score"],
-                },
-                namespace=ToolNamespace.ANALYSIS,
-            ),
-            ToolDefinition(
-                name="analyze_macro",
-                description="Analyzes macroeconomic trends and their impact.",
-                parameters={
-                    "type": "object",
-                    "properties": {"macro_data": {"type": "object"}},
-                    "required": ["macro_data"],
-                },
-                namespace=ToolNamespace.ANALYSIS,
-            ),
-            ToolDefinition(
-                name="submit_macro_report",
-                description="Submits the macroeconomic analysis report.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "outlook": {"type": "string"},
-                        "key_factors": {"type": "array", "items": {"type": "string"}},
-                        "impact": {
-                            "type": "string",
-                            "enum": ["positive", "negative", "neutral"],
-                        },
-                    },
-                    "required": ["outlook", "impact"],
-                },
-                namespace=ToolNamespace.ANALYSIS,
-            ),
-            ToolDefinition(
-                name="analyze_contrarian",
-                description="Analyzes data for contrarian investment signals.",
-                parameters={
-                    "type": "object",
-                    "properties": {
-                        "market_data": {"type": "object"},
-                        "sentiment_data": {"type": "object"},
-                    },
-                    "required": ["market_data"],
                 },
                 namespace=ToolNamespace.ANALYSIS,
             ),
@@ -578,8 +540,6 @@ class ToolExecutor:
     def _register_predefined_handlers(self) -> None:
         """Register all predefined tool handlers."""
         from storage.sql.client import PostgresClient
-        from quant.fundamentals import FundamentalScanner
-        import pandas as pd
 
         handlers: Dict[str, Callable[..., Any]] = {
             "market:check_db_status": lambda args: {
@@ -594,8 +554,24 @@ class ToolExecutor:
             "market:get_ticker_info": lambda args: PostgresClient().get_ticker_info(
                 args.get("ticker", "")
             ),
-            "market:search_tickers": lambda args: {
-                "matches": PostgresClient().search_tickers(args.get("query", ""))
+            "market:resolve_instrument_exact": lambda args: {
+                "instrument": PostgresClient().resolve_exact_symbol(
+                    args.get("symbol", "")
+                )
+            },
+            "market:search_instruments": lambda args: {
+                "matches": PostgresClient().search_instruments(
+                    query=args.get("query", ""),
+                    limit=int(args.get("limit", 10)),
+                    segment=args.get("segment"),
+                    exchange=args.get("exchange"),
+                )
+            },
+            "market:get_derivative_chain": lambda args: {
+                "contracts": PostgresClient().get_derivative_chain(
+                    underlying_symbol=args.get("underlying_symbol", ""),
+                    limit=int(args.get("limit", 50)),
+                )
             },
             "market:submit_offline_status": lambda args: args,
             "data:fetch_stock_data": lambda args: {
@@ -618,27 +594,9 @@ class ToolExecutor:
             "analysis:submit_thesis": lambda args: args,
             "analysis:run_technical_scan": self._handle_technical_scan,
             "analysis:submit_technical_report": lambda args: args,
-            "analysis:analyze_sentiment": lambda args: {
-                "delegate_to_agent": "sentiment_analysis"
-            },
             "analysis:submit_sentiment": lambda args: args,
-            "analysis:analyze_macro": lambda args: {
-                "delegate_to_agent": "macro_analysis"
-            },
             "analysis:submit_macro_report": lambda args: args,
-            "analysis:analyze_contrarian": lambda args: {
-                "delegate_to_agent": "contrarian_analysis"
-            },
             "analysis:submit_contrarian_report": lambda args: args,
-            "retrieval:hybrid_search": lambda args: {"delegate_to_agent": "retrieval"},
-            "retrieval:submit_retrieval_results": lambda args: args,
-            "research:search_web": lambda args: {"delegate_to_agent": "web_search"},
-            "research:submit_search_results": lambda args: args,
-            "validation:validate_report": lambda args: {
-                "report": args.get("report", ""),
-                "user_query": args.get("user_query", ""),
-                "is_valid": True,
-            },
         }
 
         for name, handler in handlers.items():
@@ -648,6 +606,7 @@ class ToolExecutor:
 
     def _handle_fundamental_scan(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Handle fundamental scan tool."""
+        import json
         raw_data_str = args.get("raw_data", "{}")
         if isinstance(raw_data_str, str):
             try:
@@ -656,6 +615,8 @@ class ToolExecutor:
                 raw_data = {}
         else:
             raw_data = raw_data_str
+
+        from quant.fundamentals import FundamentalScanner
 
         scanner = FundamentalScanner()
         return scanner.scan(raw_data)
@@ -695,7 +656,10 @@ class ToolExecutor:
             )
 
         try:
+            import inspect
             result = handler(args)
+            if inspect.iscoroutine(result):
+                result = await result
 
             if isinstance(result, dict):
                 if "delegate_to_agent" in result:
@@ -715,18 +679,15 @@ class ToolExecutor:
 
     def execute_sync(self, tool_full_name: str, args: Dict[str, Any]) -> ToolResult:
         """Synchronous wrapper for tool execution."""
+        import asyncio
         try:
             loop = None
             try:
-                import asyncio
-
                 loop = asyncio.get_running_loop()
             except RuntimeError:
                 pass
 
             if loop:
-                import asyncio
-
                 return asyncio.run(self.execute(tool_full_name, args))
             else:
                 return asyncio.run(self.execute(tool_full_name, args))

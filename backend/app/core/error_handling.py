@@ -16,16 +16,16 @@ Usage:
 
 import asyncio
 import logging
-from typing import List, Optional
+from typing import List, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
 from app.core.policies.retry_policy import (
-    MAX_BACKOFF_SECONDS,
     MAX_RETRIES,
     exponential_backoff_seconds,
 )
 
 logger = logging.getLogger(__name__)
+
 
 class ErrorSeverity(str, Enum):
     """Classification of error severity."""
@@ -219,7 +219,7 @@ class ErrorHandler:
         return cleanup
 
 
-async def error_handler_node(state: dict, resources: "NodeResources") -> dict:
+async def error_handler_node(state: dict, resources: Any) -> dict:
     """
     LangGraph node for error handling.
 

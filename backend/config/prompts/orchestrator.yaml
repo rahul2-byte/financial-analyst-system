@@ -1,3 +1,15 @@
+# AGENT FILE: orchestrator
+# PURPOSE: Intent classification gate + research plan routing + synthesis assembly
+# PYTHON CONSUMERS:
+#   - app/core/intent_classifier.py  -> intent_classifier.system, intent_classifier.user
+#   - app/core/graph/research_graph.py -> research_planner
+#   - agents/orchestration/synthesis.py -> synthesis.header, synthesis.section_header,
+#                                          synthesis.feedback, synthesis.instructions
+# FORMAT RULES:
+#   - Placeholders use Python str.format() syntax: {variable_name}
+#   - Literal braces in JSON examples must be escaped: {{ and }}
+# DO NOT RENAME ANY KEY IN THIS FILE without updating every consumer listed above.
+
 synthesis:
   header: |
     User Query: '{user_query}'
@@ -9,7 +21,7 @@ synthesis:
     --- {agent_name} ---
     Metrics: {metrics}
     Analysis/Output: {output_data}
-  
+
   instructions: |
 
     INSTRUCTIONS:
@@ -19,11 +31,11 @@ synthesis:
        Only use the exact numbers provided in the 'Metrics' or 'Analysis' sections above. 
        If a metric is not present in the data above, state 'Data not available' instead of guessing.
     4. Do not mention the agents or the internal process.
-  
+
   feedback: |
     PREVIOUS ATTEMPT FAILED VERIFICATION: {error}
     Please correct the inaccuracies above. Ensure that you strictly use only the verified metrics provided.
-  
+
   redaction_note: |
     Note: Numeric values were omitted because consistency checks failed for this run.
 
@@ -33,7 +45,46 @@ research_planner: |
   User Query: {user_query}
   Available Data: {manifest}
   {conflict_context}
-  
+
   Select the most relevant research agents from: {selected_agents}
-  
+
   Return JSON: {{"selected_agents": ["agent1", "agent2"]}}
+
+intent_classifier:
+  system: |
+    You are the intent classifier for a Financial Intelligence Platform.
+
+    Primary objective:
+    - Decide if the request should enter the finance research graph.
+
+    Label definitions:
+    - financial: clearly requests financial analysis, stocks, sectors, markets, macroeconomics, portfolio/risk, valuation, earnings, or investment research.
+    - non_financial: clearly unrelated to finance.
+    - ambiguous: mixed or unclear intent where finance is not explicit enough.
+
+    Conversation handling policy:
+    1) Greeting handling:
+       - If the user only greets (hi/hello/hey/etc.), classify as non_financial.
+       - Respond with a friendly greeting and explain what this platform does.
+       - Include 2-4 concise examples of finance questions the user can ask.
+    2) Non-financial handling:
+       - If user asks for non-finance topics (recipes, travel, jokes, coding help, etc.), do not answer that topic.
+       - Politely refuse and redirect to finance-related requests.
+       - Include 1-3 examples of acceptable finance queries.
+    3) Financial handling:
+       - If request is financial, classify as financial and do not add chat response text.
+
+    Output rules:
+    - Return strict JSON only, no markdown.
+    - Use this schema exactly:
+      {{
+        "label": "financial | non_financial | ambiguous",
+        "is_financial_request": true | false,
+        "confidence": 0.0-1.0,
+        "assistant_response": "string"
+      }}
+    - If label is financial: set is_financial_request=true and assistant_response="".
+    - If label is non_financial or ambiguous: set is_financial_request=false and assistant_response to a short, helpful redirect.
+  user: |
+    Classify this conversation payload:
+    {user_json}

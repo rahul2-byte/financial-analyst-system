@@ -35,7 +35,17 @@ class MarketRepository:
             ]
 
             stmt = pg_insert(OHLCV).values(rows)
-            stmt = stmt.on_conflict_do_nothing(index_elements=["ticker", "date"])
+            stmt = stmt.on_conflict_do_update(
+                index_elements=["ticker", "date"],
+                set_={
+                    "open": stmt.excluded.open,
+                    "high": stmt.excluded.high,
+                    "low": stmt.excluded.low,
+                    "close": stmt.excluded.close,
+                    "volume": stmt.excluded.volume,
+                    "adjusted_close": stmt.excluded.adjusted_close,
+                },
+            )
             session.execute(stmt)
 
     def has_any_data(self) -> bool:

@@ -1,7 +1,8 @@
 import pytest
 
-from app.core.graph.nodes.autonomous_quality_nodes import autonomous_synthesis_node
-from app.core.graph.nodes.autonomous_research_nodes import autonomous_research_execution_node
+from agents.financial.research.research_plan_node import research_plan_node
+from agents.quality.nodes import synthesis_node
+from agents.financial.research.research_execution_node import research_execution_node
 
 
 @pytest.mark.asyncio
@@ -20,12 +21,15 @@ async def test_research_execution_collects_tool_registry_evidence(monkeypatch) -
         }
 
     monkeypatch.setitem(
-        __import__("app.core.graph.nodes.autonomous_research_nodes", fromlist=["AGENT_NODE_MAP"]).AGENT_NODE_MAP,
+        __import__(
+            "agents.financial.research.execution",
+            fromlist=["AGENT_NODE_MAP"],
+        ).AGENT_NODE_MAP,
         "fundamental_analysis",
         _fake_agent,
     )
 
-    result = await autonomous_research_execution_node(
+    result = await research_execution_node(
         {
             "tasks": [
                 {
@@ -70,7 +74,7 @@ async def test_synthesis_evidence_strength_uses_real_tool_metrics() -> None:
         },
     }
 
-    result = await autonomous_synthesis_node(state)
+    result = await synthesis_node(state)
 
     assert result["evidence_strength"] > 0.6
     assert any(
@@ -92,11 +96,13 @@ async def test_research_execution_preserves_agent_mapping_when_earlier_task_time
     async def _fast_agent(_state, _resources):
         return {"agent_outputs": {"sentiment_analysis": {"analysis": "fast"}}}
 
-    module = __import__("app.core.graph.nodes.autonomous_research_nodes", fromlist=["AGENT_NODE_MAP"])
+    module = __import__(
+        "agents.financial.research.execution", fromlist=["AGENT_NODE_MAP"]
+    )
     monkeypatch.setitem(module.AGENT_NODE_MAP, "fundamental_analysis", _slow_agent)
     monkeypatch.setitem(module.AGENT_NODE_MAP, "sentiment_analysis", _fast_agent)
 
-    result = await autonomous_research_execution_node(
+    result = await research_execution_node(
         {
             "tasks": [
                 {
@@ -120,3 +126,56 @@ async def test_research_execution_preserves_agent_mapping_when_earlier_task_time
     assert "sentiment_analysis" in result["results"]
     assert result["results"]["sentiment_analysis"]["analysis"] == "fast"
     assert "fundamental_analysis" not in result["results"]
+
+
+@pytest.mark.asyncio
+async def test_fetched_data_flows_from_planner_into_execution_current_step(
+    monkeypatch,
+) -> None:
+    captured: dict[str, object] = {}
+
+    async def _capture_agent(state, _resources):
+        captured.update(state.get("current_step", {}).get("parameters", {}))
+        return {
+            "agent_outputs": {"contrarian_analysis": {"analysis": "captured"}},
+            "tool_registry": [],
+        }
+
+    module = __import__(
+        "agents.financial.research.execution", fromlist=["AGENT_NODE_MAP"]
+    )
+    monkeypatch.setitem(module.AGENT_NODE_MAP, "contrarian_analysis", _capture_agent)
+
+    planner_result = await research_plan_node(
+        {
+            "user_query": "Analyze AAPL",
+            "goal": {"ticker": "AAPL", "instruments": [{"trading_symbol": "AAPL"}]},
+            "approved_agents": ["contrarian_analysis"],
+            "timeframe": "1y",
+            "replanned_tasks": [],
+            "confidence_score": 0.5,
+            "fetched_data": {
+                "ohlcv": {"by_symbol": {"AAPL": {"data": [{"Date": "2026-04-01"}]}}},
+                "fundamentals": {"by_symbol": {"AAPL": {"marketCap": 100}}},
+                "news": [{"title": "AAPL news", "summary": "earnings beat"}],
+                "macro": {"USD_INR": 83.1},
+            },
+        }
+    )
+
+    await research_execution_node(
+        {
+            "tasks": planner_result["tasks"],
+            "timeouts": {"task_timeout_s": 5.0, "stage_timeout_s": 10.0},
+            "results": {},
+        }
+    )
+
+    market_data = captured["market_data"]
+    sentiment_data = captured["sentiment_data"]
+
+    assert isinstance(market_data, dict)
+    assert isinstance(sentiment_data, list)
+    assert market_data["fundamentals"]["marketCap"] == 100
+    assert market_data["ohlcv"]["data"] == [{"Date": "2026-04-01"}]
+    assert sentiment_data[0]["title"] == "AAPL news"

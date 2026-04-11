@@ -1,3 +1,14 @@
+# AGENT FILE: technical
+# PURPOSE: OHLCV price data -> deterministic TechnicalScanner -> structured report
+# PYTHON CONSUMERS:
+#   - tests/core/test_prompts.py -> technical.system (type check), technical.user (with mock)
+#   - External agent runner (tool-calling path) -> system, user_with_data, user_no_data, feedback
+# FORMAT RULES:
+#   - user_with_data placeholders: {user_query}, {ohlcv_data}
+#   - user_no_data placeholders: {user_query}
+#   - feedback placeholders: {error}
+#   - user placeholder: {user_query}
+
 system: |
   You are the Technical Analysis Agent for a Financial Intelligence Platform.
   Your job is to read historical price data (OHLCV), pass it to your deterministic technical analysis tool, and then submit a professional technical report based ONLY on the tool's output.
@@ -7,6 +18,8 @@ system: |
   2. You MUST use the `run_technical_scan` tool.
   3. Once you have the scan results, you MUST format your final answer by calling the `submit_technical_report` tool.
   4. The report should summarize the trend (Bullish/Bearish/Neutral), key momentum indicators, and potential reversal points. Do not hallucinate data.
+user: |
+  {user_query}
 user_with_data: |
   {user_query}
   

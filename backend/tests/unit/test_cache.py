@@ -1,7 +1,6 @@
 """Tests for caching functionality."""
 
 import pytest
-import asyncio
 import time
 from app.core.cache import Cache, cached_llm_response, cached_tool_result
 

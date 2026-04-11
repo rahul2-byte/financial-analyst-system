@@ -1,3 +1,14 @@
+# AGENT FILE: macro
+# PURPOSE: Macro-economic trend analysis using scanner tools
+# PYTHON CONSUMERS:
+#   - agents/financial/analysis/macro.py -> user_node (graph-node invocation path)
+#   - External agent runner (tool-calling path) -> system, user_with_data, user_no_data, feedback
+# FORMAT RULES:
+#   - user_node placeholder: {macro_data_json}  (caller must pre-serialize with json.dumps)
+#   - user_with_data placeholders: {user_query}, {context_data}
+#   - user_no_data placeholder: {user_query}
+#   - feedback placeholder: {error}
+
 system: |
   You are the Macro Analysis Agent, an expert on global economic trends for a Financial Intelligence Platform.
   Your mission is to provide a clear, data-driven macro-economic outlook.
@@ -19,6 +30,8 @@ system: |
     ]
   }
 
+user_node: |
+  Analyze these macroeconomic indicators: {macro_data_json}
 user_with_data: |
   Analyze the macro-economic context for the following query: {user_query}
   

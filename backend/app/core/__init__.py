@@ -35,7 +35,7 @@ except ImportError:
 
 # Graph components (may require langgraph)
 try:
-    from app.core.graph.graph_builder import get_research_graph
+    from app.core.graph.runtime.graph_builder import get_research_graph
     from app.core.graph.graph_state import ResearchGraphState, merge_dicts
 
     _HAS_GRAPH = True

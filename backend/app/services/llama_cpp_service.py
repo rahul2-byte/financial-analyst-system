@@ -28,7 +28,7 @@ class LlamaCppService(LLMServiceInterface):
     async def check_health(self) -> bool:
         """Checks if the llama.cpp server is running and healthy."""
         try:
-            await llama_manager.ensure_server_running()
+            await llama_manager.ensure_model_running(settings.model.default_model)
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.get(self.health_url)
                 return (
@@ -45,7 +45,7 @@ class LlamaCppService(LLMServiceInterface):
         langfuse_context.update_current_observation(
             input=[msg.model_dump(exclude_none=True) for msg in messages],
             model=model,
-            metadata={**kwargs, "llm_config": settings.llama_server.model_path},
+            metadata={**kwargs, "llm_config": model},
         )
 
         payload = {
@@ -61,7 +61,7 @@ class LlamaCppService(LLMServiceInterface):
         last_error = None
         for attempt in range(MAX_RETRIES):
             try:
-                await llama_manager.ensure_server_running()
+                await llama_manager.ensure_model_running(model)
                 async with httpx.AsyncClient(timeout=settings.api.timeout) as client:
                     response = await client.post(
                         self.api_url,
@@ -133,7 +133,7 @@ class LlamaCppService(LLMServiceInterface):
         last_error = None
         for attempt in range(MAX_RETRIES):
             try:
-                await llama_manager.ensure_server_running()
+                await llama_manager.ensure_model_running(model)
                 async with httpx.AsyncClient(timeout=settings.api.timeout) as client:
                     response = await client.post(
                         self.api_url,
@@ -170,7 +170,9 @@ class LlamaCppService(LLMServiceInterface):
                         f"Failed after {MAX_RETRIES} attempts. Last error: {last_error}"
                     )
 
-        raise Exception(f"Failed after {MAX_RETRIES} attempts. Last error: {last_error}")
+        raise Exception(
+            f"Failed after {MAX_RETRIES} attempts. Last error: {last_error}"
+        )
 
     def generate_stream(
         self, messages: List[Message], model: str, **kwargs
@@ -179,7 +181,7 @@ class LlamaCppService(LLMServiceInterface):
 
         async def generator():
             try:
-                await llama_manager.ensure_server_running()
+                await llama_manager.ensure_model_running(model)
                 payload = {
                     "model": model,
                     "messages": [msg.model_dump(exclude_none=True) for msg in messages],

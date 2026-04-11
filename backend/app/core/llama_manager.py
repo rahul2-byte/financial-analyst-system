@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import os
-import signal
 import subprocess
 import time
 from pathlib import Path
@@ -27,6 +26,7 @@ class LlamaServerManager:
     _process: Optional[subprocess.Popen] = None
     _lock = asyncio.Lock()
     _is_shutting_down = False
+    _currently_loaded_model: Optional[str] = None
 
     def __new__(cls):
         if cls._instance is None:
@@ -108,10 +108,24 @@ class LlamaServerManager:
                 except Exception as e:
                     logger.error("Failed to kill existing process: %s", e)
 
-    def _start_process(self):
+    def _calculate_ngl(self, model_info) -> int:
+        """Calculate optimal GPU layers based on model size."""
+        if model_info.parameters_billions:
+            # Formula: min(40, params * 4 + 3) → 8B→35, 3B→15
+            return min(40, int(model_info.parameters_billions * 4 + 3))
+        # Default fallback
+        return settings.llama_server.args.get("-ngl", 32)
+
+    def _start_process(self, model_key: str):
         """Constructs the command and starts the llama.cpp server process."""
         binary_path = Path(settings.llama_server.binary_path)
-        model_path = Path(settings.llama_server.model_path)
+        
+        # Get model path from new registry
+        model_info = settings.models.get(model_key)
+        if not model_info:
+            raise ValueError(f"Model '{model_key}' not found in configuration.")
+        
+        model_path = Path(model_info.path)
 
         if not binary_path.exists():
             raise FileNotFoundError(f"Llama server binary not found at: {binary_path}")
@@ -128,7 +142,18 @@ class LlamaServerManager:
             str(settings.llama_server.port),
         ]
 
-        for key, value in settings.llama_server.args.items():
+        # Use gpu_layers if explicitly provided, otherwise auto-calculate
+        merged_args = {**settings.llama_server.args}
+        if model_info.args:
+            merged_args.update(model_info.args)
+        
+        # Override -ngl: prefer explicit gpu_layers, then model args, then auto-calculate
+        if model_info.gpu_layers is not None:
+            merged_args["-ngl"] = model_info.gpu_layers
+        elif "-ngl" not in model_info.args:
+            merged_args["-ngl"] = self._calculate_ngl(model_info)
+
+        for key, value in merged_args.items():
             command.append(str(key))
             if value is not None:
                 command.append(str(value))
@@ -136,7 +161,7 @@ class LlamaServerManager:
         log_path = Path(settings.server_logfile)
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        logger.info("Starting llama.cpp server with command: %s", " ".join(command))
+        logger.info(f"Starting llama.cpp server with model '{model_info.name}', {merged_args.get('-ngl')} GPU layers. Command: %s", " ".join(command))
 
         env = os.environ.copy()
         binary_dir = str(binary_path.parent.resolve())
@@ -155,38 +180,48 @@ class LlamaServerManager:
         )
         logger.info("Llama.cpp server process started with PID: %s", self._process.pid)
 
-    async def ensure_server_running(self):
+    async def ensure_model_running(self, model_key: str):
         """
-        Ensures the server is running, starting it if necessary.
+        Ensures the server is running with the specified model, swapping if necessary.
         Uses a lock to avoid concurrent restarts.
         """
         if self._is_shutting_down:
             return
 
         async with self._lock:
-            # Fast path: we started it and it is healthy.
+            # Check if correct model is already loaded and healthy
+            needs_restart = False
+            if self._currently_loaded_model != model_key:
+                needs_restart = True
+            
+            # Fast path: we started it, it has the right model, and it is healthy.
             if (
-                self._process
+                not needs_restart
+                and self._process
                 and self._process.poll() is None
                 and await self._check_health()
             ):
                 return
 
-            # If an external process is already healthy on the port, use it.
-            if self._is_server_running() and await self._check_health():
-                logger.debug("Llama.cpp already running on port and healthy.")
+            # If an external process is already healthy on the port, assume it's right if model matches (hard to tell, so usually we restart)
+            if not needs_restart and self._is_server_running() and await self._check_health():
+                logger.debug("Llama.cpp already running on port and healthy with correct model.")
                 return
 
+            logger.info(f"Swapping/Starting model to '{model_key}'.")
             # Cleanup stale/broken process and restart.
             self._terminate_process()
             self._kill_existing_server()
-            self._start_process()
+            self._start_process(model_key)
 
             if not await self._wait_for_server_ready(timeout=180):
                 self._terminate_process()
+                self._currently_loaded_model = None
                 raise RuntimeError(
-                    "Failed to start and connect to the llama.cpp server."
+                    f"Failed to start and connect to the llama.cpp server for model '{model_key}'."
                 )
+            
+            self._currently_loaded_model = model_key
 
     def _terminate_process(self):
         """Terminates the managed server process if it's running."""

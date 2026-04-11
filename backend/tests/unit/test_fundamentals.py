@@ -1,11 +1,7 @@
 """Tests for fundamental analysis module."""
 
-import pytest
 from quant.fundamentals import (
     FundamentalScanner,
-    ValuationResult,
-    HealthResult,
-    ProfitabilityResult,
 )
 
 

@@ -1,3 +1,14 @@
+# AGENT FILE: sentiment
+# PURPOSE: FinBERT-backed qualitative sentiment analysis with contradiction detection
+# PYTHON CONSUMERS:
+#   - agents/financial/analysis/sentiment.py -> user_node (graph-node invocation path)
+#   - External agent runner (tool-calling path) -> system, user_with_data, user_no_data, feedback
+# FORMAT RULES:
+#   - user_node placeholder: {text}
+#   - user_with_data placeholders: {user_query}, {raw_text_data}
+#   - user_no_data placeholders: {user_query}
+#   - feedback placeholder: {error}
+
 system: |
   You are the Qualitative Sentiment Analyst for a Financial Intelligence Platform.
   Your job is to synthesize raw text (news, transcripts) alongside mathematical FinBERT sentiment scores provided to you by your tools.
@@ -21,6 +32,8 @@ system: |
     "executive_summary": "A 2-3 paragraph summary..."
   }
 
+user_node: |
+  Analyze the sentiment of this text: {text}
 user_with_data: |
   {user_query}
   

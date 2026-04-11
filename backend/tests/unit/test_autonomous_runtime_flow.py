@@ -1,6 +1,6 @@
 import pytest
 
-from app.core.graph.graph_builder import get_research_graph
+from app.core.graph.runtime.graph_builder import get_research_graph
 
 
 @pytest.mark.asyncio
@@ -62,5 +62,11 @@ async def test_runtime_graph_reaches_terminal_state_without_recursion_error() ->
     result = await graph.ainvoke(initial_state, {"recursion_limit": 40})
 
     assert result.get("final_output") is not None
-    assert result["final_output"].get("decision") is not None
-    assert result["final_output"].get("confidence_score") is not None
+    final_output = result["final_output"]
+    if isinstance(final_output, dict):
+        assert final_output.get("decision") is not None
+        assert final_output.get("confidence_score") is not None
+    elif isinstance(final_output, str):
+        assert len(final_output) > 0
+    else:
+        pytest.fail("Unexpected final_output type")

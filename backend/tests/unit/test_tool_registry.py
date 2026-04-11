@@ -225,13 +225,28 @@ def test_get_tools_by_namespace(tool_registry):
     params = {"type": "object", "properties": {}}
 
     tool_registry.register(
-        ToolDefinition(name="tool1", description="T1", parameters=params, namespace=ToolNamespace.MARKET)
+        ToolDefinition(
+            name="tool1",
+            description="T1",
+            parameters=params,
+            namespace=ToolNamespace.MARKET,
+        )
     )
     tool_registry.register(
-        ToolDefinition(name="tool2", description="T2", parameters=params, namespace=ToolNamespace.DATA)
+        ToolDefinition(
+            name="tool2",
+            description="T2",
+            parameters=params,
+            namespace=ToolNamespace.DATA,
+        )
     )
     tool_registry.register(
-        ToolDefinition(name="tool3", description="T3", parameters=params, namespace=ToolNamespace.DATA)
+        ToolDefinition(
+            name="tool3",
+            description="T3",
+            parameters=params,
+            namespace=ToolNamespace.DATA,
+        )
     )
 
     market_tools = tool_registry.get_tools_by_namespace(ToolNamespace.MARKET)

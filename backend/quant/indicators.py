@@ -115,7 +115,7 @@ class TechnicalScanner:
             return {"status": "error", "message": "DataFrame is empty"}
 
         # Ensure required columns exist
-        required_cols = ["close"]
+        required_cols = ['Date', 'Close', 'High', 'Low', 'Open', 'Volume']
         if not all(col in df.columns for col in required_cols):
             return {
                 "status": "error",

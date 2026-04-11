@@ -1,6 +1,6 @@
 import pytest
 
-from app.core.graph.nodes.autonomous_quality_nodes import autonomous_critic_node
+from agents.quality.nodes import critic_node
 
 
 @pytest.mark.asyncio
@@ -34,7 +34,7 @@ async def test_critic_retries_when_synthesis_claim_has_no_evidence_refs() -> Non
         "confidence_components": {},
     }
 
-    result = await autonomous_critic_node(state)
+    result = await critic_node(state)
 
     assert result["critic_decision"] == "retry"
     assert result["hallucination_issues"]
@@ -72,7 +72,7 @@ async def test_critic_approves_when_all_claims_have_evidence_refs() -> None:
         "confidence_components": {},
     }
 
-    result = await autonomous_critic_node(state)
+    result = await critic_node(state)
 
     assert result["critic_decision"] in {"approve", "conflict"}
     assert result["hallucination_issues"] == []

@@ -50,12 +50,14 @@ class ResearchGraphState(TypedDict):
     selected_agents: Annotated[List[str], replace_value]
     plan_status: Annotated[Optional[str], replace_value]
     timeframe: Annotated[Optional[str], replace_value]
+    timeframe_policy: Annotated[Dict[str, Any], merge_dicts]
     approved_agents: Annotated[List[str], replace_value]
 
     # Autonomous orchestration fields
     goal: Annotated[Optional[Dict[str, Any]], replace_value]
     hypotheses: Annotated[List[Dict[str, Any]], replace_value]
     data_status: Annotated[Dict[str, Any], merge_dicts]
+    fetched_data: Annotated[Dict[str, Any], merge_dicts]
     data_check: Annotated[Dict[str, Any], merge_dicts]
     data_plan: Annotated[List[Dict[str, Any]], replace_value]
     tasks: Annotated[List[Dict[str, Any]], replace_value]
@@ -86,6 +88,10 @@ class ResearchGraphState(TypedDict):
     termination_reason: Annotated[Optional[str], replace_value]
     final_output: Annotated[Optional[Dict[str, Any]], replace_value]
     validation_passed: Annotated[bool, replace_value]
+    evaluation_result: Annotated[Dict[str, Any], merge_dicts]
+    evaluation_passed: Annotated[bool, replace_value]
+    correction_prompt: Annotated[Optional[str], replace_value]
+    intelligence_decision: Annotated[Dict[str, Any], merge_dicts]
 
 
 def build_initial_graph_state(
@@ -120,10 +126,12 @@ def build_initial_graph_state(
         "selected_agents": [],
         "plan_status": None,
         "timeframe": None,
+        "timeframe_policy": {},
         "approved_agents": [],
         "goal": None,
         "hypotheses": [],
         "data_status": {},
+        "fetched_data": {},
         "data_check": {},
         "data_plan": [],
         "tasks": [],
@@ -150,4 +158,8 @@ def build_initial_graph_state(
         "termination_reason": None,
         "final_output": None,
         "validation_passed": False,
+        "evaluation_result": {},
+        "evaluation_passed": False,
+        "correction_prompt": None,
+        "intelligence_decision": {},
     }

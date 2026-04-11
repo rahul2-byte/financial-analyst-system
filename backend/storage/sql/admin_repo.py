@@ -37,6 +37,8 @@ class AdminRepository:
 
     def get_db_size(self) -> str:
         with self._session_provider() as session:
-            statement = text("SELECT pg_size_pretty(pg_database_size(current_database()));")
+            statement = text(
+                "SELECT pg_size_pretty(pg_database_size(current_database()));"
+            )
             result = session.execute(statement).first()
             return result[0] if result else "0 bytes"

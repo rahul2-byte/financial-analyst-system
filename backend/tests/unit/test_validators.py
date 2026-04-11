@@ -1,12 +1,10 @@
 """Tests for input validation utilities."""
 
-import pytest
 from app.core.validators import (
     sanitize_user_query,
     validate_query_not_malicious,
     validate_ticker,
     validate_date_range,
-    MALICIOUS_PATTERNS,
     MAX_QUERY_LENGTH,
 )
 

@@ -1,7 +1,10 @@
 from typing import Optional, Dict, Any
-from sqlmodel import Field, SQLModel, JSON, Column
 from datetime import datetime
-from sqlalchemy import UniqueConstraint
+
+from sqlalchemy import UniqueConstraint, Index
+from sqlmodel import Field, SQLModel, JSON, Column
+
+from storage.sql.memory_models import ErrorLog, InteractionLog, PerformanceMetric
 
 
 class OHLCV(SQLModel, table=True):
@@ -71,7 +74,9 @@ class CacheIndex(SQLModel, table=True):
     """System-wide cache index for tracking data freshness."""
 
     __tablename__ = "cache_index"
-    __table_args__ = (UniqueConstraint("ticker", "dataset_type", name="uq_cache_ticker_dataset"),)
+    __table_args__ = (
+        UniqueConstraint("ticker", "dataset_type", name="uq_cache_ticker_dataset"),
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     ticker: str = Field(index=True)
@@ -92,3 +97,46 @@ class ResearchAuditLog(SQLModel, table=True):
     agent_name: str
     action: str
     data: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+
+
+class InstrumentMaster(SQLModel, table=True):
+    """Canonical instrument master for equity/derivatives universe."""
+
+    __tablename__ = "instrument_master"
+    __table_args__ = (
+        UniqueConstraint(
+            "exchange", "trading_symbol", name="uq_instrument_exchange_symbol"
+        ),
+        Index("ix_instrument_master_company_name", "company_name"),
+        Index("ix_instrument_master_underlying_symbol", "underlying_symbol"),
+        Index("ix_instrument_master_segment_expiry", "segment", "expiry"),
+    )
+
+    instrument_key: str = Field(primary_key=True)
+    exchange: str = Field(index=True)
+    segment: str = Field(index=True)
+    trading_symbol: str = Field(index=True)
+    underlying_symbol: Optional[str] = Field(default=None)
+    company_name: Optional[str] = Field(default=None)
+    sector: Optional[str] = None
+    industry: Optional[str] = None
+    instrument_type: str = Field(index=True)
+    expiry: Optional[datetime] = Field(default=None, index=True)
+    strike: Optional[float] = None
+    option_type: Optional[str] = Field(default=None, index=True)
+    lot_size: Optional[int] = None
+    tick_size: Optional[float] = None
+    is_active: bool = Field(default=True, index=True)
+    as_of_date: Optional[datetime] = None
+    source_snapshot_id: Optional[str] = Field(default=None, index=True)
+
+
+class InstrumentAlias(SQLModel, table=True):
+    """Explicit mapping from common names/aliases to canonical instrument keys."""
+
+    __tablename__ = "instrument_alias"
+    __table_args__ = (Index("ix_instrument_alias_text", "alias_text", unique=True),)
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    alias_text: str = Field(index=True)
+    instrument_key: str = Field(index=True)

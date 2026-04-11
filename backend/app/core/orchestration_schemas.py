@@ -1,7 +1,7 @@
 """Orchestration schemas for LangGraph pipeline - PlanData and ExecutionStep."""
 
 from typing import List, Optional, Any
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from enum import Enum
 
 
@@ -57,11 +57,43 @@ class PlanData(BaseModel):
 class InteractivePlanPayload(BaseModel):
     """Schema for the Planner Agent LLM output when proposing an interactive plan."""
 
-    response_mode: str = Field(description="Mode of response: ask_clarification, ask_plan_approval, direct_execution")
+    response_mode: str = Field(
+        description="Mode of response: ask_clarification, ask_plan_approval, direct_execution"
+    )
     assistant_response: str = Field(description="Text to show the user")
-    proposed_timeframe: Optional[str] = Field(default=None, description="Proposed timeframe (e.g., '1y', '5y', '1m')")
-    proposed_agents: List[str] = Field(default_factory=list, description="List of proposed agents")
-    is_fast_track: bool = Field(default=False, description="True if user query is detailed enough to skip approval")
+    proposed_timeframe: Optional[str] = Field(
+        default=None, description="Proposed timeframe (e.g., '1y', '5y', '1m')"
+    )
+    proposed_agents: List[str] = Field(
+        default_factory=list, description="List of proposed agents"
+    )
+    is_fast_track: bool = Field(
+        default=False,
+        description="True if user query is detailed enough to skip approval",
+    )
+
+    @field_validator("proposed_agents", mode="before")
+    @classmethod
+    def validate_agents(cls, v: Any) -> List[str]:
+        if isinstance(v, str):
+            return [v]
+        if isinstance(v, list):
+            return [str(x) for x in v]
+        return []
+
+    @field_validator("proposed_timeframe", mode="before")
+    @classmethod
+    def validate_timeframe(cls, v: Any) -> Optional[str]:
+        if isinstance(v, str) and v.strip().lower() == "null":
+            return None
+        return v
+
+    @field_validator("is_fast_track", mode="before")
+    @classmethod
+    def validate_fast_track(cls, v: Any) -> bool:
+        if isinstance(v, str):
+            return v.strip().lower() in ("true", "1", "yes", "t", "y")
+        return bool(v)
 
 
 class OfflineStatus(BaseModel):
@@ -75,6 +107,22 @@ class OfflineStatus(BaseModel):
     extra_info: dict = Field(
         default_factory=dict, description="Additional context from tools"
     )
+
+
+class EvaluationErrorType(str, Enum):
+    NONE = "none"
+    HALLUCINATION = "hallucination"
+    INCOMPLETE_RESPONSE = "incomplete_response"
+    FACTUAL_ERROR = "factual_error"
+    FORMATTING_ERROR = "formatting_error"
+    REASONING_ERROR = "reasoning_error"
+    UNSAFE_OUTPUT = "unsafe_output"
+
+
+class EvaluatorResult(BaseModel):
+    score: float = Field(ge=0.0, le=1.0)
+    error_type: EvaluationErrorType = Field(default=EvaluationErrorType.NONE)
+    feedback: str = Field(min_length=1)
 
 
 class DataStatus(str, Enum):

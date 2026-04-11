@@ -21,20 +21,40 @@ def test_prompt_manager_loads_prompt_directory():
     manager._load_prompts()
 
     assert "technical" in manager.prompts
-    assert "planner" in manager.prompts
     assert "autonomous_orchestrator" in manager.prompts
     assert isinstance(manager.get_prompt("technical.system"), str)
     assert isinstance(
         manager.get_prompt("autonomous_orchestrator.autonomous.critic"), str
     )
 
+
+def test_prompt_manager_does_not_load_removed_unused_prompt_files():
+    manager = PromptManager()
+    manager._load_prompts()
+
+    for removed_key in (
+        "fundamental",
+        "macro_indicators",
+        "market_news",
+        "planner",
+        "price_and_fundamentals",
+        "retrieval",
+        "web_search",
+    ):
+        assert removed_key not in manager.prompts
+
+
 def test_prompt_manager_loads_interactive_planner_prompts():
     manager = PromptManager()
     manager._load_prompts()
-    
-    system_prompt = manager.get_prompt("autonomous_orchestrator.interactive_planner.system")
-    user_prompt = manager.get_prompt("autonomous_orchestrator.interactive_planner.user", query="test")
-    
+
+    system_prompt = manager.get_prompt(
+        "autonomous_orchestrator.interactive_planner.system"
+    )
+    user_prompt = manager.get_prompt(
+        "autonomous_orchestrator.interactive_planner.user", query="test"
+    )
+
     assert isinstance(system_prompt, str)
     assert isinstance(user_prompt, str)
     assert "response_mode" in system_prompt
@@ -43,3 +63,25 @@ def test_prompt_manager_loads_interactive_planner_prompts():
     assert "direct_execution" in system_prompt
     assert "is_fast_track" in system_prompt
 
+
+def test_prompt_manager_loads_centralized_node_prompts_and_ticker_resolver():
+    manager = PromptManager()
+    manager._load_prompts()
+
+    ticker_resolver = manager.get_prompt(
+        "autonomous_orchestrator.ticker_resolver.system"
+    )
+    sentiment_node = manager.get_prompt("sentiment.user_node", text="test text")
+    macro_node = manager.get_prompt("macro.user_node", macro_data_json="{}")
+    contrarian_node = manager.get_prompt(
+        "contrarian.user_node",
+        market_data_json="{}",
+        sentiment_data_json="{}",
+    )
+
+    assert "RELIANCE" in ticker_resolver
+    assert "ambiguity_reason" in ticker_resolver
+    assert sentiment_node == "Analyze the sentiment of this text: test text\n"
+    assert macro_node == "Analyze these macroeconomic indicators: {}\n"
+    assert "Market Data: {}" in contrarian_node
+    assert "Sentiment: {}" in contrarian_node

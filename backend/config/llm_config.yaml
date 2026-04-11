@@ -7,9 +7,6 @@ llama_server:
   # Path to the llama-server executable, relative to the 'backend' directory.
   binary_path: "llama.cpp/build/bin/llama-server"
 
-  # Path to the GGUF model file, relative to the 'backend' directory.
-  model_path: "ai-lab/models/mistral/Ministral-3-8B-Instruct-2512-Q4_K_M.gguf"
-
   # Host and port for the server.
   host: "127.0.0.1"
   port: 8080
@@ -24,6 +21,20 @@ llama_server:
     --cache-type-k: "q4_0"
     --cache-type-v: "q4_0"
 
+models:
+  reasoning:
+    name: "llama-3.1"
+    path: "ai-lab/models/meta-llama/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"
+    best_for: "General reasoning, synthesis, routing, and orchestration."
+    parameters_billions: 8
+    gpu_layers: 32
+  tool_calling:
+    name: "qwen-2.5"
+    path: "ai-lab/models/qwen-tool-use/Qwen2.5-3B-Instruct-Q5_K_L.gguf"
+    best_for: "Function calling, data extraction, and using MCP tools."
+    parameters_billions: 3
+    gpu_layers: 36
+
 # API and Application Settings
 api:
   # Base URL for the llama.cpp server.
@@ -32,7 +43,7 @@ api:
 
 # LLM Model Settings
 model:
-  default_model: "mistral-8b"
+  default_model: "reasoning"
   max_output_tokens: 2048
 
 # Log file for the llama.cpp server's output.
