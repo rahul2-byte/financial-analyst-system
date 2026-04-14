@@ -18,8 +18,6 @@ class NodeResources:
             self._sql_db = None
             self._vector_db = None
             self._yf_fetcher = None
-            self._rss_fetcher = None
-            self._web_search = None
             self._initialized = True
 
     @property
@@ -53,22 +51,5 @@ class NodeResources:
 
             self._yf_fetcher = YFinanceFetcher()
         return self._yf_fetcher
-
-    @property
-    def rss_fetcher(self):
-        if self._rss_fetcher is None:
-            from data.providers.rss_news import RSSNewsFetcher
-
-            self._rss_fetcher = RSSNewsFetcher()
-        return self._rss_fetcher
-
-    @property
-    def web_search(self):
-        if self._web_search is None:
-            from data.providers.web_search import WebSearchProvider
-
-            self._web_search = WebSearchProvider()
-        return self._web_search
-
 
 resources = NodeResources()
