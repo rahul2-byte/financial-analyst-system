@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-import asyncio
+import hashlib
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlparse
@@ -11,12 +11,13 @@ import logging
 
 from app.core.contracts.graph_node import finalize_node_output
 from app.core.node_resources import resources
+from app.config import settings
 from data.schemas.market import OHLCVData
-from data.providers.news_query_planner import build_news_query_plan
-from data.providers.news_query_planner import QUERY_SPECS
-from data.providers.rss_news import deduplicate_articles, enrich_article_with_body
-from data.processors.text import TextProcessor, is_article_relevant
+from data.news_pipeline.models import CompanyContext, NewsPipelineRecord
+from data.news_pipeline.query_templates import QueryTemplateLibrary
+from data.news_pipeline.runner import NewsPipelineRunner
 from agents.shared.utils import (
+    derive_fundamental_schema_coverage,
     derive_news_coverage_score,
     derive_news_freshness_score,
     derive_required_fields_coverage,
@@ -26,13 +27,7 @@ from agents.shared.utils import (
 
 logger = logging.getLogger(__name__)
 NEWS_FRESHNESS_THRESHOLD = 0.6
-PLANNED_NEWS_INTENT_TYPES = tuple(spec["intent_type"] for spec in QUERY_SPECS)
-TRUSTED_NEWS_DOMAINS = frozenset(
-    domain
-    for spec in QUERY_SPECS
-    for domain in spec.get("preferred_domains", [])
-    if isinstance(domain, str) and "." in domain
-)
+PLANNED_NEWS_INTENT_TYPES = tuple(QueryTemplateLibrary.keys())
 
 
 def _parse_timestamp(value: Any) -> datetime | None:
@@ -58,7 +53,8 @@ def _resolve_source_domain(article: dict[str, Any]) -> str:
         return ""
     parsed = urlparse(candidate)
     if parsed.netloc:
-        return parsed.netloc.lower()
+        domain = parsed.netloc.lower()
+        return domain[4:] if domain.startswith("www.") else domain
     return candidate.strip().lower()
 
 
@@ -83,17 +79,26 @@ def _is_trusted_article(article: dict[str, Any]) -> bool:
     explicit_value = article.get("is_trusted_domain")
     if isinstance(explicit_value, bool):
         return explicit_value
-    return _resolve_source_domain(article) in TRUSTED_NEWS_DOMAINS
+    source_tier = article.get("source_tier")
+    if isinstance(source_tier, int):
+        return source_tier <= 2
+    return False
 
 
 def _is_open_web_article(article: dict[str, Any]) -> bool:
     source_type = article.get("source_type")
     if isinstance(source_type, str) and source_type.strip():
-        return source_type.strip().lower() == "open_web"
+        return source_type.strip().lower() != "filing"
     return bool(article.get("url") or article.get("link"))
 
 
-def _build_news_cache_summary(payload: list[dict[str, Any]], chunk_count: int) -> dict[str, Any]:
+def _sha256(value: str) -> str:
+    return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def _build_news_cache_summary(
+    payload: list[dict[str, Any]], chunk_count: int
+) -> dict[str, Any]:
     dedupe_keys = {
         dedupe_key
         for article in payload
@@ -127,7 +132,9 @@ def _build_news_cache_summary(payload: list[dict[str, Any]], chunk_count: int) -
         (
             published_at
             for published_at in (
-                _parse_timestamp(article.get("published_date") or article.get("published"))
+                _parse_timestamp(
+                    article.get("published_date") or article.get("published")
+                )
                 for article in payload
             )
             if published_at is not None
@@ -205,12 +212,31 @@ def _build_news_cache_summary(payload: list[dict[str, Any]], chunk_count: int) -
     }
 
 
-def _build_news_chunk_metadata(article: dict[str, Any], ticker: str | None) -> dict[str, Any]:
+def _build_news_chunk_metadata(
+    article: dict[str, Any], ticker: str | None
+) -> dict[str, Any]:
+    title = str(article.get("title", ""))
+    content = str(article.get("content", ""))
+    title_hash = str(article.get("title_hash") or _sha256(title))
+    content_hash = str(article.get("content_hash") or _sha256(content))
+    article_hash = str(
+        article.get("article_hash") or _sha256(f"{title_hash}:{content_hash}")
+    )
+    dedupe_key = str(
+        article.get("dedupe_key")
+        or article.get("canonical_url")
+        or article.get("url")
+        or article_hash
+    )
     metadata = {
         "ticker": article.get("ticker", ticker or "UNKNOWN"),
         "source": article.get("source", "RSS"),
         "url": article.get("url", ""),
         "published_date": str(article.get("published_date", "")),
+        "title_hash": title_hash,
+        "content_hash": content_hash,
+        "article_hash": article_hash,
+        "dedupe_key": dedupe_key,
     }
     for key in (
         "canonical_url",
@@ -218,23 +244,30 @@ def _build_news_chunk_metadata(article: dict[str, Any], ticker: str | None) -> d
         "original_url",
         "source_domain",
         "source_type",
+        "source_tier",
         "query_objective",
         "query_variant",
         "intent_type",
+        "query_intent",
         "search_provider",
         "search_rank",
-        "dedupe_key",
-        "article_hash",
-        "title_hash",
-        "content_hash",
         "is_trusted_domain",
         "timeframe",
         "run_id",
         "fetched_at",
         "original_blocked_url",
+        "quality_score",
+        "paywall_detected",
+        "extraction_status",
+        "relevance_check",
+        "is_duplicate",
+        "cluster_id",
+        "pipeline_version",
     ):
         if key in article:
             metadata[key] = article.get(key)
+    if "intent_type" not in metadata and "query_intent" in metadata:
+        metadata["intent_type"] = metadata["query_intent"]
     return metadata
 
 
@@ -252,7 +285,13 @@ def _stamp_news_fetched_at(payload: Any, fetched_at: str) -> Any:
         stamped_payload.append(stamped_item)
     return stamped_payload
 
-def _store_data(dataset: str, payload: Any, ticker: str | None, payload_by_symbol: dict[str, Any] | None = None) -> None:
+
+def _store_data(
+    dataset: str,
+    payload: Any,
+    ticker: str | None,
+    payload_by_symbol: dict[str, Any] | None = None,
+) -> None:
     try:
         if dataset == "ohlcv" and payload_by_symbol:
             for symbol, symbol_data in payload_by_symbol.items():
@@ -261,33 +300,55 @@ def _store_data(dataset: str, payload: Any, ticker: str | None, payload_by_symbo
                     for row in symbol_data["data"]:
                         date_val = row.get("Date") or row.get("Datetime")
                         if date_val:
-                            ohlcv_records.append(OHLCVData(
-                                ticker=symbol,
-                                date=pd.to_datetime(date_val).to_pydatetime(),
-                                open=float(row.get("Open", 0)),
-                                high=float(row.get("High", 0)),
-                                low=float(row.get("Low", 0)),
-                                close=float(row.get("Close", 0)),
-                                volume=int(row.get("Volume", 0)),
-                                adjusted_close=float(row.get("Adj Close", 0)) if "Adj Close" in row else None
-                            ))
+                            ohlcv_records.append(
+                                OHLCVData(
+                                    ticker=symbol,
+                                    date=pd.to_datetime(date_val).to_pydatetime(),
+                                    open=float(row.get("Open", 0)),
+                                    high=float(row.get("High", 0)),
+                                    low=float(row.get("Low", 0)),
+                                    close=float(row.get("Close", 0)),
+                                    volume=int(row.get("Volume", 0)),
+                                    adjusted_close=(
+                                        float(row.get("Adj Close", 0))
+                                        if "Adj Close" in row
+                                        else None
+                                    ),
+                                )
+                            )
                     if ohlcv_records:
                         resources.sql_db.save_ohlcv(ohlcv_records)
-                        resources.sql_db.update_cache_index(symbol, "ohlcv", extra_info={"row_count": len(ohlcv_records), "latest_date": ohlcv_records[-1].date.isoformat() if ohlcv_records else None})
+                        resources.sql_db.update_cache_index(
+                            symbol,
+                            "ohlcv",
+                            extra_info={
+                                "row_count": len(ohlcv_records),
+                                "latest_date": (
+                                    ohlcv_records[-1].date.isoformat()
+                                    if ohlcv_records
+                                    else None
+                                ),
+                            },
+                        )
 
         elif dataset == "fundamentals" and payload_by_symbol:
             for symbol, symbol_data in payload_by_symbol.items():
                 if "error" not in symbol_data:
                     resources.sql_db.upsert_fundamentals(symbol_data)
-                    resources.sql_db.update_cache_index(symbol, "fundamentals", extra_info={"fundamentals_payload": symbol_data})
+                    resources.sql_db.update_cache_index(
+                        symbol,
+                        "fundamentals",
+                        extra_info={"fundamentals_payload": symbol_data},
+                    )
 
         elif dataset == "macro" and payload:
             if isinstance(payload, dict) and "error" not in payload:
                 resources.sql_db.upsert_macro_indicators(payload)
-                resources.sql_db.update_cache_index("MACRO", "macro", extra_info={"macro_payload": payload})
+                resources.sql_db.update_cache_index(
+                    "MACRO", "macro", extra_info={"macro_payload": payload}
+                )
 
         elif dataset == "news" and isinstance(payload, list) and payload:
-            processor = TextProcessor(use_embeddings=True)
             chunks = []
             normalized_articles: list[dict[str, Any]] = []
             for article in payload:
@@ -301,9 +362,7 @@ def _store_data(dataset: str, payload: Any, ticker: str | None, payload_by_symbo
 
                 metadata = _build_news_chunk_metadata(article, ticker)
                 if text_content:
-                    chunks.extend(processor.process_and_embed(text_content, metadata))
-            if chunks:
-                resources.vector_db.upsert_chunks(chunks)
+                    chunks.extend(resources.vector_db.chunk_and_upsert(text_content, metadata))
             if ticker and normalized_articles:
                 resources.sql_db.update_cache_index(
                     ticker,
@@ -413,9 +472,8 @@ def _ohlcv_coverage(payload: Any, requirements: dict[str, Any]) -> float:
 
 
 def _fundamentals_coverage(payload: Any, requirements: dict[str, Any]) -> float:
-    return derive_required_fields_coverage(
-        payload, list(requirements.get("required_fields", []))
-    )
+    del requirements
+    return derive_fundamental_schema_coverage(payload)
 
 
 def _macro_coverage(payload: Any, requirements: dict[str, Any]) -> float:
@@ -441,6 +499,99 @@ def _resolve_company_name(goal: dict[str, Any]) -> str | None:
     return None
 
 
+def _extract_company_context(
+    goal: dict[str, Any], ticker: str | None, company_name: str | None
+) -> CompanyContext:
+    nse_symbol: str | None = None
+    bse_code: str | None = None
+    sector: str | None = None
+
+    instruments = goal.get("instruments")
+    if isinstance(instruments, list):
+        for instrument in instruments:
+            if not isinstance(instrument, dict):
+                continue
+            nse_symbol = (
+                nse_symbol
+                or instrument.get("nse_symbol")
+                or instrument.get("trading_symbol")
+            )
+            bse_code = (
+                bse_code
+                or instrument.get("bse_code")
+                or instrument.get("bse_scrip_code")
+            )
+            sector = sector or instrument.get("sector")
+
+    nse_symbol = nse_symbol or goal.get("nse_symbol")
+    bse_code = bse_code or goal.get("bse_code")
+    sector = sector or goal.get("sector")
+
+    normalized_ticker = str(ticker or "").strip()
+    if normalized_ticker.endswith(".NS"):
+        nse_symbol = nse_symbol or normalized_ticker.removesuffix(".NS")
+        normalized_ticker = normalized_ticker.removesuffix(".NS")
+    elif normalized_ticker.endswith(".BO"):
+        bse_code = bse_code or normalized_ticker.removesuffix(".BO")
+        normalized_ticker = normalized_ticker.removesuffix(".BO")
+    elif normalized_ticker.isdigit():
+        bse_code = bse_code or normalized_ticker
+    else:
+        nse_symbol = nse_symbol or normalized_ticker
+
+    return CompanyContext(
+        ticker=normalized_ticker or str(ticker or "UNKNOWN"),
+        company_name=company_name or normalized_ticker or "Unknown Company",
+        nse_symbol=str(nse_symbol).strip() if nse_symbol else None,
+        bse_code=str(bse_code).strip() if bse_code else None,
+        sector=str(sector).strip() if sector else None,
+    )
+
+
+def _record_to_article(
+    record: NewsPipelineRecord, timeframe: str | None
+) -> dict[str, Any]:
+    article = {
+        "ticker": record.ticker,
+        "company_name": record.company_name,
+        "title": record.title,
+        "summary": record.snippet,
+        "content": record.article_text or record.snippet or "",
+        "url": record.url,
+        "link": record.url,
+        "canonical_url": record.canonical_url,
+        "published_date": (
+            record.publish_time.isoformat() if record.publish_time else ""
+        ),
+        "source": record.source_domain,
+        "source_domain": record.source_domain,
+        "source_type": record.source_type,
+        "source_tier": record.source_tier,
+        "quality_score": record.quality_score,
+        "paywall_detected": record.paywall_detected,
+        "extraction_status": record.extraction_status,
+        "relevance_check": record.relevance_check,
+        "is_duplicate": record.is_duplicate,
+        "cluster_id": record.cluster_id,
+        "query_intent": record.query_intent,
+        "intent_type": record.query_intent,
+        "search_provider": record.search_provider,
+        "query_variant": record.query_intent,
+        "timeframe": str(timeframe or ""),
+        "pipeline_version": record.pipeline_version,
+        "is_trusted_domain": record.source_tier <= 2,
+    }
+    return article
+
+
+def _build_news_pipeline_runner() -> NewsPipelineRunner:
+    return NewsPipelineRunner(
+        max_articles_per_company=int(settings.MAX_ARTICLES_PER_COMPANY),
+        min_quality_score=float(settings.MIN_QUALITY_SCORE),
+        pipeline_version=str(settings.PIPELINE_VERSION),
+    )
+
+
 async def _fetch_planned_news(
     *,
     objective: str,
@@ -448,226 +599,23 @@ async def _fetch_planned_news(
     company_name: str | None,
     timeframe: str | None,
     conversation_history: list[dict[str, Any]] | None,
+    goal: dict[str, Any] | None = None,
 ) -> list[Any]:
-    query_plan = build_news_query_plan(
-        objective=objective,
-        ticker=ticker,
-        company_name=company_name,
-        timeframe=timeframe,
-        conversation_history=conversation_history,
-    )
-
-    merged_articles: list[Any] = []
     fetched_at = datetime.now(UTC).isoformat()
-    
-    semaphore = asyncio.Semaphore(10)
+    del objective, conversation_history
 
-    async def process_article(
-        article: dict[str, Any], query_text: str, query_spec: dict[str, Any], rank: int
-    ) -> dict[str, Any] | None:
-        async with semaphore:
-            # Preserve initial snippet from 'content' (set by _normalize_news_payload)
-            initial_snippet = article.get("content", "")
-
-            # Enrich with full body content via scraper and handle paywall fallbacks
-            try:
-                enriched = await asyncio.to_thread(
-                    enrich_article_with_body, article, resources.web_search
-                )
-            except Exception as e:
-                logger.error(f"Error enriching article {article.get('url')}: {e}")
-                enriched = article
-
-            content = enriched.get("content", "")
-
-            if content.startswith("PAYWALL_BLOCKED:"):
-                original_url = enriched.get("url") or enriched.get("link")
-                title = enriched.get("title")
-
-                if title:
-                    logger.info(
-                        f"Paywall detected for '{title}'. Attempting fallback search..."
-                    )
-                    # Perform a new search using title
-                    try:
-                        fallback_results = await asyncio.to_thread(
-                            resources.web_search.search,
-                            query=f"{title} news",
-                            mode="news",
-                            max_results=3,
-                        )
-                    except Exception as e:
-                        logger.error(f"Error during fallback search for '{title}': {e}")
-                        fallback_results = []
-
-                    # Filter out the original blocked URL
-                    alternative_articles = [
-                        alt
-                        for alt in fallback_results
-                        if (alt.get("url") or alt.get("link")) != original_url
-                    ]
-
-                    # Try to scrape alternative results until success or exhausted
-                    for alt_article in alternative_articles:
-                        # Normalize alternative article
-                        norm_alt_list = _normalize_news_payload([alt_article])
-                        if not norm_alt_list:
-                            continue
-                        norm_alt = norm_alt_list[0]
-                        try:
-                            enriched_alt = await asyncio.to_thread(
-                                enrich_article_with_body, norm_alt, resources.web_search
-                            )
-                        except Exception as e:
-                            logger.error(f"Error enriching alternative article: {e}")
-                            continue
-
-                        alt_content = enriched_alt.get("content", "")
-
-                        if (
-                            alt_content
-                            and not alt_content.startswith("PAYWALL_BLOCKED:")
-                            and not alt_content.startswith("Failed to scrape")
-                        ):
-                            logger.info(
-                                f"Successfully retrieved alternative content for '{title}' from {enriched_alt.get('url')}"
-                            )
-                            # Update original article with alternative data
-                            enriched["content"] = alt_content
-                            enriched["url"] = enriched_alt.get("url")
-                            enriched["link"] = enriched_alt.get("link")
-                            enriched["source"] = enriched_alt.get("source")
-                            if "article_hash" in enriched_alt:
-                                enriched["article_hash"] = enriched_alt["article_hash"]
-                            enriched["original_blocked_url"] = original_url
-                            break
-                    else:
-                        logger.warning(
-                            f"Could not find non-paywalled alternative for '{title}'"
-                        )
-
-            final_content = enriched.get("content", "")
-            is_failure = (
-                final_content.startswith("PAYWALL_BLOCKED:") or 
-                final_content.startswith("Failed to scrape") or
-                not final_content.strip()
-            )
-
-            if rank <= 2 and is_failure and initial_snippet:
-                logger.info(
-                    f"Applying snippet fallback for rank {rank} article: {enriched.get('title')}"
-                )
-                enriched["content"] = initial_snippet
-                enriched["is_snippet_fallback"] = True
-            elif rank > 2 and is_failure:
-                # If rank > 2 and we failed to get full text, we return None to filter it out
-                return None
-
-            return enriched
-
-    async def process_query(query_spec: dict[str, Any]) -> list[dict[str, Any]]:
-        query_text = str(query_spec.get("query", "")).strip()
-        if not query_text:
-            return []
-
-        # Use web search instead of RSS
-        try:
-            raw_results = await asyncio.to_thread(
-                resources.web_search.search,
-                query=query_text,
-                mode="news",
-                max_results=20,
-                time_range=str(query_spec.get("time_range", "m")),
-            )
-        except Exception as e:
-            logger.error(f"Error searching for query '{query_text}': {e}")
-            return []
-
-        # Normalize results (maps 'url', 'date', 'body' to 'url', 'published_date', 'content')
-        fetched_articles = _normalize_news_payload(raw_results)
-
-        article_tasks = []
-        for i, article in enumerate(fetched_articles):
-            if isinstance(article, dict):
-                article_tasks.append(process_article(article, query_text, query_spec, rank=i + 1))
-
-        results = await asyncio.gather(*article_tasks, return_exceptions=True)
-
-        valid_articles = []
-        for i, enriched in enumerate(results):
-            if not isinstance(enriched, dict):
-                if isinstance(enriched, Exception):
-                    logger.error(
-                        f"Unexpected error in process_article for query '{query_text}': {enriched}"
-                    )
-                continue
-
-            # Post-processing and relevance check
-            source_domain = _resolve_source_domain(enriched)
-            enriched.setdefault("query_objective", objective)
-            enriched.setdefault("query_variant", query_text)
-            enriched.setdefault(
-                "intent_type", str(query_spec.get("intent_type", "")).strip()
-            )
-            enriched.setdefault("search_rank", i + 1)
-            enriched.setdefault("search_provider", "ddgs_news")
-            enriched.setdefault("source_domain", source_domain)
-            enriched.setdefault("source_type", "open_web")
-            enriched.setdefault(
-                "timeframe", str(timeframe or query_spec.get("time_range", "")).strip()
-            )
-            if "is_trusted_domain" not in enriched:
-                enriched["is_trusted_domain"] = source_domain in TRUSTED_NEWS_DOMAINS
-
-            # Relevance Guard Check
-            # ADR aliases for common Indian stocks (HDFC Bank trades as HDB on US exchanges)
-            adr_aliases: list[str] = []
-            if ticker:
-                adr_alias_map = {
-                    "HDFC": ["HDB"],
-                    "HDFCBANK": ["HDB"],
-                    "TCS": ["TCS"],
-                    "INFY": ["INFY"],
-                    "RELANCE": ["RELiance", "RJio"],
-                }
-                adr_aliases = adr_alias_map.get(ticker.upper(), [])
-
-            search_rank = enriched.get("search_rank", i + 1)
-            use_lenient = search_rank <= 2
-
-            if ticker or company_name:
-                if not is_article_relevant(
-                    enriched,
-                    ticker=ticker or "",
-                    company_name=company_name,
-                    adr_aliases=adr_aliases,
-                    lenient=use_lenient,
-                ):
-                    logger.debug(
-                        f"Filtering out irrelevant article: {enriched.get('title')}"
-                    )
-                    continue
-
-            valid_articles.append(enriched)
-
-        return valid_articles
-
-    query_tasks = [process_query(qs) for qs in query_plan.get("queries", [])]
-    query_results = await asyncio.gather(*query_tasks, return_exceptions=True)
-
-    for res in query_results:
-        if not isinstance(res, list):
-            if isinstance(res, Exception):
-                logger.error(f"Error processing query in news fetch: {res}")
-            continue
-        merged_articles.extend(res)
-
-    return _stamp_news_fetched_at(
-        deduplicate_articles(
-            [article for article in merged_articles if isinstance(article, dict)]
+    company_context = _extract_company_context(goal or {}, ticker, company_name)
+    runner = _build_news_pipeline_runner()
+    records = await runner.run(
+        company=company_context,
+        time_window_days=(
+            30
+            if not timeframe
+            else 7 if str(timeframe).lower() in {"w", "1w", "7d"} else 30
         ),
-        fetched_at,
     )
+    payload = [_record_to_article(record, timeframe) for record in records]
+    return _stamp_news_fetched_at(payload, fetched_at)
 
 
 async def data_fetch_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -714,7 +662,9 @@ async def data_fetch_node(state: dict[str, Any]) -> dict[str, Any]:
                             symbol, period=period, interval=interval
                         )
                     else:
-                        symbol_data = resources.yf_fetcher.fetch_company_fundamentals(symbol)
+                        symbol_data = resources.yf_fetcher.fetch_company_fundamentals(
+                            symbol
+                        )
                     symbol_available = bool(symbol_data)
                     symbol_coverage = (
                         _ohlcv_coverage(symbol_data, requirements)
@@ -723,7 +673,9 @@ async def data_fetch_node(state: dict[str, Any]) -> dict[str, Any]:
                     )
                     symbol_freshness = derive_snapshot_freshness_score(
                         _freshness_payload(dataset, symbol_data, fetched_at),
-                        stale_after_days=float(requirements.get("stale_after_days", 90)),
+                        stale_after_days=float(
+                            requirements.get("stale_after_days", 90)
+                        ),
                     )
                     by_symbol[symbol] = {
                         "available": symbol_available,
@@ -755,10 +707,11 @@ async def data_fetch_node(state: dict[str, Any]) -> dict[str, Any]:
                     or [0.0]
                 )
             elif dataset == "news":
-                news_fetched_at = datetime.now(UTC).isoformat()
                 goal_objective = str(goal.get("objective", "")).strip()
-                objective = goal_objective or query or (
-                    ", ".join(symbols) if symbols else (ticker or "")
+                objective = (
+                    goal_objective
+                    or query
+                    or (", ".join(symbols) if symbols else (ticker or ""))
                 )
                 fetched = await _fetch_planned_news(
                     objective=objective,
@@ -766,6 +719,7 @@ async def data_fetch_node(state: dict[str, Any]) -> dict[str, Any]:
                     company_name=_resolve_company_name(goal),
                     timeframe=state.get("timeframe"),
                     conversation_history=state.get("conversation_history"),
+                    goal=goal,
                 )
                 available = bool(fetched)
                 dataset_payload = fetched
@@ -778,30 +732,6 @@ async def data_fetch_node(state: dict[str, Any]) -> dict[str, Any]:
                         fetched,
                         minimum_items=int(requirements.get("minimum_items", 10)),
                     )
-                    if freshness < NEWS_FRESHNESS_THRESHOLD and ticker:
-                        fallback = _stamp_news_fetched_at(
-                            _normalize_news_payload(
-                                resources.yf_fetcher.fetch_news(ticker, limit=10)
-                            ),
-                            news_fetched_at,
-                        )
-                        if fallback:
-                            fetched = fallback
-                            dataset_payload = fallback
-                            available = True
-                            source = "yfinance_fallback"
-                            freshness = derive_news_freshness_score(
-                                fallback,
-                                stale_after_days=float(
-                                    requirements.get("stale_after_days", 2)
-                                ),
-                            )
-                            coverage = derive_news_coverage_score(
-                                fallback,
-                                minimum_items=int(
-                                    requirements.get("minimum_items", 10)
-                                ),
-                            )
             elif dataset == "macro":
                 fetched = resources.yf_fetcher.fetch_macro_indicators()
                 available = bool(fetched)
@@ -829,10 +759,14 @@ async def data_fetch_node(state: dict[str, Any]) -> dict[str, Any]:
 
             # Persist data to the structured DB and vector DB
             _store_data(
-                dataset=dataset, 
-                payload=fetched, 
-                ticker=ticker, 
-                payload_by_symbol=dataset_payload.get("by_symbol") if isinstance(dataset_payload, dict) else None
+                dataset=dataset,
+                payload=fetched,
+                ticker=ticker,
+                payload_by_symbol=(
+                    dataset_payload.get("by_symbol")
+                    if isinstance(dataset_payload, dict)
+                    else None
+                ),
             )
 
         dataset_state["available"] = available

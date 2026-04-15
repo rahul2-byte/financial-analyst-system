@@ -104,8 +104,17 @@ class OfflineStatus(BaseModel):
     )
     ticker_used: str = Field(description="The ticker symbol that was finally verified")
     reasoning: str = Field(description="Brief explanation of the availability check")
-    extra_info: dict = Field(
-        default_factory=dict, description="Additional context from tools"
+    ohlcv_data: Optional[dict] = Field(
+        default=None, description="Raw JSON output from get_ticker_info"
+    )
+    fundamentals_data: Optional[dict] = Field(
+        default=None, description="Raw JSON output from get_fundamentals_info"
+    )
+    news_data: Optional[dict] = Field(
+        default=None, description="Raw JSON output from get_news_info"
+    )
+    macro_data: Optional[dict] = Field(
+        default=None, description="Raw JSON output from get_macro_info"
     )
 
 

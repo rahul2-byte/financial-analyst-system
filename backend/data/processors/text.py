@@ -20,7 +20,9 @@ class TextProcessor:
         self.embedding_service = EmbeddingService() if use_embeddings else None
 
     @staticmethod
-    def _serialize_metadata(metadata: Dict[str, object] | None) -> Dict[str, MetadataValue]:
+    def _serialize_metadata(
+        metadata: Dict[str, object] | None,
+    ) -> Dict[str, MetadataValue]:
         if not metadata:
             return {}
 
@@ -41,6 +43,39 @@ class TextProcessor:
             raise ValueError("metadata must include a non-empty ticker")
         return ticker
 
+    @staticmethod
+    def clean_text(text: str) -> str:
+        if not text:
+            return ""
+
+        # 1. Remove URLs
+        text = re.sub(
+            r"http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\(\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+",
+            "",
+            text,
+        )
+
+        # 2. Remove Markdown headers (###, #####, etc.)
+        text = re.sub(r"^#{1,6}\s*", "", text, flags=re.MULTILINE)
+
+        # 3. Remove common share/nav boilerplate
+        boilerplate_patterns = [
+            r"WhatsApp X Facebook LinkedIn Messenger Reddit Mail",
+            r"Updated - .*",
+            r"Published on .*",
+            r"READ MORE",
+        ]
+        for pattern in boilerplate_patterns:
+            text = re.sub(pattern, "", text, flags=re.IGNORECASE)
+
+        # 4. Remove excessive newlines and whitespace
+        # Replace 3 or more newlines with exactly 2
+        text = re.sub(r"\n{3,}", "\n\n", text)
+        # Remove leading/trailing whitespace on each line
+        text = "\n".join([line.strip() for line in text.splitlines() if line.strip()])
+
+        return text.strip()
+
     def chunk_text(
         self, text: str, metadata: Dict[str, object] | None = None
     ) -> List[ProcessedChunk]:
@@ -48,6 +83,7 @@ class TextProcessor:
         Splits text into chunks recursively (Paragraph -> Sentence -> Word).
         This is a simplified implementation.
         """
+        text = self.clean_text(text)
         chunks = []
         serialized_metadata = self._serialize_metadata(metadata)
         ticker = self._require_ticker(serialized_metadata)
@@ -169,7 +205,9 @@ def is_article_relevant(
     if not valid_targets:
         return False
 
-    patterns = [re.compile(rf"\b{re.escape(t)}\b", re.IGNORECASE) for t in valid_targets]
+    patterns = [
+        re.compile(rf"\b{re.escape(t)}\b", re.IGNORECASE) for t in valid_targets
+    ]
 
     if title:
         for pattern in patterns:

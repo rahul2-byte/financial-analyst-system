@@ -27,8 +27,9 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     # Startup logic can go here if needed
     from app.services.mcp_service import mcp_manager
+
     await mcp_manager.start()
-    
+
     yield
     # Shutdown logic
     from app.core.observability import get_langfuse

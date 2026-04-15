@@ -17,14 +17,53 @@ import os
 import sys
 import json
 import logging
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 from functools import wraps
 
 # ============================================================================
 # Logging Configuration
 # ============================================================================
+
+
+class RepeatedWarningFilter(logging.Filter):
+    def __init__(
+        self,
+        window_seconds: float = 60.0,
+        clock: Callable[[], float] | None = None,
+    ) -> None:
+        super().__init__()
+        self.window_seconds = window_seconds
+        self.clock = clock or time.monotonic
+        self._last_seen: dict[tuple[str, str], float] = {}
+        self._lock = threading.Lock()
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        if record.levelno != logging.WARNING:
+            return True
+
+        now = self.clock()
+        message = record.getMessage()
+        key = (record.name, message)
+
+        with self._lock:
+            expired = [
+                existing_key
+                for existing_key, timestamp in self._last_seen.items()
+                if now - timestamp > self.window_seconds
+            ]
+            for existing_key in expired:
+                self._last_seen.pop(existing_key, None)
+
+            last_seen = self._last_seen.get(key)
+            if last_seen is not None and now - last_seen <= self.window_seconds:
+                return False
+
+            self._last_seen[key] = now
+            return True
 
 
 def setup_logging(log_level: str = "INFO") -> None:
@@ -39,6 +78,11 @@ def setup_logging(log_level: str = "INFO") -> None:
         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
+
+    repeated_warning_filter = RepeatedWarningFilter()
+    for handler in logging.getLogger().handlers:
+        if not any(isinstance(item, RepeatedWarningFilter) for item in handler.filters):
+            handler.addFilter(repeated_warning_filter)
 
     # Silence overly verbose loggers
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)

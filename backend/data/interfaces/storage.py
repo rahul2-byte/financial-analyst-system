@@ -36,6 +36,11 @@ class IVectorStorage(ABC):
         pass
 
     @abstractmethod
+    def chunk_and_upsert(self, text: str, metadata: dict) -> List[ProcessedChunk]:
+        """Convenience method to chunk, embed, and upsert text."""
+        pass
+
+    @abstractmethod
     def search(
         self,
         query_embedding: List[float],
@@ -44,4 +49,9 @@ class IVectorStorage(ABC):
         ticker: Optional[str] = None,
     ) -> List[ProcessedChunk]:
         """Search for relevant chunks using vector similarity or hybrid approach."""
+        pass
+
+    @abstractmethod
+    def get_news_info(self, ticker: str) -> dict:
+        """Get summary info of news coverage for a ticker."""
         pass

@@ -42,6 +42,23 @@ POOL_TIMEOUT = 30
 
 
 class PostgresClient(IStructuredStorage):
+    @staticmethod
+    def _canonical_equity_ticker(ticker: str) -> str:
+        value = str(ticker or "").strip().upper()
+        if value.endswith(".NS") or value.endswith(".BO"):
+            return value[:-3]
+        return value
+
+    @classmethod
+    def _fundamentals_lookup_variants(cls, ticker: str) -> list[str]:
+        requested = str(ticker or "").strip().upper()
+        canonical = cls._canonical_equity_ticker(ticker)
+        variants: list[str] = []
+        for candidate in (requested, canonical, f"{canonical}.NS", f"{canonical}.BO"):
+            if candidate and candidate not in variants:
+                variants.append(candidate)
+        return variants
+
     """
     PostgreSQL client with connection pooling.
 
@@ -90,17 +107,22 @@ class PostgresClient(IStructuredStorage):
         SQLModel.metadata.create_all(self._engine)
 
         with self._engine.begin() as conn:
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 CREATE INDEX IF NOT EXISTS ix_trgm_company_name 
                 ON instrument_master USING gin (company_name gin_trgm_ops);
-            """))
-            conn.execute(text("""
+            """)
+            )
+            conn.execute(
+                text("""
                 CREATE INDEX IF NOT EXISTS ix_trgm_trading_symbol 
                 ON instrument_master USING gin (trading_symbol gin_trgm_ops);
-            """))
+            """)
+            )
 
             # Ensure unique constraints for ON CONFLICT operations
-            conn.execute(text("""
+            conn.execute(
+                text("""
                 DO $$ 
                 BEGIN 
                     -- Clean up and add constraint for ohlcv_data
@@ -128,7 +150,8 @@ class PostgresClient(IStructuredStorage):
                         ALTER TABLE instrument_master ADD CONSTRAINT uq_instrument_exchange_symbol UNIQUE (exchange, trading_symbol);
                     END IF;
                 END $$;
-            """))
+            """)
+            )
 
     @contextmanager
     def get_session(self):
@@ -437,6 +460,177 @@ class PostgresClient(IStructuredStorage):
                 "earliest_date": None,
                 "latest_date": None,
                 "frequency": None,
+            }
+
+    def get_fundamentals_info(self, ticker: str) -> Dict[str, Any]:
+        """Get presence metadata and fundamentals snapshot for a ticker."""
+        with self.get_session() as session:
+            statement = text(
+                """
+                SELECT ticker, updated_at, name, industry, sector, market_cap, pe_ratio,
+                       forward_pe, peg_ratio, price_to_book, debt_to_equity,
+                       return_on_equity, profit_margins, revenue_growth,
+                       earnings_growth, dividend_yield, current_price,
+                       target_mean_price, fifty_two_week_high, fifty_two_week_low
+                FROM company_fundamentals
+                WHERE ticker = :ticker
+                """
+            )
+            lookup_variants = self._fundamentals_lookup_variants(ticker)
+            requested = str(ticker or "").strip().upper()
+            requested_is_suffixed = requested.endswith(".NS") or requested.endswith(
+                ".BO"
+            )
+            best_row: dict[str, Any] | None = None
+            best_score: tuple[float, int] | None = None
+            completeness_fields = (
+                "name",
+                "industry",
+                "sector",
+                "market_cap",
+                "pe_ratio",
+                "forward_pe",
+                "peg_ratio",
+                "price_to_book",
+                "debt_to_equity",
+                "return_on_equity",
+                "profit_margins",
+                "revenue_growth",
+                "earnings_growth",
+                "dividend_yield",
+                "current_price",
+                "target_mean_price",
+                "fifty_two_week_high",
+                "fifty_two_week_low",
+            )
+
+            for candidate in lookup_variants:
+                result = session.execute(statement, {"ticker": candidate}).first()
+                if result:
+                    row = dict(getattr(result, "_mapping", result))
+                    updated_at = row.get("updated_at")
+                    if requested_is_suffixed:
+                        best_row = row
+                        break
+
+                    updated_at_score = (
+                        updated_at.timestamp()
+                        if isinstance(updated_at, datetime)
+                        else float("-inf")
+                    )
+                    completeness_score = sum(
+                        row.get(field) is not None for field in completeness_fields
+                    )
+                    score = (updated_at_score, completeness_score)
+                    if best_score is None or score > best_score:
+                        best_row = row
+                        best_score = score
+
+            if best_row:
+                updated_at = best_row.get("updated_at")
+                updated_at_value = (
+                    updated_at.isoformat()
+                    if isinstance(updated_at, datetime)
+                    else str(updated_at)
+                    if updated_at is not None
+                    else None
+                )
+                return {
+                    "ticker": self._canonical_equity_ticker(ticker),
+                    "ticker_found": True,
+                    "has_data": True,
+                    "updated_at": updated_at_value,
+                    "latest_date": updated_at_value,
+                    "name": best_row.get("name"),
+                    "industry": best_row.get("industry"),
+                    "sector": best_row.get("sector"),
+                    "marketCap": best_row.get("market_cap"),
+                    "peRatio": best_row.get("pe_ratio"),
+                    "forwardPE": best_row.get("forward_pe"),
+                    "pegRatio": best_row.get("peg_ratio"),
+                    "priceToBook": best_row.get("price_to_book"),
+                    "debtToEquity": best_row.get("debt_to_equity"),
+                    "returnOnEquity": best_row.get("return_on_equity"),
+                    "profitMargins": best_row.get("profit_margins"),
+                    "revenueGrowth": best_row.get("revenue_growth"),
+                    "earningsGrowth": best_row.get("earnings_growth"),
+                    "dividendYield": best_row.get("dividend_yield"),
+                    "currentPrice": best_row.get("current_price"),
+                    "targetMeanPrice": best_row.get("target_mean_price"),
+                    "fiftyTwoWeekHigh": best_row.get("fifty_two_week_high"),
+                    "fiftyTwoWeekLow": best_row.get("fifty_two_week_low"),
+                }
+            return {
+                "ticker": self._canonical_equity_ticker(ticker),
+                "ticker_found": False,
+                "has_data": False,
+                "updated_at": None,
+                "latest_date": None,
+            }
+
+    def get_macro_info(self) -> Dict[str, Any]:
+        """Get date range and row count for macro indicators."""
+        with self.get_session() as session:
+            statement = text(
+                "SELECT count(date), min(date), max(date) FROM macro_indicators"
+            )
+            result = session.execute(statement).first()
+
+            if result and result[0] > 0:
+                count, min_date, max_date = result
+                return {
+                    "has_data": True,
+                    "row_count": count,
+                    "earliest_date": (
+                        min_date.isoformat()
+                        if hasattr(min_date, "isoformat")
+                        else str(min_date)
+                    ),
+                    "latest_date": (
+                        max_date.isoformat()
+                        if hasattr(max_date, "isoformat")
+                        else str(max_date)
+                    ),
+                }
+            return {
+                "has_data": False,
+                "row_count": 0,
+                "earliest_date": None,
+                "latest_date": None,
+            }
+
+    def get_news_cache_info(self, ticker: str) -> Dict[str, Any]:
+        """Get cache info for news dataset."""
+        with self.get_session() as session:
+            statement = text(
+                "SELECT last_updated, extra_info FROM cache_index WHERE ticker = :ticker AND dataset_type = 'news'"
+            )
+            result = session.execute(statement, {"ticker": ticker}).first()
+            if result:
+                last_updated, extra_info = result
+                extra_info = extra_info or {}
+                vector_ready = extra_info.get("vector_ready")
+                chunk_count = int(extra_info.get("chunk_count", 0) or 0)
+                has_data = bool(vector_ready) if vector_ready is not None else True
+                return {
+                    "ticker": ticker,
+                    "has_data": has_data,
+                    "latest_date": (
+                        last_updated.isoformat()
+                        if hasattr(last_updated, "isoformat")
+                        else str(last_updated)
+                    ),
+                    "vector_ready": (
+                        bool(vector_ready) if vector_ready is not None else None
+                    ),
+                    "chunk_count": chunk_count,
+                }
+            return {
+                "ticker": ticker,
+                "has_data": False,
+                "latest_date": None,
+                "vector_ready": None,
+                "chunk_count": 0,
             }
 
     def get_ticker_count(self) -> int:

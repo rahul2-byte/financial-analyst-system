@@ -3,7 +3,6 @@ from typing import Dict, List, Optional, TypeAlias
 
 from pydantic import BaseModel
 
-
 MetadataValue: TypeAlias = str | int | float | bool | None
 
 

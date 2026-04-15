@@ -14,6 +14,13 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 
+def _httpx_limits() -> httpx.Limits:
+    return httpx.Limits(
+        max_connections=int(settings.HTTP_POOL_MAX_CONNECTIONS),
+        max_keepalive_connections=int(settings.HTTP_POOL_MAX_KEEPALIVE_CONNECTIONS),
+    )
+
+
 class LlamaServerManager:
     """
     Manages the lifecycle of the llama.cpp server process.
@@ -38,7 +45,7 @@ class LlamaServerManager:
 
     async def _check_health(self, timeout: float = 2.0) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
+            async with httpx.AsyncClient(timeout=timeout, limits=_httpx_limits()) as client:
                 response = await client.get(self._health_url())
                 if response.status_code != 200:
                     return False
@@ -119,12 +126,12 @@ class LlamaServerManager:
     def _start_process(self, model_key: str):
         """Constructs the command and starts the llama.cpp server process."""
         binary_path = Path(settings.llama_server.binary_path)
-        
+
         # Get model path from new registry
         model_info = settings.models.get(model_key)
         if not model_info:
             raise ValueError(f"Model '{model_key}' not found in configuration.")
-        
+
         model_path = Path(model_info.path)
 
         if not binary_path.exists():
@@ -146,7 +153,7 @@ class LlamaServerManager:
         merged_args = {**settings.llama_server.args}
         if model_info.args:
             merged_args.update(model_info.args)
-        
+
         # Override -ngl: prefer explicit gpu_layers, then model args, then auto-calculate
         if model_info.gpu_layers is not None:
             merged_args["-ngl"] = model_info.gpu_layers
@@ -161,7 +168,10 @@ class LlamaServerManager:
         log_path = Path(settings.server_logfile)
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        logger.info(f"Starting llama.cpp server with model '{model_info.name}', {merged_args.get('-ngl')} GPU layers. Command: %s", " ".join(command))
+        logger.info(
+            f"Starting llama.cpp server with model '{model_info.name}', {merged_args.get('-ngl')} GPU layers. Command: %s",
+            " ".join(command),
+        )
 
         env = os.environ.copy()
         binary_dir = str(binary_path.parent.resolve())
@@ -193,7 +203,7 @@ class LlamaServerManager:
             needs_restart = False
             if self._currently_loaded_model != model_key:
                 needs_restart = True
-            
+
             # Fast path: we started it, it has the right model, and it is healthy.
             if (
                 not needs_restart
@@ -204,8 +214,14 @@ class LlamaServerManager:
                 return
 
             # If an external process is already healthy on the port, assume it's right if model matches (hard to tell, so usually we restart)
-            if not needs_restart and self._is_server_running() and await self._check_health():
-                logger.debug("Llama.cpp already running on port and healthy with correct model.")
+            if (
+                not needs_restart
+                and self._is_server_running()
+                and await self._check_health()
+            ):
+                logger.debug(
+                    "Llama.cpp already running on port and healthy with correct model."
+                )
                 return
 
             logger.info(f"Swapping/Starting model to '{model_key}'.")
@@ -220,7 +236,7 @@ class LlamaServerManager:
                 raise RuntimeError(
                     f"Failed to start and connect to the llama.cpp server for model '{model_key}'."
                 )
-            
+
             self._currently_loaded_model = model_key
 
     def _terminate_process(self):

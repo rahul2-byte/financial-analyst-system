@@ -38,7 +38,9 @@ def test_router_transitions_to_validation_for_approved_high_confidence() -> None
     assert decide_next_action(state) == "run_validation"
 
 
-def test_router_terminates_when_required_data_is_incomplete_after_fetch_budget_exhausted() -> None:
+def test_router_terminates_when_required_data_is_incomplete_after_fetch_budget_exhausted() -> (
+    None
+):
     state = {
         "iteration_count": 4,
         "retry_count_by_domain": {"data_fetch": 3},

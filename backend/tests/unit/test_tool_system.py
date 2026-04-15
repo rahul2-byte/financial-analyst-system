@@ -179,3 +179,71 @@ class TestToolSystemIntegration:
             tools = tool_registry.get_tools_by_namespace(ns)
             # Some namespaces may be empty, but the enum should work
             assert isinstance(tools, list)
+
+
+def test_get_news_info_uses_shared_vector_db_resource(monkeypatch):
+    from app.core.tools.tool_system import ToolExecutor
+    import app.core.tools.tool_system as tool_system_module
+
+    class _StubSQL:
+        def get_news_cache_info(self, ticker):
+            return {
+                "ticker": ticker,
+                "has_data": True,
+                "latest_date": "2026-04-12T18:39:07.970267",
+            }
+
+    class _FreshQdrantShouldNotBeUsed:
+        def __init__(self, *args, **kwargs):
+            raise AssertionError("Fresh QdrantStorage should not be instantiated")
+
+    class _SharedVector:
+        def get_news_info(self, ticker):
+            return {"ticker": ticker, "news_count": 3, "has_news": True}
+
+    class _Resources:
+        sql_db = _StubSQL()
+        vector_db = _SharedVector()
+
+    monkeypatch.setattr(tool_system_module, "resources", _Resources())
+    monkeypatch.setattr(
+        "storage.vector.client.QdrantStorage", _FreshQdrantShouldNotBeUsed
+    )
+
+    executor = ToolExecutor()
+    result = executor._handle_get_news_info({"ticker": "HDFCBANK"})
+
+    assert result["sql_cache"]["has_data"] is True
+    assert result["vector_db"]["has_news"] is True
+    assert result["has_data"] is True
+
+
+def test_get_news_info_requires_vector_presence_for_ground_truth(monkeypatch):
+    from app.core.tools.tool_system import ToolExecutor
+    import app.core.tools.tool_system as tool_system_module
+
+    class _StubSQL:
+        def get_news_cache_info(self, ticker):
+            return {
+                "ticker": ticker,
+                "has_data": True,
+                "latest_date": "2026-04-12T18:39:07.970267",
+                "vector_ready": False,
+            }
+
+    class _SharedVector:
+        def get_news_info(self, ticker):
+            return {"ticker": ticker, "news_count": 0, "has_news": False}
+
+    class _Resources:
+        sql_db = _StubSQL()
+        vector_db = _SharedVector()
+
+    monkeypatch.setattr(tool_system_module, "resources", _Resources())
+
+    executor = ToolExecutor()
+    result = executor._handle_get_news_info({"ticker": "HDFCBANK"})
+
+    assert result["sql_cache"]["has_data"] is True
+    assert result["vector_db"]["has_news"] is False
+    assert result["has_data"] is False

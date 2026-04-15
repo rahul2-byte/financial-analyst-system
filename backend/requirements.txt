@@ -16,6 +16,13 @@ uuid
 fastapi
 uvicorn
 httpx
+feedparser
+trafilatura
+newspaper3k
+pdfplumber
+PyMuPDF
+rapidfuzz
+exa-py
 pyyaml
 psutil
 opentelemetry-api
@@ -26,6 +33,7 @@ opentelemetry-instrumentation-httpx
 transformers
 torch
 nltk
+sentence-transformers
 json_repair>=0.58.0
 pyjson5>=2.0.0
 mcp

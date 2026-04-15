@@ -17,12 +17,14 @@ class LlamaServerConfig(BaseModel):
 
 class ModelInfo(BaseModel):
     """Information about a specific model."""
+
     name: str
     path: str
     best_for: str
     parameters_billions: float | None = None
     gpu_layers: int | None = None
     args: dict[str, Any] = Field(default_factory=dict)
+
 
 class ApiConfig(BaseModel):
     """API runtime settings from YAML."""
@@ -70,6 +72,7 @@ class EnvSettings(BaseSettings):
 
     ALPHA_VANTAGE_API_KEY: str | None = None
     OPENAI_API_KEY: str | None = None
+    ANTHROPIC_API_KEY: str | None = None
 
     LANGFUSE_PUBLIC_KEY: str | None = None
     LANGFUSE_SECRET_KEY: str | None = None
@@ -79,6 +82,15 @@ class EnvSettings(BaseSettings):
 
     DEFAULT_LLM_MODEL: str | None = None
     FALLBACK_LLM_MODEL: str = "llama-3b"
+    MIN_QUALITY_SCORE: float = 40.0
+    MAX_ARTICLES_PER_COMPANY: int = 50
+    PIPELINE_VERSION: str = "1.0.0"
+    EXA_API_KEY: str | None = None
+    EXA_MAX_RESULTS_PER_QUERY: int = 10
+    EXA_USE_TEXT_CONTENT: bool = True
+    EMBEDDING_IDLE_TTL_SECONDS: int = 600
+    HTTP_POOL_MAX_CONNECTIONS: int = 10
+    HTTP_POOL_MAX_KEEPALIVE_CONNECTIONS: int = 10
 
     model_config = SettingsConfigDict(
         env_file=".env",

@@ -80,7 +80,11 @@ def _best_effort_progress_action(state: dict[str, Any]) -> str:
         if critic_decision == "retry":
             return "terminate_insufficient_data"
         if critic_decision == "approve":
-            return "terminate_success" if bool(state.get("validation_passed", False)) else "run_validation"
+            return (
+                "terminate_success"
+                if bool(state.get("validation_passed", False))
+                else "run_validation"
+            )
     if _has_cached_research_results(state):
         return "run_synthesis"
     if state.get("tasks"):
@@ -133,7 +137,10 @@ def decide_next_action(state: dict[str, Any]) -> str:
         count for domain, count in retry_counts.items() if domain != "data_fetch"
     ]
     remaining_budget = float(state.get("execution_budget", {}).get("remaining", 1.0))
-    if any(count >= RETRY_LIMIT for count in non_fetch_retries) or remaining_budget <= 0.0:
+    if (
+        any(count >= RETRY_LIMIT for count in non_fetch_retries)
+        or remaining_budget <= 0.0
+    ):
         return _best_effort_progress_action(state)
 
     results = state.get("results", {})

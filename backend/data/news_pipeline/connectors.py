@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from time import struct_time
 from typing import Any
@@ -23,13 +23,20 @@ from data.news_pipeline.query_templates import (
 logger = logging.getLogger(__name__)
 
 
+def _httpx_limits() -> httpx.Limits:
+    return httpx.Limits(
+        max_connections=int(settings.HTTP_POOL_MAX_CONNECTIONS),
+        max_keepalive_connections=int(settings.HTTP_POOL_MAX_KEEPALIVE_CONNECTIONS),
+    )
+
+
 def _parse_datetime(value: Any) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=UTC)
+        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
     if isinstance(value, struct_time):
-        return datetime(*value[:6], tzinfo=UTC)
+        return datetime(*value[:6], tzinfo=timezone.utc)
     if isinstance(value, str):
         stripped = value.strip()
         if not stripped:
@@ -37,7 +44,7 @@ def _parse_datetime(value: Any) -> datetime | None:
         for parser in (datetime.fromisoformat, parsedate_to_datetime):
             try:
                 parsed = parser(stripped)
-                return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+                return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
             except (TypeError, ValueError):
                 continue
     return None
@@ -46,7 +53,7 @@ def _parse_datetime(value: Any) -> datetime | None:
 def _within_window(published_at: datetime | None, time_window_days: int) -> bool:
     if published_at is None:
         return True
-    threshold = datetime.now(UTC) - timedelta(days=time_window_days)
+    threshold = datetime.now(timezone.utc) - timedelta(days=time_window_days)
     return published_at >= threshold
 
 
@@ -68,7 +75,7 @@ def _effective_child_publish_time(
         "d": timedelta(days=amount),
         "w": timedelta(weeks=amount),
     }
-    return datetime.now(UTC) - unit_to_delta[unit]
+    return datetime.now(timezone.utc) - unit_to_delta[unit]
 
 
 def _source_domain(url: str) -> str:
@@ -115,7 +122,9 @@ class BaseNewsConnector:
         self, url: str, *, headers: dict[str, str] | None = None
     ) -> httpx.Response:
         async with httpx.AsyncClient(
-            timeout=self.timeout, follow_redirects=True
+            timeout=self.timeout,
+            follow_redirects=True,
+            limits=_httpx_limits(),
         ) as client:
             response = await client.get(url, headers=headers)
             response.raise_for_status()
@@ -172,7 +181,7 @@ class ExaSearchConnector:
             intents=list(QueryTemplateLibrary.keys()),
             time_window_days=time_window_days,
         )
-        start_published_date = datetime.now(UTC) - timedelta(days=time_window_days)
+        start_published_date = datetime.now(timezone.utc) - timedelta(days=time_window_days)
         results: list[RawSearchResult] = []
         seen_result_keys: set[str] = set()
         raw_items_seen = 0

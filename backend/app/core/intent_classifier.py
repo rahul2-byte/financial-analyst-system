@@ -90,13 +90,17 @@ async def classify_query_intent(
                 break
 
     if not isinstance(parsed, dict):
-        logger.warning(f"Intent classifier returned non-dict after unwrapping: {type(parsed)}")
+        logger.warning(
+            f"Intent classifier returned non-dict after unwrapping: {type(parsed)}"
+        )
         return _build_fail_closed_result()
 
     try:
         result = IntentClassificationResult.model_validate(parsed)
     except ValidationError:
-        logger.warning(f"Intent classifier returned invalid schema: {parsed}", exc_info=True)
+        logger.warning(
+            f"Intent classifier returned invalid schema: {parsed}", exc_info=True
+        )
         return _build_fail_closed_result()
 
     if result.label == "financial":

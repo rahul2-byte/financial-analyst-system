@@ -3,6 +3,7 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from data.interfaces.storage import IVectorStorage
 from data.schemas.text import ProcessedChunk
+from data.processors.text import TextProcessor
 from app.config import settings
 import uuid
 import math
@@ -36,7 +37,7 @@ class QdrantStorage(IVectorStorage):
             self.client.create_collection(
                 collection_name=self.collection_name,
                 vectors_config=models.VectorParams(
-                    size=384, distance=models.Distance.COSINE
+                    size=1024, distance=models.Distance.COSINE
                 ),
             )
 
@@ -52,6 +53,14 @@ class QdrantStorage(IVectorStorage):
                     lowercase=True,
                 ),
             )
+
+    def chunk_and_upsert(self, text: str, metadata: dict) -> List[ProcessedChunk]:
+        """Convenience method to chunk, embed, and upsert text."""
+        processor = TextProcessor(use_embeddings=True)
+        chunks = processor.process_and_embed(text, metadata)
+        if chunks:
+            self.upsert_chunks(chunks)
+        return chunks
 
     def upsert_chunks(self, chunks: List[ProcessedChunk]) -> None:
         points = []
@@ -233,3 +242,36 @@ class QdrantStorage(IVectorStorage):
                 )
             )
         return chunks
+
+    def get_news_info(self, ticker: str) -> dict:
+        """Query Qdrant to find document counts for a ticker."""
+        # Using a count request with a filter
+        count_filter = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="ticker", match=models.MatchValue(value=ticker)
+                )
+            ]
+        )
+
+        try:
+            result = self.client.count(
+                collection_name=self.collection_name,
+                count_filter=count_filter,
+                exact=True,
+            )
+            return {
+                "ticker": ticker,
+                "news_count": result.count,
+                "has_news": result.count > 0,
+            }
+        except Exception as e:
+            import logging
+
+            logging.getLogger(__name__).error(f"Error counting news in Qdrant: {e}")
+            return {
+                "ticker": ticker,
+                "news_count": 0,
+                "has_news": False,
+                "error": str(e),
+            }

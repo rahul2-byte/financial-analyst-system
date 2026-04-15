@@ -66,7 +66,9 @@ def _patch_resolver(monkeypatch, ticker: str | None):
             resolver_source="db_lookup",
         )
 
-    monkeypatch.setattr("agents.orchestration.goal_node.resolve_instruments", _stub_resolver)
+    monkeypatch.setattr(
+        "agents.orchestration.goal_node.resolve_instruments", _stub_resolver
+    )
 
 
 @pytest.mark.asyncio
@@ -92,7 +94,9 @@ async def test_goal_passes_llm_hints_to_resolver(monkeypatch) -> None:
             resolver_source="db_lookup",
         )
 
-    monkeypatch.setattr("agents.orchestration.goal_node.resolve_instruments", _stub_resolver)
+    monkeypatch.setattr(
+        "agents.orchestration.goal_node.resolve_instruments", _stub_resolver
+    )
 
     stub_llm = _StubLLMService(
         '{"ticker":null,"candidates":["AAPL"],"exchange_hint":"NSE","segment_hint":"EQ","instrument_type_hint":"equity"}'

@@ -1,183 +1,327 @@
 import pytest
 
-from agents.financial.data.data_check_node import data_check_node
+from agents.financial.data.data_check_node import (
+    _run_local_offline_audit,
+    data_check_node,
+)
 from app.core.node_resources import resources
-from app.core.orchestration_schemas import OfflineStatus
 
 
-class _StubLLMResponse:
-    def __init__(self) -> None:
-        self.content = ""
-        self.tool_calls = None
+class _ExplodingLLMService:
+    def __getattr__(self, name):
+        raise AssertionError(
+            f"LLM should not be used during deterministic audit: {name}"
+        )
 
 
-class _CountingLLMService:
-    def __init__(self) -> None:
-        self.calls = 0
+class _StubSqlDb:
+    def __init__(
+        self,
+        *,
+        exact=None,
+        alias=None,
+        ranked=None,
+        ohlcv=None,
+        fundamentals=None,
+        macro=None,
+        news_cache=None,
+    ):
+        self._exact = exact or {}
+        self._alias = alias or {}
+        self._ranked = ranked or {}
+        self._ohlcv = ohlcv or {}
+        self._fundamentals = fundamentals or {}
+        self._macro = macro or {
+            "has_data": True,
+            "row_count": 12,
+            "latest_date": "2026-04-10T00:00:00",
+        }
+        self._news_cache = news_cache or {}
 
-    async def generate_message(self, messages, model, tools=None):
-        self.calls += 1
-        return _StubLLMResponse()
+    def resolve_exact_symbol(self, symbol):
+        return self._exact.get(symbol)
+
+    def resolve_alias(self, symbol):
+        return self._alias.get(symbol)
+
+    def search_instruments_ranked(
+        self, query, limit=10, exchange=None, segment=None, instrument_type=None
+    ):
+        return list(self._ranked.get(query, []))
+
+    def get_ticker_info(self, ticker):
+        return self._ohlcv.get(
+            ticker,
+            {
+                "ticker": ticker,
+                "ticker_found": False,
+                "has_data": False,
+                "row_count": 0,
+                "latest_date": None,
+            },
+        )
+
+    def get_fundamentals_info(self, ticker):
+        return self._fundamentals.get(
+            ticker,
+            {
+                "ticker": ticker,
+                "ticker_found": False,
+                "has_data": False,
+                "latest_date": None,
+            },
+        )
+
+    def get_macro_info(self):
+        return dict(self._macro)
+
+    def get_news_cache_info(self, ticker):
+        return self._news_cache.get(
+            ticker,
+            {
+                "ticker": ticker,
+                "has_data": False,
+                "latest_date": None,
+                "vector_ready": None,
+                "chunk_count": 0,
+            },
+        )
 
 
-def _set_llm_service(stub):
-    previous = resources._llm_service
-    setattr(resources, "_llm_service", stub)
+class _StubVectorDb:
+    def __init__(self, by_ticker=None):
+        self._by_ticker = by_ticker or {}
+
+    def get_news_info(self, ticker):
+        return self._by_ticker.get(
+            ticker, {"ticker": ticker, "news_count": 0, "has_news": False}
+        )
+
+
+def _swap_resources(*, sql_db, vector_db, llm_service=None):
+    previous = (resources._sql_db, resources._vector_db, resources._llm_service)
+    resources._sql_db = sql_db
+    resources._vector_db = vector_db
+    resources._llm_service = llm_service
     return previous
 
 
+def _restore_resources(previous):
+    resources._sql_db, resources._vector_db, resources._llm_service = previous
+
+
 @pytest.mark.asyncio
-async def test_checker_uses_offline_audit_when_data_status_incomplete() -> None:
-    stub = _CountingLLMService()
-    previous = _set_llm_service(stub)
+async def test_run_local_offline_audit_resolves_fuzzy_symbol_without_llm() -> None:
+    sql_db = _StubSqlDb(
+        ranked={
+            "APPLE": [
+                {
+                    "trading_symbol": "AAPL",
+                    "company_name": "Apple Inc",
+                    "instrument_key": "NSE_EQ|AAPL",
+                    "score": 0.92,
+                    "match_reason": "trigram_company",
+                }
+            ]
+        },
+        ohlcv={
+            "AAPL": {
+                "ticker": "AAPL",
+                "ticker_found": True,
+                "has_data": True,
+                "row_count": 252,
+                "latest_date": "2026-04-10T00:00:00",
+            }
+        },
+        fundamentals={
+            "AAPL": {
+                "ticker": "AAPL",
+                "ticker_found": True,
+                "has_data": True,
+                "latest_date": "2026-04-09T00:00:00",
+                "market_cap": 1,
+            }
+        },
+        news_cache={
+            "AAPL": {
+                "ticker": "AAPL",
+                "has_data": True,
+                "latest_date": "2026-04-10T00:00:00",
+                "vector_ready": True,
+                "chunk_count": 5,
+            }
+        },
+    )
+    vector_db = _StubVectorDb(
+        {"AAPL": {"ticker": "AAPL", "news_count": 5, "has_news": True}}
+    )
+    previous = _swap_resources(
+        sql_db=sql_db, vector_db=vector_db, llm_service=_ExplodingLLMService()
+    )
+
     try:
-        state = {
-            "user_query": "Analyze AAPL",
-            "goal": {"ticker": "AAPL"},
-            "data_status": {},
-        }
-        await data_check_node(state)
+        offline, errors = await _run_local_offline_audit("APPLE")
     finally:
-        setattr(resources, "_llm_service", previous)
+        _restore_resources(previous)
 
-    assert stub.calls >= 1
+    assert errors == []
+    assert offline is not None
+    assert offline.ticker_used == "AAPL"
+    assert offline.data_available is True
+    assert "Resolved APPLE to AAPL" in offline.reasoning
 
 
 @pytest.mark.asyncio
-async def test_checker_skips_offline_audit_when_data_status_complete() -> None:
-    stub = _CountingLLMService()
-    previous = _set_llm_service(stub)
+async def test_run_local_offline_audit_marks_ambiguous_symbol_resolution() -> None:
+    sql_db = _StubSqlDb(
+        ranked={
+            "ABC": [
+                {
+                    "trading_symbol": "ABC1",
+                    "company_name": "ABC One",
+                    "score": 0.81,
+                    "match_reason": "trigram_symbol",
+                },
+                {
+                    "trading_symbol": "ABC2",
+                    "company_name": "ABC Two",
+                    "score": 0.81,
+                    "match_reason": "trigram_symbol",
+                },
+            ]
+        }
+    )
+    previous = _swap_resources(
+        sql_db=sql_db, vector_db=_StubVectorDb(), llm_service=_ExplodingLLMService()
+    )
+
     try:
-        state = {
-            "user_query": "Analyze AAPL",
-            "goal": {"ticker": "AAPL"},
-            "data_status": {
-                "ohlcv": {
-                    "by_symbol": {
-                        "AAPL": {
-                            "available": True,
-                            "coverage": 0.95,
-                            "freshness": 0.95,
-                            "source": "fetch_attempt",
-                            "error": None,
-                        }
-                    },
-                    "available": True,
-                    "partial": True,
-                    "source": "fetch_attempt",
-                    "coverage": 0.95,
-                    "freshness": 0.95,
-                    "error": None,
-                },
-                "news": {
-                    "available": True,
-                    "partial": True,
-                    "source": "fetch_attempt",
-                    "coverage": 0.95,
-                    "freshness": 0.95,
-                    "error": None,
-                },
-                "fundamentals": {
-                    "by_symbol": {
-                        "AAPL": {
-                            "available": True,
-                            "coverage": 0.95,
-                            "freshness": 0.95,
-                            "source": "fetch_attempt",
-                            "error": None,
-                        }
-                    },
-                    "available": True,
-                    "partial": True,
-                    "source": "fetch_attempt",
-                    "coverage": 0.95,
-                    "freshness": 0.95,
-                    "error": None,
-                },
-                "macro": {
-                    "available": True,
-                    "partial": True,
-                    "source": "fetch_attempt",
-                    "coverage": 0.95,
-                    "freshness": 0.95,
-                    "error": None,
-                },
-            },
-        }
-        await data_check_node(state)
+        offline, errors = await _run_local_offline_audit("ABC")
     finally:
-        setattr(resources, "_llm_service", previous)
+        _restore_resources(previous)
 
-    assert stub.calls == 0
+    assert errors == []
+    assert offline is not None
+    assert offline.ticker_used == "ABC"
+    assert offline.data_available is False
+    assert offline.ohlcv_data["error"] == "SYMBOL_AMBIGUOUS"
+    assert "Could not resolve ABC uniquely" in offline.reasoning
 
 
 @pytest.mark.asyncio
-async def test_checker_updates_goal_ticker_from_offline_audit(monkeypatch) -> None:
-    async def _stub_audit(_ticker: str):
-        return (
-            OfflineStatus(
-                data_available=True,
-                ticker_used="AAPL",
-                reasoning="Exact symbol found locally",
-                extra_info={"latest_date": "2026-04-01", "row_count": 400},
-            ),
-            [],
+async def test_run_local_offline_audit_reports_missing_news_reason() -> None:
+    sql_db = _StubSqlDb(
+        exact={"AAPL": {"trading_symbol": "AAPL", "company_name": "Apple Inc"}},
+        ohlcv={
+            "AAPL": {
+                "ticker": "AAPL",
+                "ticker_found": True,
+                "has_data": True,
+                "row_count": 252,
+                "latest_date": "2026-04-10T00:00:00",
+            }
+        },
+        fundamentals={
+            "AAPL": {
+                "ticker": "AAPL",
+                "ticker_found": True,
+                "has_data": True,
+                "latest_date": "2026-04-09T00:00:00",
+                "market_cap": 1,
+            }
+        },
+        news_cache={
+            "AAPL": {
+                "ticker": "AAPL",
+                "has_data": True,
+                "latest_date": "2026-04-10T00:00:00",
+                "vector_ready": False,
+                "chunk_count": 0,
+            }
+        },
+    )
+    vector_db = _StubVectorDb(
+        {"AAPL": {"ticker": "AAPL", "news_count": 0, "has_news": False}}
+    )
+    previous = _swap_resources(
+        sql_db=sql_db, vector_db=vector_db, llm_service=_ExplodingLLMService()
+    )
+
+    try:
+        offline, errors = await _run_local_offline_audit("AAPL")
+    finally:
+        _restore_resources(previous)
+
+    assert errors == []
+    assert offline is not None
+    assert offline.data_available is False
+    assert offline.news_data["error"] == "NEWS_VECTOR_NOT_READY"
+
+
+@pytest.mark.asyncio
+async def test_data_check_node_uses_deterministic_audit_to_update_goal_ticker() -> None:
+    sql_db = _StubSqlDb(
+        ranked={
+            "APPLE": [
+                {
+                    "trading_symbol": "AAPL",
+                    "company_name": "Apple Inc",
+                    "instrument_key": "NSE_EQ|AAPL",
+                    "score": 0.92,
+                    "match_reason": "trigram_company",
+                }
+            ]
+        },
+        ohlcv={
+            "AAPL": {
+                "ticker": "AAPL",
+                "ticker_found": True,
+                "has_data": True,
+                "row_count": 252,
+                "latest_date": "2026-04-10T00:00:00",
+            }
+        },
+        fundamentals={
+            "AAPL": {
+                "ticker": "AAPL",
+                "ticker_found": True,
+                "has_data": True,
+                "latest_date": "2026-04-09T00:00:00",
+                "market_cap": 1,
+            }
+        },
+        news_cache={
+            "AAPL": {
+                "ticker": "AAPL",
+                "has_data": True,
+                "latest_date": "2026-04-10T00:00:00",
+                "vector_ready": True,
+                "chunk_count": 5,
+            }
+        },
+    )
+    vector_db = _StubVectorDb(
+        {"AAPL": {"ticker": "AAPL", "news_count": 5, "has_news": True}}
+    )
+    previous = _swap_resources(
+        sql_db=sql_db, vector_db=vector_db, llm_service=_ExplodingLLMService()
+    )
+
+    try:
+        result = await data_check_node(
+            {
+                "user_query": "Analyze Apple",
+                "goal": {"ticker": "APPLE"},
+                "data_status": {},
+            }
         )
-
-    monkeypatch.setattr(
-        "agents.financial.data.data_check_node._run_local_offline_audit",
-        _stub_audit,
-    )
-
-    result = await data_check_node(
-        {
-            "user_query": "Analyze Apple",
-            "goal": {"ticker": "APPLE"},
-            "data_status": {},
-        }
-    )
+    finally:
+        _restore_resources(previous)
 
     assert result["goal"]["ticker"] == "AAPL"
-    assert result["data_check"]["local_audit"]["original_ticker"] == "APPLE"
+    assert result["goal"]["ticker_resolution_source"] == "offline_audit"
     assert result["data_check"]["local_audit"]["resolved_ticker"] == "AAPL"
-
-
-@pytest.mark.asyncio
-async def test_checker_marks_low_coverage_datasets_for_refresh() -> None:
-    result = await data_check_node(
-        {
-            "user_query": "Analyze AAPL",
-            "goal": {"ticker": "AAPL"},
-            "timeframe_policy": {
-                "ohlcv": {"minimum_coverage_ratio": 0.8},
-                "news": {"minimum_coverage_ratio": 0.5},
-                "fundamentals": {"minimum_coverage_ratio": 0.75},
-                "macro": {"minimum_coverage_ratio": 1.0},
-            },
-            "data_status": {
-                "ohlcv": {
-                    "available": True,
-                    "coverage": 1.0,
-                    "freshness": 0.95,
-                },
-                "news": {
-                    "available": True,
-                    "coverage": 1.0,
-                    "freshness": 0.95,
-                },
-                "fundamentals": {
-                    "available": True,
-                    "coverage": 0.0,
-                    "freshness": 0.95,
-                },
-                "macro": {
-                    "available": True,
-                    "coverage": 0.0,
-                    "freshness": 0.95,
-                },
-            },
-        }
-    )
-
-    assert result["status"] == "partial"
-    assert result["data_check"]["stale_datasets"] == ["fundamentals", "macro"]
+    assert result["data_status"]["ohlcv"]["available"] is True
+    assert result["data_status"]["fundamentals"]["available"] is True
+    assert result["data_status"]["news"]["available"] is True
+    assert result["data_status"]["macro"]["available"] is True

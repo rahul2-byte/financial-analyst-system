@@ -15,6 +15,13 @@ from app.core.policies.retry_policy import MAX_RETRIES, exponential_backoff_seco
 logger = logging.getLogger(__name__)
 
 
+def _httpx_limits() -> httpx.Limits:
+    return httpx.Limits(
+        max_connections=int(settings.HTTP_POOL_MAX_CONNECTIONS),
+        max_keepalive_connections=int(settings.HTTP_POOL_MAX_KEEPALIVE_CONNECTIONS),
+    )
+
+
 class LlamaCppService(LLMServiceInterface):
     """
     Resilient service to interact with the llama.cpp server's OpenAI-compatible API.
@@ -29,7 +36,7 @@ class LlamaCppService(LLMServiceInterface):
         """Checks if the llama.cpp server is running and healthy."""
         try:
             await llama_manager.ensure_model_running(settings.model.default_model)
-            async with httpx.AsyncClient(timeout=5.0) as client:
+            async with httpx.AsyncClient(timeout=5.0, limits=_httpx_limits()) as client:
                 response = await client.get(self.health_url)
                 return (
                     response.status_code == 200
@@ -62,7 +69,10 @@ class LlamaCppService(LLMServiceInterface):
         for attempt in range(MAX_RETRIES):
             try:
                 await llama_manager.ensure_model_running(model)
-                async with httpx.AsyncClient(timeout=settings.api.timeout) as client:
+                async with httpx.AsyncClient(
+                    timeout=settings.api.timeout,
+                    limits=_httpx_limits(),
+                ) as client:
                     response = await client.post(
                         self.api_url,
                         json=payload,
@@ -134,7 +144,10 @@ class LlamaCppService(LLMServiceInterface):
         for attempt in range(MAX_RETRIES):
             try:
                 await llama_manager.ensure_model_running(model)
-                async with httpx.AsyncClient(timeout=settings.api.timeout) as client:
+                async with httpx.AsyncClient(
+                    timeout=settings.api.timeout,
+                    limits=_httpx_limits(),
+                ) as client:
                     response = await client.post(
                         self.api_url,
                         json=payload,

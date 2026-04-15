@@ -101,7 +101,9 @@ async def research_plan_node(state: dict[str, Any]) -> dict[str, Any]:
 
     rag_context = ""
     rag_chunks = []
-    if any(agent in selected for agent in ["sentiment_analysis", "contrarian_analysis"]):
+    if any(
+        agent in selected for agent in ["sentiment_analysis", "contrarian_analysis"]
+    ):
         try:
             embedding_service = EmbeddingService()
             query_embedding = embedding_service.embed_text(query)

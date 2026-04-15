@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 _TIMEFRAME_ALIASES = {
     "1mo": "1mo",
     "1 month": "1mo",

@@ -61,7 +61,9 @@ def _is_clarification_followup(
 
 
 def _resolved_objective(
-    query: str, conversation_history: list[dict[str, Any]], is_clarification_followup: bool
+    query: str,
+    conversation_history: list[dict[str, Any]],
+    is_clarification_followup: bool,
 ) -> str:
     if not is_clarification_followup:
         return query
@@ -232,7 +234,9 @@ async def goal_node(state: dict[str, Any]) -> dict[str, Any]:
     is_clarification_followup = _is_clarification_followup(
         conversation_history, normalized_timeframe
     )
-    objective = _resolved_objective(query, conversation_history, is_clarification_followup)
+    objective = _resolved_objective(
+        query, conversation_history, is_clarification_followup
+    )
 
     if planner_mode == "ask_clarification" or (
         proposed_timeframe is not None and normalized_timeframe is None
@@ -382,11 +386,11 @@ async def goal_node(state: dict[str, Any]) -> dict[str, Any]:
         "approved_agents": proposed_agents or _default_agents(),
         "plan": {
             "response_mode": planner_mode,
-                "assistant_response": (
-                    planner_payload.assistant_response
-                    if planner_payload is not None
-                    else ""
-                ),
+            "assistant_response": (
+                planner_payload.assistant_response
+                if planner_payload is not None
+                else ""
+            ),
             "proposed_timeframe": normalized_timeframe,
             "proposed_agents": proposed_agents or _default_agents(),
             "is_fast_track": (

@@ -23,6 +23,8 @@ from typing import Any, Dict, Optional, Callable, Union
 from dataclasses import dataclass
 from enum import Enum
 
+from app.core.node_resources import resources
+
 logger = logging.getLogger(__name__)
 
 
@@ -170,6 +172,42 @@ class ToolRegistry:
                 namespace=ToolNamespace.MARKET,
             ),
             ToolDefinition(
+                name="get_fundamentals_info",
+                description="Checks if company fundamental data (P/E, market cap, etc.) is available in the local database.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "ticker": {
+                            "type": "string",
+                            "description": "The stock ticker symbol.",
+                        }
+                    },
+                    "required": ["ticker"],
+                },
+                namespace=ToolNamespace.MARKET,
+            ),
+            ToolDefinition(
+                name="get_macro_info",
+                description="Checks if macroeconomic indicator data (Nifty 50, USD/INR, Crude Oil, etc.) is available in the local database.",
+                parameters={"type": "object", "properties": {}, "required": []},
+                namespace=ToolNamespace.MARKET,
+            ),
+            ToolDefinition(
+                name="get_news_info",
+                description="Checks for news articles and text chunks coverage for a ticker in both local SQL cache and Vector DB (Qdrant).",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "ticker": {
+                            "type": "string",
+                            "description": "The stock ticker symbol.",
+                        }
+                    },
+                    "required": ["ticker"],
+                },
+                namespace=ToolNamespace.MARKET,
+            ),
+            ToolDefinition(
                 name="resolve_instrument_exact",
                 description="Resolve exact instrument by trading symbol or instrument key from local instrument master.",
                 parameters={
@@ -215,16 +253,39 @@ class ToolRegistry:
             ),
             ToolDefinition(
                 name="submit_offline_status",
-                description="Submits the final determination of whether the data is available offline.",
+                description="Submits the final offline data availability status.",
                 parameters={
                     "type": "object",
                     "properties": {
                         "data_available": {"type": "boolean"},
                         "ticker_used": {"type": "string"},
                         "reasoning": {"type": "string"},
-                        "metadata": {"type": "object"},
+                        "ohlcv_data": {
+                            "type": "object",
+                            "description": "The exact JSON object returned by get_ticker_info",
+                        },
+                        "fundamentals_data": {
+                            "type": "object",
+                            "description": "The exact JSON object returned by get_fundamentals_info",
+                        },
+                        "news_data": {
+                            "type": "object",
+                            "description": "The exact JSON object returned by get_news_info",
+                        },
+                        "macro_data": {
+                            "type": "object",
+                            "description": "The exact JSON object returned by get_macro_info",
+                        },
                     },
-                    "required": ["data_available", "ticker_used", "reasoning"],
+                    "required": [
+                        "data_available",
+                        "ticker_used",
+                        "reasoning",
+                        "ohlcv_data",
+                        "fundamentals_data",
+                        "news_data",
+                        "macro_data",
+                    ],
                 },
                 namespace=ToolNamespace.MARKET,
             ),
@@ -554,6 +615,11 @@ class ToolExecutor:
             "market:get_ticker_info": lambda args: PostgresClient().get_ticker_info(
                 args.get("ticker", "")
             ),
+            "market:get_fundamentals_info": lambda args: PostgresClient().get_fundamentals_info(
+                args.get("ticker", "")
+            ),
+            "market:get_macro_info": lambda args: PostgresClient().get_macro_info(),
+            "market:get_news_info": self._handle_get_news_info,
             "market:resolve_instrument_exact": lambda args: {
                 "instrument": PostgresClient().resolve_exact_symbol(
                     args.get("symbol", "")
@@ -604,9 +670,23 @@ class ToolExecutor:
 
         logger.info(f"Registered {len(handlers)} tool handlers")
 
+    def _handle_get_news_info(self, args: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle get_news_info tool checking both SQL cache and shared vector storage."""
+        ticker = args.get("ticker", "")
+        sql_info = resources.sql_db.get_news_cache_info(ticker)
+        vector_info = resources.vector_db.get_news_info(ticker)
+
+        return {
+            "ticker": ticker,
+            "sql_cache": sql_info,
+            "vector_db": vector_info,
+            "has_data": bool(vector_info.get("has_news", False)),
+        }
+
     def _handle_fundamental_scan(self, args: Dict[str, Any]) -> Dict[str, Any]:
         """Handle fundamental scan tool."""
         import json
+
         raw_data_str = args.get("raw_data", "{}")
         if isinstance(raw_data_str, str):
             try:
@@ -657,6 +737,7 @@ class ToolExecutor:
 
         try:
             import inspect
+
             result = handler(args)
             if inspect.iscoroutine(result):
                 result = await result
@@ -680,6 +761,7 @@ class ToolExecutor:
     def execute_sync(self, tool_full_name: str, args: Dict[str, Any]) -> ToolResult:
         """Synchronous wrapper for tool execution."""
         import asyncio
+
         try:
             loop = None
             try:

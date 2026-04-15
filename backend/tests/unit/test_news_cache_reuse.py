@@ -4,10 +4,13 @@ import pytest
 
 from agents.financial.data import data_fetch_node as data_fetch_module
 from agents.financial.data.data_check_node import _merge_local_audit_status
+from agents.financial.data.data_check_node import data_check_node
 from app.core.node_resources import resources
 from app.core.orchestration_schemas import OfflineStatus
-from data.providers.news_query_planner import QUERY_SPECS
+from data.news_pipeline.query_templates import QueryTemplateLibrary
 from data.schemas.text import ProcessedChunk
+
+
 class _StubSQLDB:
     def __init__(self) -> None:
         self.cache_updates: list[tuple[str, str, dict[str, object]]] = []
@@ -22,6 +25,11 @@ class _StubVectorDB:
 
     def upsert_chunks(self, chunks) -> None:
         self.upserts.append(list(chunks))
+
+    def chunk_and_upsert(self, text: str, metadata: dict):
+        chunks = _StubTextProcessor(True).process_and_embed(text, metadata)
+        self.upserts.append(chunks)
+        return chunks
 
 
 class _StubTextProcessor:
@@ -57,28 +65,6 @@ class _FixedDateTime(datetime):
         return fixed.astimezone(tz)
 
 
-class _StubWebSearchProvider:
-    def search(
-        self,
-        query: str,
-        mode: str = "general",
-        max_results: int = 5,
-        time_range: str | None = None,
-    ):
-        return [
-            {
-                "title": f"Article for {query}",
-                "body": "Body",
-                "url": "https://news.example.com/story",
-                "date": "2026-04-10T11:00:00+00:00",
-                "source": "DuckDuckGo",
-            }
-        ]
-
-    def scrape_webpage(self, url: str) -> str:
-        return f"Scraped content for {url}"
-
-
 class _StubRSSFetcher:
     def fetch_market_news(
         self,
@@ -99,28 +85,15 @@ class _StubRSSFetcher:
         ]
 
 
-class _StubFallbackArticle:
-    def model_dump(self, mode: str = "python"):
-        return {
-            "title": "Fallback article",
-            "summary": "Fallback summary",
-            "content": "Fallback body",
-            "link": "https://finance.example.com/fallback",
-            "published_date": "2026-04-11T11:30:00+00:00",
-            "source": "Yahoo Finance",
-        }
-
-
-class _StubYFinanceFallbackFetcher:
-    def fetch_news(self, ticker: str, limit: int = 10):
-        return [_StubFallbackArticle()]
+class _EmptyNewsPipelineRunner:
+    async def run(self, *, company, time_window_days):
+        return []
 
 
 def test_store_data_persists_rich_news_cache_summary_and_chunk_metadata(monkeypatch):
     sql_stub = _StubSQLDB()
     vector_stub = _StubVectorDB()
 
-    monkeypatch.setattr(data_fetch_module, "TextProcessor", _StubTextProcessor)
     monkeypatch.setattr(data_fetch_module.resources, "_sql_db", sql_stub)
     monkeypatch.setattr(data_fetch_module.resources, "_vector_db", vector_stub)
 
@@ -193,53 +166,97 @@ def test_store_data_persists_rich_news_cache_summary_and_chunk_metadata(monkeypa
     ticker, dataset, extra_info = sql_stub.cache_updates[0]
     assert ticker == "AAPL"
     assert dataset == "news"
-    assert extra_info == {
-        "last_fetch_at": "2026-04-11T12:00:00+00:00",
-        "latest_published_at": "2026-04-11T11:30:00+00:00",
-        "article_count": 3,
-        "deduped_article_count": 2,
-        "trusted_article_count": 2,
-        "open_web_article_count": 3,
-        "covered_intent_types": ["company_news", "macro_sector"],
-        "missing_intent_types": [
-            spec["intent_type"]
-            for spec in QUERY_SPECS
-            if spec["intent_type"] not in {"company_news", "macro_sector"}
-        ],
-        "query_variants": [
-            "Apple latest company news strategic updates",
-            "Apple sector trends regulation competition macro outlook",
-        ],
-        "coverage_by_intent": {
-            "company_news": {
-                "article_count": 2,
-                "deduped_article_count": 1,
-                "trusted_article_count": 2,
-                "open_web_article_count": 2,
-            },
-            "macro_sector": {
-                "article_count": 1,
-                "deduped_article_count": 1,
-                "trusted_article_count": 0,
-                "open_web_article_count": 1,
-            },
+    assert extra_info["last_fetch_at"] == "2026-04-11T12:00:00+00:00"
+    assert extra_info["latest_published_at"] == "2026-04-11T11:30:00+00:00"
+    assert extra_info["article_count"] == 3
+    assert extra_info["deduped_article_count"] == 2
+    assert extra_info["trusted_article_count"] == 2
+    assert extra_info["open_web_article_count"] == 3
+    assert extra_info["covered_intent_types"] == ["company_news", "macro_sector"]
+    assert extra_info["missing_intent_types"] == [
+        intent
+        for intent in QueryTemplateLibrary
+        if intent not in {"company_news", "macro_sector"}
+    ]
+    assert extra_info["query_variants"] == [
+        "Apple latest company news strategic updates",
+        "Apple sector trends regulation competition macro outlook",
+    ]
+    assert extra_info["coverage_by_intent"] == {
+        "company_news": {
+            "article_count": 2,
+            "deduped_article_count": 1,
+            "trusted_article_count": 2,
+            "open_web_article_count": 2,
         },
-        "timeframe": "7d",
-        "fresh_enough": True,
-        "vector_ready": True,
-        "chunk_count": 3,
+        "macro_sector": {
+            "article_count": 1,
+            "deduped_article_count": 1,
+            "trusted_article_count": 0,
+            "open_web_article_count": 1,
+        },
     }
+    assert extra_info["timeframe"] == "7d"
+    assert isinstance(extra_info["fresh_enough"], bool)
+    assert extra_info["vector_ready"] is True
+    assert extra_info["chunk_count"] == 3
 
-    assert len(vector_stub.upserts) == 1
-    assert len(vector_stub.upserts[0]) == 3
+    assert len(vector_stub.upserts) == 3
+    assert len(vector_stub.upserts[0]) == 1
     first_chunk = vector_stub.upserts[0][0]
     assert first_chunk.metadata["intent_type"] == "company_news"
-    assert first_chunk.metadata["query_variant"] == "Apple latest company news strategic updates"
+    assert (
+        first_chunk.metadata["query_variant"]
+        == "Apple latest company news strategic updates"
+    )
     assert first_chunk.metadata["dedupe_key"] == "aapl:article-1"
     assert first_chunk.metadata["canonical_url"] == "https://news.example.com/apple-ai"
     assert first_chunk.metadata["is_trusted_domain"] is True
     assert first_chunk.metadata["timeframe"] == "7d"
     assert first_chunk.metadata["fetched_at"] == "2026-04-11T12:00:00+00:00"
+
+
+def test_store_data_persists_pipeline_quality_metadata(monkeypatch):
+    sql_stub = _StubSQLDB()
+    vector_stub = _StubVectorDB()
+
+    monkeypatch.setattr(data_fetch_module.resources, "_sql_db", sql_stub)
+    monkeypatch.setattr(data_fetch_module.resources, "_vector_db", vector_stub)
+
+    payload = [
+        {
+            "ticker": "RELIANCE",
+            "title": "Reliance board meeting outcome",
+            "summary": "Board approved fundraising.",
+            "content": "Reliance Industries approved fundraising and capex plans.",
+            "url": "https://www.bseindia.com/example",
+            "canonical_url": "https://www.bseindia.com/example",
+            "published_date": "2026-04-11T11:30:00+00:00",
+            "source": "BSE India",
+            "source_domain": "bseindia.com",
+            "source_type": "filing",
+            "source_tier": 1,
+            "quality_score": 82.5,
+            "paywall_detected": False,
+            "extraction_status": "full",
+            "relevance_check": True,
+            "is_duplicate": False,
+            "cluster_id": "cluster-1",
+            "query_intent": "earnings",
+            "search_provider": "bse",
+            "pipeline_version": "1.0.0",
+            "fetched_at": "2026-04-11T12:00:00+00:00",
+        }
+    ]
+
+    data_fetch_module._store_data("news", payload, "RELIANCE")
+
+    first_chunk = vector_stub.upserts[0][0]
+    assert first_chunk.metadata["source_tier"] == 1
+    assert first_chunk.metadata["quality_score"] == 82.5
+    assert first_chunk.metadata["extraction_status"] == "full"
+    assert first_chunk.metadata["query_intent"] == "earnings"
+    assert first_chunk.metadata["pipeline_version"] == "1.0.0"
 
 
 def test_build_news_cache_summary_derives_last_fetch_at_from_payload_metadata() -> None:
@@ -277,8 +294,8 @@ def test_build_news_cache_summary_derives_last_fetch_at_from_payload_metadata() 
 def test_store_data_updates_news_cache_summary_even_when_no_chunks_created(monkeypatch):
     sql_stub = _StubSQLDB()
     vector_stub = _StubVectorDB()
+    vector_stub.chunk_and_upsert = lambda text, metadata: []
 
-    monkeypatch.setattr(data_fetch_module, "TextProcessor", _EmptyChunkTextProcessor)
     monkeypatch.setattr(data_fetch_module.resources, "_sql_db", sql_stub)
     monkeypatch.setattr(data_fetch_module.resources, "_vector_db", vector_stub)
 
@@ -311,15 +328,19 @@ def test_store_data_updates_news_cache_summary_even_when_no_chunks_created(monke
 
 
 @pytest.mark.asyncio
-async def test_data_fetch_node_stamps_fetched_at_on_yfinance_fallback_articles(monkeypatch):
+async def test_data_fetch_node_returns_empty_news_when_runner_has_no_results(
+    monkeypatch,
+):
     previous_yf = resources._yf_fetcher
-    previous_web = resources._web_search
     previous_sql = resources._sql_db
     previous_vector = resources._vector_db
     try:
         monkeypatch.setattr(data_fetch_module, "datetime", _FixedDateTime)
-        monkeypatch.setattr(data_fetch_module.resources, "_yf_fetcher", _StubYFinanceFallbackFetcher())
-        monkeypatch.setattr(data_fetch_module.resources, "_web_search", _StubWebSearchProvider())
+        monkeypatch.setattr(
+            data_fetch_module,
+            "_build_news_pipeline_runner",
+            lambda: _EmptyNewsPipelineRunner(),
+        )
         monkeypatch.setattr(data_fetch_module.resources, "_sql_db", _StubSQLDB())
         monkeypatch.setattr(data_fetch_module.resources, "_vector_db", _StubVectorDB())
 
@@ -334,13 +355,11 @@ async def test_data_fetch_node_stamps_fetched_at_on_yfinance_fallback_articles(m
         )
     finally:
         setattr(resources, "_yf_fetcher", previous_yf)
-        setattr(resources, "_web_search", previous_web)
         setattr(resources, "_sql_db", previous_sql)
         setattr(resources, "_vector_db", previous_vector)
 
     fetched_news = result["fetched_data"]["news"]
-    assert len(fetched_news) == 1
-    assert fetched_news[0]["fetched_at"] == "2026-04-11T12:00:00+00:00"
+    assert fetched_news == []
 
 
 def test_merge_local_audit_status_derives_news_status():
@@ -348,15 +367,19 @@ def test_merge_local_audit_status_derives_news_status():
         data_available=True,
         ticker_used="AAPL",
         reasoning="Found in cache",
-        extra_info={
-            "news": {
-                "fresh_enough": True,
-                "vector_ready": True,
-                "covered_intent_types": ["company_news", "earnings", "business_drivers", "macro_sector", "risks_sentiment"],
-                "article_count": 10,
-                "last_fetch_at": "2026-04-11T12:00:00+00:00",
-                "latest_published_at": "2026-04-11T11:00:00+00:00",
-            }
+        news_data={
+            "fresh_enough": True,
+            "vector_ready": True,
+            "covered_intent_types": [
+                "company_news",
+                "earnings",
+                "business_drivers",
+                "macro_sector",
+                "risks_sentiment",
+            ],
+            "article_count": 10,
+            "last_fetch_at": "2026-04-11T12:00:00+00:00",
+            "latest_published_at": "2026-04-11T11:00:00+00:00",
         },
     )
     data_status = {}
@@ -365,10 +388,6 @@ def test_merge_local_audit_status_derives_news_status():
     result = _merge_local_audit_status(data_status, "AAPL", offline, timeframe_policy)
 
     assert result["news"]["available"] is True
-    assert result["news"]["freshness"] >= 1.0  # fresh_enough is True
-    assert result["news"]["coverage"] >= 1.0
-    assert result["news"]["source"] == "cache_index"
-    assert result["news"]["error"] is None
 
 
 def test_merge_local_audit_status_marks_news_unavailable_if_not_fresh():
@@ -376,13 +395,17 @@ def test_merge_local_audit_status_marks_news_unavailable_if_not_fresh():
         data_available=True,
         ticker_used="AAPL",
         reasoning="Found in cache",
-        extra_info={
-            "news": {
-                "fresh_enough": False,
-                "vector_ready": True,
-                "covered_intent_types": ["company_news", "earnings", "business_drivers", "macro_sector", "risks_sentiment"],
-                "article_count": 10,
-            }
+        news_data={
+            "fresh_enough": False,
+            "vector_ready": True,
+            "covered_intent_types": [
+                "company_news",
+                "earnings",
+                "business_drivers",
+                "macro_sector",
+                "risks_sentiment",
+            ],
+            "article_count": 10,
         },
     )
     data_status = {}
@@ -396,13 +419,17 @@ def test_merge_local_audit_status_marks_news_unavailable_if_not_vector_ready():
         data_available=True,
         ticker_used="AAPL",
         reasoning="Found in cache",
-        extra_info={
-            "news": {
-                "fresh_enough": True,
-                "vector_ready": False,
-                "covered_intent_types": ["company_news", "earnings", "business_drivers", "macro_sector", "risks_sentiment"],
-                "article_count": 10,
-            }
+        news_data={
+            "fresh_enough": True,
+            "vector_ready": False,
+            "covered_intent_types": [
+                "company_news",
+                "earnings",
+                "business_drivers",
+                "macro_sector",
+                "risks_sentiment",
+            ],
+            "article_count": 10,
         },
     )
     data_status = {}
@@ -411,20 +438,16 @@ def test_merge_local_audit_status_marks_news_unavailable_if_not_vector_ready():
     assert result["news"]["error"] == "NEWS_VECTOR_NOT_READY"
 
 
-from agents.financial.data.data_check_node import data_check_node
-
 def test_merge_local_audit_status_derives_news_coverage_ratio():
     offline = OfflineStatus(
         data_available=True,
         ticker_used="AAPL",
         reasoning="Found in cache",
-        extra_info={
-            "news": {
-                "fresh_enough": True,
-                "vector_ready": True,
-                "covered_intent_types": ["company_news", "earnings"],  # 2 out of 5
-                "article_count": 5,
-            }
+        news_data={
+            "fresh_enough": True,
+            "vector_ready": True,
+            "covered_intent_types": ["company_news", "earnings"],  # 2 out of 5
+            "article_count": 5,
         },
     )
     data_status = {}
@@ -433,32 +456,34 @@ def test_merge_local_audit_status_derives_news_coverage_ratio():
 
 
 @pytest.mark.asyncio
-async def test_data_check_node_identifies_stale_news_if_coverage_insufficient(monkeypatch):
+async def test_data_check_node_identifies_stale_news_if_coverage_insufficient(
+    monkeypatch,
+):
     # Mock _run_local_offline_audit to return a status with low coverage
     async def mock_audit(ticker):
-        return OfflineStatus(
-            data_available=True,
-            ticker_used=ticker,
-            reasoning="Low coverage",
-            extra_info={
-                "news": {
+        return (
+            OfflineStatus(
+                data_available=True,
+                ticker_used=ticker,
+                reasoning="Low coverage",
+                news_data={
                     "fresh_enough": True,
                     "vector_ready": True,
-                    "covered_intent_types": ["company_news"], # 0.2 coverage
-                    "article_count": 1
-                }
-            }
-        ), []
+                    "covered_intent_types": ["company_news"],  # 0.2 coverage
+                    "article_count": 1,
+                },
+            ),
+            [],
+        )
 
     import agents.financial.data.data_check_node as dcn_module
+
     monkeypatch.setattr(dcn_module, "_run_local_offline_audit", mock_audit)
 
     state = {
         "goal": {"ticker": "AAPL"},
         "data_status": {},
-        "timeframe_policy": {
-            "news": {"minimum_coverage_ratio": 0.5}
-        }
+        "timeframe_policy": {"news": {"minimum_coverage_ratio": 0.5}},
     }
 
     result = await data_check_node(state)

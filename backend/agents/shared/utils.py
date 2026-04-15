@@ -4,6 +4,34 @@ from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
 
+FUNDAMENTAL_CORE_FIELDS = [
+    "marketCap",
+    "currentPrice",
+    "peRatio",
+    "forwardPE",
+    "priceToBook",
+    "returnOnEquity",
+    "profitMargins",
+    "revenueGrowth",
+    "earningsGrowth",
+]
+
+FUNDAMENTAL_CONTEXT_FIELDS = [
+    "ticker",
+    "name",
+    "industry",
+    "sector",
+]
+
+FUNDAMENTAL_ENRICHMENT_FIELDS = [
+    "pegRatio",
+    "debtToEquity",
+    "dividendYield",
+    "targetMeanPrice",
+    "fiftyTwoWeekHigh",
+    "fiftyTwoWeekLow",
+]
+
 
 def _parse_datetime(value: Any) -> datetime | None:
     if isinstance(value, datetime):
@@ -134,6 +162,17 @@ def derive_required_fields_coverage(payload: Any, required_fields: list[str]) ->
         if field in payload and payload[field] is not None:
             present += 1
     return min(1.0, present / float(len(required_fields)))
+
+
+def derive_fundamental_schema_coverage(payload: Any) -> float:
+    if not isinstance(payload, dict):
+        return 0.0
+
+    core = derive_required_fields_coverage(payload, FUNDAMENTAL_CORE_FIELDS)
+    context = derive_required_fields_coverage(payload, FUNDAMENTAL_CONTEXT_FIELDS)
+    enrichment = derive_required_fields_coverage(payload, FUNDAMENTAL_ENRICHMENT_FIELDS)
+
+    return round((core * 0.7) + (context * 0.2) + (enrichment * 0.1), 4)
 
 
 def extract_goal_symbols(goal: dict[str, Any]) -> list[str]:

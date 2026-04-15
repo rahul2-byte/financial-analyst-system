@@ -6,6 +6,7 @@ from app.core.intent_classifier import (
     NON_FINANCIAL_FALLBACK_RESPONSE,
     classify_query_intent,
 )
+from app.core.query_scope import normalize_research_scope
 from app.core.validators import sanitize_user_query, validate_query_not_malicious
 from app.core.observability import langfuse_context
 from app.core.logging import SessionLogger
@@ -56,6 +57,7 @@ class PipelineOrchestrator:
             return
 
         sanitized_query = sanitize_user_query(user_query)
+        scoped_query = normalize_research_scope(sanitized_query)
 
         conversation_history_dicts = [
             self._normalize_message(msg) for msg in (conversation_history or [])
@@ -92,15 +94,15 @@ class PipelineOrchestrator:
             metadata={"source": "cli", "version": "v1.2"},
         )
 
-        session_logger = SessionLogger.get_logger(sanitized_query)
+        session_logger = SessionLogger.get_logger(scoped_query)
         session_logger.log_step(
             "RECEIVE_QUERY",
             "New research query received by the orchestrator.",
-            parameters={"query": sanitized_query},
+            parameters={"query": scoped_query},
         )
 
         initial_state = build_initial_graph_state(
-            user_query=sanitized_query,
+            user_query=scoped_query,
             conversation_history=conversation_history_dicts,
         )
 
