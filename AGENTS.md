@@ -117,7 +117,7 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
 
 ## 8. Development Boot Sequence
 Before submitting any code changes, agents must:
-1. **Load Context**: Read `PROJECT_CONSTITUTION.md`, `CODING_STANDARDS.md`, and `AGENT_RULES.md`.
+1. **Load Context**: Read `PROJECT_CONSTITUTION.md`, `CODING_STANDARDS.md`, `AGENT_RULES.md`, and **Section 9 (Behavioral Guidelines)**.
 2. **Verify Patterns**: Use `glob`/`grep` to find existing implementations of similar logic.
 3. **Plan & Summarize**: Summarize current task and identify impacted modules before writing code.
 4. **TDD**: Write unit tests for new quant logic or tools BEFORE implementation.
