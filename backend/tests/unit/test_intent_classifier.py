@@ -13,12 +13,12 @@ class _StubLLMService:
     def __init__(self, content: str) -> None:
         self.content = content
 
-    async def generate_message(self, messages, model, tools=None):
+    async def generate_message(self, messages, model, **kwargs):
         return _StubLLMResponse(self.content)
 
 
 class _FailingLLMService:
-    async def generate_message(self, messages, model, tools=None):
+    async def generate_message(self, messages, model, **kwargs):
         raise RuntimeError("llm down")
 
 

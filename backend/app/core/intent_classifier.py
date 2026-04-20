@@ -40,11 +40,6 @@ async def classify_query_intent(
     conversation_history: list[dict[str, Any]] | None = None,
 ) -> IntentClassificationResult:
     history = conversation_history or []
-    payload = {
-        "user_query": user_query,
-        "conversation_history": history[-8:],
-    }
-
     try:
         messages = [
             Message(
@@ -52,18 +47,28 @@ async def classify_query_intent(
                 content=prompt_manager.get_prompt(
                     "orchestrator.intent_classifier.system"
                 ),
-            ),
+            )
+        ]
+
+        # Map conversation history to Message objects
+        for msg in history[-8:]:
+            messages.append(Message(role=msg["role"], content=msg["content"]))
+
+        # Add current user query as its own message
+        messages.append(
             Message(
                 role="user",
                 content=prompt_manager.get_prompt(
                     "orchestrator.intent_classifier.user",
-                    user_json=json.dumps(payload, ensure_ascii=True),
+                    user_query=user_query,
                 ),
-            ),
-        ]
+            )
+        )
+
         response = await resources.llm_service.generate_message(
             messages=messages,
             model=settings.DEFAULT_LLM_MODEL,
+            response_format={"type": "json_object"},
         )
     except Exception as exc:  # noqa: BLE001
         logger.error("Intent classifier request failed: %s", exc, exc_info=True)

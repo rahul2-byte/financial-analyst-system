@@ -86,5 +86,5 @@ intent_classifier:
     - If label is financial: set is_financial_request=true and assistant_response="".
     - If label is non_financial or ambiguous: set is_financial_request=false and assistant_response to a short, helpful redirect.
   user: |
-    Classify this conversation payload:
-    {user_json}
+    Classify this query:
+    {user_query}
