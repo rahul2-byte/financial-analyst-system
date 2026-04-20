@@ -76,7 +76,7 @@ async def classify_query_intent(
 
     parsed = parse_json_from_llm_response(response.content)
     if not parsed:
-        logger.warning("Intent classifier returned non-JSON content")
+        logger.warning(f"Intent classifier returned non-JSON content. Raw: {response.content}")
         return _build_fail_closed_result()
 
     # Defensive: unwrap nested structures (e.g., [[...]] or [{...}])
