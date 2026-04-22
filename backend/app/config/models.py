@@ -72,9 +72,7 @@ class EnvSettings(BaseSettings):
 
     LANGFUSE_PUBLIC_KEY: str | None = None
     LANGFUSE_SECRET_KEY: str | None = None
-    LANGFUSE_HOST: str = "https://cloud.langfuse.com"
-
-    PHOENIX_HOST: str = "http://localhost:6006"
+    OPIK_USE_LOCAL: bool = True
 
     DEFAULT_LLM_MODEL: str | None = None
     FALLBACK_LLM_MODEL: str = "llama-3b"
