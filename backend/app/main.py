@@ -9,15 +9,6 @@ from app.core.logging import setup_logging
 from app.core.llama_manager import llama_manager
 from app.routes import chat, health
 
-# --- OpenTelemetry Instrumentation ---
-try:
-    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-    from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-
-    OTEL_AVAILABLE = True
-except ImportError:
-    OTEL_AVAILABLE = False
-
 # Setup logging first
 setup_logging(log_level="INFO" if not settings.DEBUG else "DEBUG")
 logger = logging.getLogger(__name__)
@@ -47,19 +38,6 @@ app = FastAPI(
     debug=settings.DEBUG,
     lifespan=lifespan,
 )
-
-# Instrument the app
-if OTEL_AVAILABLE:
-    try:
-        from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-        from opentelemetry.instrumentation.httpx import HTTPXClientInstrumentor
-
-        FastAPIInstrumentor.instrument_app(app)
-        HTTPXClientInstrumentor().instrument()
-        logger.info("FastAPI and HTTPX auto-instrumentation enabled.")
-    except Exception as e:
-        logger.error(f"Failed to instrument app: {e}")
-
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
