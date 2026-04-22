@@ -1,10 +1,40 @@
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
+from uuid import uuid4
 
 from sqlalchemy import UniqueConstraint, Index
 from sqlmodel import Field, SQLModel, JSON, Column
 
 from storage.sql.memory_models import ErrorLog, InteractionLog, PerformanceMetric
+
+__all__ = [
+    "OHLCV",
+    "CompanyFundamentals",
+    "FinancialStatements",
+    "MacroIndicators",
+    "CacheIndex",
+    "ResearchAuditLog",
+    "InstrumentMaster",
+    "InstrumentAlias",
+    "TextChunk",
+    "ErrorLog",
+    "InteractionLog",
+    "PerformanceMetric",
+]
+
+try:
+    from pgvector.sqlalchemy import Vector
+except ModuleNotFoundError:  # pragma: no cover
+    # Keep the module importable in minimal/dev environments.
+    # Production uses the real pgvector type.
+    from sqlalchemy.types import UserDefinedType
+
+    class Vector(UserDefinedType):
+        def __init__(self, dim: int):
+            self.dim = dim
+
+        def get_col_spec(self) -> str:
+            return f"vector({self.dim})"
 
 
 class OHLCV(SQLModel, table=True):
@@ -140,3 +170,22 @@ class InstrumentAlias(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     alias_text: str = Field(index=True)
     instrument_key: str = Field(index=True)
+
+
+class TextChunk(SQLModel, table=True):
+    __tablename__ = "text_chunks"
+
+    # Use a UUID string to avoid DB UUID type edge-cases.
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    ticker: str = Field(index=True)
+    text: str
+
+    # "metadata" is a reserved attribute name in SQLAlchemy declarative models.
+    # Keep the column name as "metadata" while using a safe Python attribute.
+    metadata_: Dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column("metadata", JSON),
+    )
+
+    published_date: Optional[datetime] = Field(default=None)
+    embedding: List[float] = Field(sa_column=Column(Vector(1024)))

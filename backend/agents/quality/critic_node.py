@@ -1,25 +1,18 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.core.contracts.graph_node import finalize_node_output
-from app.core.intelligence import (
-    EvaluationFeedback,
-    IntelligenceAction,
-    SystemIntelligenceLayer,
+from app.core.audit import build_node_audit_entry
+from agents.quality.claim_verifier import is_data_gap_claim, verify_claims
+from agents.quality.conflict_arbitrator import arbitrate_conflicts
+from app.core.graph.router_policy import (
+    CRITIC_RETRY_LIMIT,
+    EVIDENCE_STRENGTH_THRESHOLD,
 )
-from app.core.node_resources import resources
-from agents.quality.evidence import (
-    build_contradiction_records,
-    evidence_count_by_agent,
-    evidence_ref_set,
-    horizon_from_text,
-    intensity_from_text,
-    moving_average,
-    signal_from_text,
-    validate_claim_evidence_links,
-)
-from app.core.graph.router_policy import EVIDENCE_STRENGTH_THRESHOLD
+
+logger = logging.getLogger(__name__)
 
 
 def _reprioritize_tasks(
@@ -42,210 +35,127 @@ def _reprioritize_tasks(
     return replanned
 
 
-def _memory_store():
-    existing = getattr(resources, "_sql_db", None)
-    if existing is not None:
-        return existing
-    try:
-        return resources.sql_db
-    except Exception:  # noqa: BLE001
-        return None
-
-
-def _retry_feedback(
-    decision: str,
-    hallucination_issues: list[dict[str, Any]],
-    contradiction_records: list[dict[str, Any]],
-    evidence_strength: float,
-) -> tuple[str, str]:
-    if hallucination_issues:
-        return (
-            "hallucination",
-            "Critic detected unsupported claims that were not grounded in evidence.",
-        )
-    if any(record.get("type") != "evidence_gap" for record in contradiction_records):
-        return "reasoning_error", "Critic detected contradictions across agent outputs."
-    if decision == "retry" and evidence_strength < EVIDENCE_STRENGTH_THRESHOLD:
-        return (
-            "incomplete_response",
-            "Evidence strength is too low to support a reliable thesis.",
-        )
-    return (
-        "reasoning_error",
-        "Critic requested another iteration to improve the response.",
-    )
-
-
 async def critic_node(state: dict[str, Any]) -> dict[str, Any]:
     synthesis = state.get("results", {}).get("synthesis", {})
     synthesis_claims = synthesis.get("claims", [])
-    data_used = synthesis.get("data_used", {})
-    stale_count = sum(
-        1 for status in data_used.values() if float(status.get("freshness", 0.0)) < 0.6
-    )
-    tool_registry = state.get("tool_registry", [])
-    evidence_counts = evidence_count_by_agent(tool_registry)
 
-    agent_claims = [
-        {
-            "agent": "fundamental_analysis",
-            "direction": signal_from_text(
-                state.get("results", {}).get("fundamental_analysis", "")
-            ),
-            "horizon": horizon_from_text(
-                state.get("results", {}).get("fundamental_analysis", "")
-            ),
-            "intensity": intensity_from_text(
-                state.get("results", {}).get("fundamental_analysis", "")
-            ),
-            "evidence_count": evidence_counts.get("fundamental_analysis", 0),
-        },
-        {
-            "agent": "sentiment_analysis",
-            "direction": signal_from_text(
-                state.get("results", {}).get("sentiment_analysis", "")
-            ),
-            "horizon": horizon_from_text(
-                state.get("results", {}).get("sentiment_analysis", "")
-            ),
-            "intensity": intensity_from_text(
-                state.get("results", {}).get("sentiment_analysis", "")
-            ),
-            "evidence_count": evidence_counts.get("sentiment_analysis", 0),
-        },
-        {
-            "agent": "macro_analysis",
-            "direction": signal_from_text(
-                state.get("results", {}).get("macro_analysis", "")
-            ),
-            "horizon": horizon_from_text(
-                state.get("results", {}).get("macro_analysis", "")
-            ),
-            "intensity": intensity_from_text(
-                state.get("results", {}).get("macro_analysis", "")
-            ),
-            "evidence_count": evidence_counts.get("macro_analysis", 0),
-        },
-    ]
-
-    contradiction_records = build_contradiction_records(agent_claims)
-    max_contradiction_severity = max(
-        (float(record["severity"]) for record in contradiction_records), default=0.0
-    )
-    contradiction_penalty = min(0.35, max_contradiction_severity * 0.4)
-
-    ref_set = evidence_ref_set(tool_registry)
-    hallucination_issues = (
-        validate_claim_evidence_links(synthesis_claims, ref_set)
-        if isinstance(synthesis_claims, list)
-        else []
-    )
-
-    hallucination_penalty = 0.2 if hallucination_issues else 0.0
-    freshness_penalty = 0.05 * stale_count
-
-    synthesis_confidence = float(state.get("synthesis_confidence", 0.0))
-    adjusted_confidence = max(
-        0.0,
-        synthesis_confidence
-        - freshness_penalty
-        - contradiction_penalty
-        - hallucination_penalty,
-    )
-    history = list(state.get("confidence_history", [])) + [adjusted_confidence]
-    smoothed_confidence = moving_average(history)
-
+    citation_index = state.get("citation_index", {})
     evidence_strength = float(state.get("evidence_strength", 0.0))
-    decision = "approve"
-    if evidence_strength < EVIDENCE_STRENGTH_THRESHOLD:
-        decision = "retry"
 
-    if any(
-        record["type"] != "evidence_gap" and float(record["severity"]) >= 0.45
-        for record in contradiction_records
-    ):
-        decision = "conflict"
-    elif any(record["type"] == "evidence_gap" for record in contradiction_records):
-        decision = "retry"
+    # Claim verification
+    verification = verify_claims(synthesis_claims, citation_index, evidence_strength)
+
+    hallucination_issues: list[dict[str, Any]] = []
+    for claim in synthesis_claims:
+        refs = claim.get("evidence_refs", [])
+        if not refs and not is_data_gap_claim(claim.get("text", "")):
+            claim_id = claim.get("claim_id")
+            hallucination_issues.append(
+                {
+                    "claim_id": claim_id,
+                    "issue": "missing_evidence_refs",
+                }
+            )
+
+    # Conflict arbitration
+    arbitration = arbitrate_conflicts(synthesis_claims)
+
+    decision = "approve"
+    force_replan = False
+    replanned_tasks = []
+    correction_prompt = None
+    retry_counts = dict(state.get("retry_count_by_domain", {}))
 
     if hallucination_issues:
         decision = "retry"
+        correction_prompt = (
+            "Attach evidence_refs for every claim and re-run verification."
+        )
+        force_replan = True
+    elif verification.invalid_major_claim_ids:
+        decision = "retry"
+        correction_prompt = (
+            "Re-research the unsupported major claims and attach valid citations."
+        )
+        force_replan = True
+    elif not arbitration.resolved:
+        decision = "conflict"
+    elif evidence_strength < EVIDENCE_STRENGTH_THRESHOLD:
+        decision = "retry"
+        correction_prompt = (
+            "Evidence strength is too low. Fetch more supporting news or fundamentals."
+        )
+        force_replan = True
 
-    retry_counts = dict(state.get("retry_count_by_domain", {}))
-    force_replan = False
-    replanned_tasks: list[dict[str, Any]] = []
-    correction_prompt: str | None = None
-    intelligence_decision: dict[str, Any] = {}
-
+    critic_retry_count = int(retry_counts.get("critic", 0))
     if decision == "retry":
-        error_type, feedback = _retry_feedback(
-            decision, hallucination_issues, contradiction_records, evidence_strength
-        )
-        sil = SystemIntelligenceLayer(
-            memory_store=_memory_store(),
-            max_retries=3,
-            pass_threshold=0.8,
-        )
-        sil_decision = sil.process_evaluation(
-            query_id=str(
-                state.get("query_id")
-                or state.get("goal", {}).get("ticker")
-                or state.get("user_query", "unknown")
-            ),
-            user_input=str(state.get("user_query", "")),
-            candidate_output=str(synthesis),
-            evaluation=EvaluationFeedback(
-                score=adjusted_confidence,
-                error_type=error_type,
-                feedback=feedback,
-            ),
-            current_retries=int(retry_counts.get("research", 0)),
-            agent_name="critic",
-        )
-        retry_counts["research"] = sil_decision.retry_count
-        correction_prompt = sil_decision.correction_prompt
-        intelligence_decision = sil.as_payload(sil_decision)
-        if sil_decision.action == IntelligenceAction.RETRY:
-            force_replan = True
-            replanned_tasks = _reprioritize_tasks(
-                list(state.get("tasks", [])),
-                sil_decision.error_type,
-                sil_decision.correction_prompt,
-            )
-        else:
-            decision = "terminate_failure"
+        critic_retry_count += 1
+        retry_counts["critic"] = critic_retry_count
 
-    payload = {
+    reached_retry_limit = (
+        decision == "retry" and critic_retry_count >= CRITIC_RETRY_LIMIT
+    )
+
+    if force_replan and not reached_retry_limit:
+        replanned_tasks = _reprioritize_tasks(
+            list(state.get("tasks", [])),
+            (
+                "hallucination"
+                if verification.invalid_major_claim_ids
+                else "incomplete_response"
+            ),
+            correction_prompt,
+        )
+
+    payload: dict[str, Any] = {
         "critic_decision": decision,
-        "hallucination_issues": hallucination_issues,
-        "contradiction_records": contradiction_records,
-        "adjusted_confidence": adjusted_confidence,
-        "smoothed_confidence": smoothed_confidence,
-        "confidence_score": smoothed_confidence,
-        "confidence_history": history,
-        "confidence_components": {
-            "freshness_penalty": freshness_penalty,
-            "contradiction_penalty": contradiction_penalty,
-            "hallucination_penalty": hallucination_penalty,
-            "max_contradiction_severity": max_contradiction_severity,
-        },
         "retry_count_by_domain": retry_counts,
-        "force_replan": force_replan,
+        "hallucination_issues": hallucination_issues,
+        "claim_verification": {
+            "verified_claim_ids": verification.verified_claim_ids,
+            "invalid_major_claim_ids": verification.invalid_major_claim_ids,
+            "details": verification.verification_details,
+        },
+        "conflict_record": {
+            "resolved": arbitration.resolved,
+            "method": arbitration.method,
+            "winning_claim_ids": arbitration.winning_claim_ids,
+            "unresolved_claim_pairs": arbitration.unresolved_claim_pairs,
+        },
+        "force_replan": force_replan and not reached_retry_limit,
         "replanned_tasks": replanned_tasks,
+        "task_contexts": {},
         "correction_prompt": correction_prompt,
-        "intelligence_decision": intelligence_decision,
+        "confidence_score": float(state.get("confidence_score", 0.8)),
         "status": "success",
-        "reasoning": "Applied evidence and consistency checks to synthesized output.",
+        "reasoning": f"Critic decision: {decision}. Checked {len(synthesis_claims)} claims.",
         "next_action": (
-            "run_validation"
-            if decision == "approve"
+            "terminate_low_confidence"
+            if reached_retry_limit
             else (
-                "terminate_failure"
-                if decision == "terminate_failure"
-                else "run_research_plan"
+                "run_validation"
+                if decision == "approve"
+                else (
+                    "run_conflict_resolution"
+                    if decision == "conflict"
+                    else "run_research_plan"
+                )
             )
         ),
         "data": {"critic_decision": decision},
         "errors": [],
     }
+
+    audit = build_node_audit_entry("critic_node", state, payload)
+    audit["decision_summary"] = {
+        "critic_decision": decision,
+        "critic_retry_count": critic_retry_count,
+        "critic_retry_limit_reached": reached_retry_limit,
+        "verified_claim_count": len(verification.verified_claim_ids),
+        "invalid_major_claim_ids": verification.invalid_major_claim_ids,
+        "conflict_resolved": arbitration.resolved,
+        "force_replan": force_replan and not reached_retry_limit,
+    }
+    payload["data"]["audit"] = audit
+
     return finalize_node_output("critic_node", payload)

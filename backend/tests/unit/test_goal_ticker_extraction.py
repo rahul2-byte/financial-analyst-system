@@ -218,6 +218,29 @@ async def test_goal_requests_clarification_when_query_is_vague(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
+async def test_goal_rejects_direct_execution_for_broad_query_without_timeframe(
+    monkeypatch,
+) -> None:
+    _patch_resolver(monkeypatch, "HDFCBANK")
+    stub_llm = _StubLLMService(
+        [
+            '{"response_mode":"direct_execution","assistant_response":"Executing now.","proposed_timeframe":null,"proposed_agents":["fundamental_analysis","technical_analysis","sentiment_analysis","macro_analysis","contrarian_analysis"],"is_fast_track":true}',
+            '{"ticker":"HDFCBANK"}',
+        ]
+    )
+    previous = _set_stub_llm(stub_llm)
+
+    try:
+        result = await goal_node({"user_query": "Analyse the HDFC stock"})
+    finally:
+        setattr(resources, "_llm_service", previous)
+
+    assert result["plan_status"] == "awaiting_clarification"
+    assert result["timeframe"] is None
+    assert "timeframe" in result["final_output"].lower()
+
+
+@pytest.mark.asyncio
 async def test_goal_requests_approval_for_semiclear_query(monkeypatch) -> None:
     _patch_resolver(monkeypatch, "AAPL")
     stub_llm = _StubLLMService(
@@ -317,3 +340,28 @@ async def test_goal_executes_when_user_answers_prior_clarification(monkeypatch) 
     assert result["goal"]["ticker"] == "HDFCBANK"
     assert result["goal"]["objective"] == "Analyse the HDFC stock"
     assert result.get("final_output") is None
+
+
+@pytest.mark.asyncio
+async def test_goal_node_audit_logs_timeframe_and_resolution(monkeypatch) -> None:
+    _patch_resolver(monkeypatch, "HDFCBANK")
+    stub_llm = _StubLLMService(
+        [
+            '{"response_mode":"direct_execution","assistant_response":"Proceeding with analysis.","proposed_timeframe":"1y","proposed_agents":["fundamental_analysis","technical_analysis"],"is_fast_track":true}',
+            '{"ticker":"HDFCBANK","candidates":["HDFCBANK"]}',
+        ]
+    )
+    previous = _set_stub_llm(stub_llm)
+
+    try:
+        result = await goal_node({"user_query": "Analyse HDFC Bank for 1 year"})
+    finally:
+        setattr(resources, "_llm_service", previous)
+
+    audit = result["data"]["audit"]
+    assert audit["node"] == "goal_node"
+    assert audit["ticker"] == "HDFCBANK"
+    assert audit["timeframe"] == "1y"
+    assert audit["decision_summary"]["planner_mode"] == "direct_execution"
+    assert audit["decision_summary"]["normalized_timeframe"] == "1y"
+    assert audit["decision_summary"]["ticker_resolution"] == "resolved"

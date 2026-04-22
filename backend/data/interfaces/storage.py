@@ -43,7 +43,7 @@ class IVectorStorage(ABC):
     @abstractmethod
     def search(
         self,
-        query_embedding: List[float],
+        query_embedding: Optional[List[float]] = None,
         limit: int = 5,
         query_text: Optional[str] = None,
         ticker: Optional[str] = None,
@@ -54,4 +54,11 @@ class IVectorStorage(ABC):
     @abstractmethod
     def get_news_info(self, ticker: str) -> dict:
         """Get summary info of news coverage for a ticker."""
+        pass
+
+    @abstractmethod
+    def list_recent_by_tickers(
+        self, tickers: List[str], limit: int = 20
+    ) -> List[ProcessedChunk]:
+        """Get recent text chunks for a list of tickers."""
         pass

@@ -1,13 +1,31 @@
-"""Data checker node."""
+"""Financial data check node (graph runtime).
+
+This node evaluates local availability for required datasets and updates
+`state['goal']['ticker']` when a deterministic local symbol resolution succeeds.
+
+Outputs (stable contract):
+- `data_status`: per-dataset availability/freshness/coverage with error codes.
+- `data_check.missing_datasets` / `data_check.stale_datasets`
+- `next_action`: either `run_data_plan` (when missing/stale) or `run_research_plan`.
+
+Implementation note:
+The node uses `resources.sql_db` and `resources.vector_db` for offline evidence
+and merges that evidence into a normalized `data_status` structure.
+"""
 
 from __future__ import annotations
 
 import logging
 from typing import Any
 
+from app.core.audit import build_node_audit_entry
 from app.core.contracts.graph_node import finalize_node_output
 from app.core.node_resources import resources
 from app.core.orchestration_schemas import OfflineStatus
+from agents.financial.data.policy import (
+    DATA_CHECK_FRESHNESS_THRESHOLD as FRESHNESS_THRESHOLD,
+    REQUIRED_DATASETS,
+)
 from agents.shared.utils import (
     derive_freshness_score,
     derive_fundamental_schema_coverage,
@@ -15,10 +33,39 @@ from agents.shared.utils import (
     extract_goal_symbols,
 )
 
-REQUIRED_DATASETS = ("ohlcv", "news", "fundamentals", "macro")
-FRESHNESS_THRESHOLD = 0.6
-
 logger = logging.getLogger(__name__)
+
+
+def _build_data_check_audit(
+    state: dict[str, Any],
+    payload: dict[str, Any],
+    goal: dict[str, Any],
+    missing: list[str],
+    stale: list[str],
+    local_audit: dict[str, Any],
+    data_status: dict[str, Any],
+) -> dict[str, Any]:
+    context_state = dict(state)
+    context_state["goal"] = goal
+    audit = build_node_audit_entry("data_check_node", context_state, payload)
+    audit["decision_summary"] = {
+        "resolved_ticker": local_audit.get("resolved_ticker") or goal.get("ticker"),
+        "missing_datasets": missing,
+        "stale_datasets": stale,
+        "next_action": payload.get("next_action"),
+        "dataset_statuses": [
+            {
+                "dataset": dataset,
+                "available": bool(status.get("available", False)),
+                "coverage": float(status.get("coverage", 0.0)),
+                "freshness": float(status.get("freshness", 0.0)),
+                "error": status.get("error"),
+            }
+            for dataset, status in data_status.items()
+            if isinstance(status, dict)
+        ],
+    }
+    return audit
 
 
 def _is_data_status_incomplete(data_status: dict[str, Any]) -> bool:
@@ -31,10 +78,6 @@ def _is_data_status_incomplete(data_status: dict[str, Any]) -> bool:
         if "available" not in value:
             return True
     return False
-
-
-def _normalize_offline_status_payload(payload: dict[str, Any]) -> dict[str, Any]:
-    return dict(payload)
 
 
 def _empty_dataset_evidence(ticker: str | None = None) -> dict[str, Any]:
@@ -56,8 +99,13 @@ def _missing_dataset_evidence(
 
 
 def _news_info_for_ticker(ticker: str) -> dict[str, Any]:
-    sql_info = resources.sql_db.get_news_cache_info(ticker)
-    vector_info = resources.vector_db.get_news_info(ticker)
+    sql_raw = resources.sql_db.get_news_cache_info(ticker)
+    vector_raw = resources.vector_db.get_news_info(ticker)
+
+    # Defensive normalization: storage adapters should return dicts, but the node
+    # must not crash if adapters evolve.
+    sql_info = sql_raw if isinstance(sql_raw, dict) else {}
+    vector_info = vector_raw if isinstance(vector_raw, dict) else {}
 
     has_sql_cache = bool(sql_info.get("has_data", False))
     vector_ready = sql_info.get("vector_ready")
@@ -129,6 +177,38 @@ def _resolve_local_symbol(requested_symbol: str) -> tuple[str | None, str | None
         return _choose_ranked_symbol_match(candidate, ranked)
 
     return None, "SYMBOL_NOT_FOUND_LOCALLY"
+
+
+def _build_offline_status_from_tool_evidence(
+    requested_symbol: str,
+    submitted_args: dict[str, Any],
+    tool_evidence: dict[str, Any],
+) -> OfflineStatus:
+    """Builds OfflineStatus from tool evidence, ignoring hallucinations in submitted_args."""
+
+    # Extract evidence from tools
+    ohlcv_ev = tool_evidence.get("get_ticker_info", {"has_data": False})
+    fund_ev = tool_evidence.get("get_fundamentals_info", {"has_data": False})
+    news_ev = tool_evidence.get("get_news_info", {"has_data": False})
+    macro_ev = tool_evidence.get("get_macro_info", {"has_data": False})
+
+    # Tool evidence always overrides submitted_args (anti-hallucination)
+    data_available = (
+        bool(ohlcv_ev.get("has_data"))
+        and bool(fund_ev.get("has_data"))
+        and bool(news_ev.get("has_data"))
+        and bool(macro_ev.get("has_data"))
+    )
+
+    return OfflineStatus(
+        data_available=data_available,
+        ticker_used=submitted_args.get("ticker_used", requested_symbol.upper()),
+        reasoning=submitted_args.get("reasoning", ""),
+        ohlcv_data=ohlcv_ev,
+        fundamentals_data=fund_ev,
+        news_data=news_ev,
+        macro_data=macro_ev,
+    )
 
 
 def _build_deterministic_offline_status(
@@ -214,13 +294,17 @@ def _build_deterministic_offline_status(
     )
 
 
-def _merge_local_audit_status(
-    data_status: dict[str, Any],
+def _merge_ohlcv_status(
+    merged: dict[str, Any],
+    *,
     symbol: str,
     offline: OfflineStatus,
     timeframe_policy: dict[str, Any],
-) -> dict[str, Any]:
-    merged = dict(data_status)
+) -> None:
+    """Merge OHLCV evidence into `merged['ohlcv']`.
+
+    Pure update of the provided `merged` dict (legacy behavior).
+    """
 
     ohlcv_state = dict(merged.get("ohlcv", {}))
     by_symbol_ohlcv = dict(ohlcv_state.get("by_symbol", {}))
@@ -233,9 +317,11 @@ def _merge_local_audit_status(
     by_symbol_ohlcv[symbol] = {
         "available": has_ohlcv_data,
         "source": "db_check",
-        "error": None
-        if has_ohlcv_data
-        else str(ohlcv_evidence.get("error") or "LOCAL_DATA_MISSING"),
+        "error": (
+            None
+            if has_ohlcv_data
+            else str(ohlcv_evidence.get("error") or "LOCAL_DATA_MISSING")
+        ),
     }
     if ohlcv_evidence.get("latest_date"):
         freshness = derive_freshness_score({"date": ohlcv_evidence.get("latest_date")})
@@ -247,6 +333,7 @@ def _merge_local_audit_status(
         by_symbol_ohlcv[symbol]["coverage"] = min(
             1.0, float(ohlcv_evidence.get("row_count", 0)) / max(expected_points, 1.0)
         )
+
     ohlcv_state["by_symbol"] = by_symbol_ohlcv
     available_values = [
         bool(entry.get("available", False)) for entry in by_symbol_ohlcv.values()
@@ -264,12 +351,21 @@ def _merge_local_audit_status(
     ohlcv_state["error"] = None if ohlcv_state["available"] else "LOCAL_DATA_MISSING"
     merged["ohlcv"] = ohlcv_state
 
+
+def _merge_fundamentals_status(
+    merged: dict[str, Any],
+    *,
+    symbol: str,
+    offline: OfflineStatus,
+    timeframe_policy: dict[str, Any],
+) -> None:
+    """Merge fundamentals evidence into `merged['fundamentals']`."""
+
     fundamentals_state = dict(merged.get("fundamentals", {}))
     by_symbol_fundamentals = dict(fundamentals_state.get("by_symbol", {}))
     fundamentals_requirements = dict(timeframe_policy.get("fundamentals", {}))
 
     fundamentals_payload = offline.fundamentals_data or {}
-
     fundamentals_freshness = (
         derive_snapshot_freshness_score(
             fundamentals_payload,
@@ -280,8 +376,8 @@ def _merge_local_audit_status(
         if fundamentals_payload and fundamentals_payload.get("has_data")
         else 0.5
     )
-
     fundamentals_coverage = derive_fundamental_schema_coverage(fundamentals_payload)
+
     by_symbol_fundamentals[symbol] = {
         "available": bool(
             fundamentals_payload and fundamentals_payload.get("has_data")
@@ -295,6 +391,7 @@ def _merge_local_audit_status(
         "freshness": fundamentals_freshness,
         "coverage": fundamentals_coverage,
     }
+
     fundamentals_state["by_symbol"] = by_symbol_fundamentals
     fund_available_values = [
         bool(entry.get("available", False)) for entry in by_symbol_fundamentals.values()
@@ -319,13 +416,22 @@ def _merge_local_audit_status(
     )
     merged["fundamentals"] = fundamentals_state
 
-    # Handle News dataset with rich metadata
+
+def _merge_news_status(
+    merged: dict[str, Any],
+    *,
+    offline: OfflineStatus,
+) -> None:
+    """Merge news evidence into `merged['news']`.
+
+    Supports the new structured `sql_cache/vector_db` evidence as well as older
+    cache-index-style metadata.
+    """
+
     news_state = dict(merged.get("news", {}))
     news_evidence = offline.news_data or {}
     if news_evidence:
-        # Support both the new tool format and the rich legacy metadata
         if "sql_cache" in news_evidence or "vector_db" in news_evidence:
-            # New structured format
             has_data = news_evidence.get("has_data", False)
             news_coverage = 1.0 if has_data else 0.0
             sql_cache = news_evidence.get("sql_cache", {})
@@ -333,7 +439,6 @@ def _merge_local_audit_status(
             news_freshness = (
                 derive_freshness_score({"date": latest_date}) if latest_date else 0.5
             )
-
             news_state.update(
                 {
                     "available": has_data,
@@ -348,11 +453,8 @@ def _merge_local_audit_status(
                 }
             )
         else:
-            # Rich legacy metadata (e.g., from cache_index or older audits)
             covered_intents = list(news_evidence.get("covered_intent_types", []))
-            news_coverage = (
-                len(covered_intents) / 5.0
-            )  # Assuming 5 required intent types
+            news_coverage = len(covered_intents) / 5.0
             news_fresh_enough = bool(news_evidence.get("fresh_enough", False))
             news_vector_ready = bool(news_evidence.get("vector_ready", False))
 
@@ -380,7 +482,14 @@ def _merge_local_audit_status(
         news_state.setdefault("error", "LOCAL_STATUS_UNKNOWN")
     merged["news"] = news_state
 
-    # Handle Macro dataset
+
+def _merge_macro_status(
+    merged: dict[str, Any],
+    *,
+    offline: OfflineStatus,
+) -> None:
+    """Merge macro evidence into `merged['macro']`."""
+
     macro_state = dict(merged.get("macro", {}))
     macro_evidence = offline.macro_data or {}
     if macro_evidence:
@@ -395,9 +504,11 @@ def _merge_local_audit_status(
                     else 0.5
                 ),
                 "coverage": 1.0 if has_data else 0.0,
-                "error": None
-                if has_data
-                else str(macro_evidence.get("error") or "LOCAL_DATA_MISSING"),
+                "error": (
+                    None
+                    if has_data
+                    else str(macro_evidence.get("error") or "LOCAL_DATA_MISSING")
+                ),
             }
         )
     else:
@@ -408,6 +519,24 @@ def _merge_local_audit_status(
         macro_state.setdefault("error", "LOCAL_STATUS_UNKNOWN")
     merged["macro"] = macro_state
 
+
+def _merge_local_audit_status(
+    data_status: dict[str, Any],
+    symbol: str,
+    offline: OfflineStatus,
+    timeframe_policy: dict[str, Any],
+) -> dict[str, Any]:
+    merged = dict(data_status)
+
+    _merge_ohlcv_status(
+        merged, symbol=symbol, offline=offline, timeframe_policy=timeframe_policy
+    )
+    _merge_fundamentals_status(
+        merged, symbol=symbol, offline=offline, timeframe_policy=timeframe_policy
+    )
+    _merge_news_status(merged, offline=offline)
+    _merge_macro_status(merged, offline=offline)
+
     return merged
 
 
@@ -416,11 +545,14 @@ async def _run_local_offline_audit(
 ) -> tuple[OfflineStatus | None, list[str]]:
     normalized = str(ticker or "").strip().upper()
     resolved_symbol, resolution_error = _resolve_local_symbol(normalized)
-    return _build_deterministic_offline_status(
-        normalized,
-        resolved_symbol,
-        resolution_error,
-    ), []
+    return (
+        _build_deterministic_offline_status(
+            normalized,
+            resolved_symbol,
+            resolution_error,
+        ),
+        [],
+    )
 
 
 async def data_check_node(state: dict[str, Any]) -> dict[str, Any]:
@@ -430,26 +562,31 @@ async def data_check_node(state: dict[str, Any]) -> dict[str, Any]:
     goal = dict(state.get("goal", {}))
     original_ticker = goal.get("ticker")
     timeframe_policy = dict(state.get("timeframe_policy", {}))
+    # `extract_goal_symbols()` returns a *single* primary symbol as a one-item
+    # list (single-ticker pipeline).
+    extracted = extract_goal_symbols(goal)
+    primary_symbol = extracted[0] if extracted else None
 
-    goal_symbols = extract_goal_symbols(goal)
-
-    if goal_symbols and _is_data_status_incomplete(data_status):
+    if (
+        isinstance(primary_symbol, str)
+        and primary_symbol
+        and _is_data_status_incomplete(data_status)
+    ):
         resolved_symbols: list[str] = []
         try:
             reports: list[dict[str, Any]] = []
-            for symbol in goal_symbols:
-                offline, symbol_errors = await _run_local_offline_audit(symbol)
-                audit_errors.extend(symbol_errors)
-                if offline is None:
-                    continue
-                resolved_symbol = (offline.ticker_used or symbol).upper()
+
+            offline, symbol_errors = await _run_local_offline_audit(primary_symbol)
+            audit_errors.extend(symbol_errors)
+            if offline is not None:
+                resolved_symbol = (offline.ticker_used or primary_symbol).upper()
                 resolved_symbols.append(resolved_symbol)
                 data_status = _merge_local_audit_status(
                     data_status, resolved_symbol, offline, timeframe_policy
                 )
                 reports.append(
                     {
-                        "input_symbol": symbol,
+                        "input_symbol": primary_symbol,
                         "resolved_symbol": resolved_symbol,
                         "data_available": offline.data_available,
                         "reasoning": offline.reasoning,
@@ -469,7 +606,7 @@ async def data_check_node(state: dict[str, Any]) -> dict[str, Any]:
             local_audit = {
                 "original_ticker": original_ticker,
                 "resolved_ticker": goal.get("ticker"),
-                "symbols_checked": goal_symbols,
+                "symbols_checked": [primary_symbol],
                 "reports": reports,
             }
         except Exception as exc:  # noqa: BLE001
@@ -516,4 +653,7 @@ async def data_check_node(state: dict[str, Any]) -> dict[str, Any]:
         },
         "errors": audit_errors,
     }
+    payload["data"]["audit"] = _build_data_check_audit(
+        state, payload, goal, missing, stale, local_audit, data_status
+    )
     return finalize_node_output("data_check_node", payload)

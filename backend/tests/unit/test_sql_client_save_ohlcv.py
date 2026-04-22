@@ -89,7 +89,7 @@ def test_get_fundamentals_info_falls_back_to_yahoo_suffix_variants():
 
     result = client.get_fundamentals_info("HDFCBANK")
 
-    assert calls == ["HDFCBANK", "HDFCBANK.NS"]
+    assert calls == ["HDFCBANK", "HDFCBANK.NS", "HDFCBANK.BO"]
     assert result["ticker"] == "HDFCBANK"
     assert result["ticker_found"] is True
     assert result["has_data"] is True
@@ -115,7 +115,7 @@ def test_get_fundamentals_info_returns_full_snapshot_shape():
     updated_at = datetime(2026, 4, 13, 9, 15, 30, 123456)
 
     def execute(statement, params):
-        assert params["ticker"] == "HDFCBANK"
+        assert params["ticker"] in ["HDFCBANK", "HDFCBANK.NS", "HDFCBANK.BO"]
         return _Result(
             {
                 "ticker": "HDFCBANK",

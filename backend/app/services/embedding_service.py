@@ -76,18 +76,20 @@ class EmbeddingService:
                 raise ImportError(
                     "sentence-transformers is not installed. Please install it to use embeddings."
                 )
-            
+
             import os
             from pathlib import Path
-            
+
             # Explicitly set the cache folder to the local project directory
             # so the model is only downloaded once and stored locally
             cache_dir = os.path.join(
                 Path(__file__).parent.parent.parent, "ai-lab", "models", "embeddings"
             )
             os.makedirs(cache_dir, exist_ok=True)
-            
-            logger.info(f"Loading embedding model {self.model_name} from local folder: {cache_dir}...")
+
+            logger.info(
+                f"Loading embedding model {self.model_name} from local folder: {cache_dir}..."
+            )
             self.model = SentenceTransformer(self.model_name, cache_folder=cache_dir)
             logger.info("Embedding model loaded.")
 
@@ -97,7 +99,7 @@ class EmbeddingService:
         """Generate an embedding for a single text string."""
         self.load_model()
         assert self.model is not None
-        # The model returns a numpy array, we convert to list for Qdrant/JSON
+        # The model returns a numpy array, we convert to list for pgvector/JSON
         embedding = self.model.encode(text)
         return embedding.tolist()
 
@@ -123,10 +125,12 @@ class EmbeddingService:
             self.model = None
 
             import gc
+
             gc.collect()
 
             try:
                 import torch
+
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
             except ImportError:

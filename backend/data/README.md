@@ -8,7 +8,7 @@ This module handles the fetching, processing, and storage of financial data.
 - **Providers**: `YFinanceFetcher` is the current implementation for OHLCV and News.
 - **Storage**:
   - **Structured**: Postgres (via SQLAlchemy/SQLModel). Stores OHLCV.
-  - **Vector**: Qdrant. Stores News/Text chunks.
+  - **Vector**: Postgres/pgvector. Stores News/Text chunks.
 - **Orchestration**: Data sync orchestration is handled by application services and scheduled jobs; keep data interfaces/providers focused on fetch/validate/normalize/store responsibilities.
 
 ## Setup

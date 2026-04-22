@@ -102,27 +102,78 @@ class PostgresClient(IStructuredStorage):
 
     def _create_tables(self) -> None:
         """Create all tables if they don't exist."""
+        vector_available = True
         with self._engine.begin() as conn:
             conn.execute(text("CREATE EXTENSION IF NOT EXISTS pg_trgm;"))
-        SQLModel.metadata.create_all(self._engine)
+            try:
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector;"))
+            except Exception as e:
+                import logging
+
+                vector_available = False
+                logging.getLogger(__name__).warning(
+                    f"Could not create vector extension: {e}"
+                )
+
+        # If pgvector isn't installed on the running Postgres instance, table creation will
+        # fail when it reaches `text_chunks.embedding vector(...)`. Keep the rest of the
+        # schema usable (instrument resolver, OHLCV cache, etc.) by skipping that table.
+        if vector_available:
+            SQLModel.metadata.create_all(self._engine)
+        else:
+            non_vector_tables = [
+                table
+                for table in SQLModel.metadata.sorted_tables
+                if table.name != "text_chunks"
+            ]
+            SQLModel.metadata.create_all(self._engine, tables=non_vector_tables)
 
         with self._engine.begin() as conn:
-            conn.execute(
-                text("""
+            conn.execute(text("""
                 CREATE INDEX IF NOT EXISTS ix_trgm_company_name 
                 ON instrument_master USING gin (company_name gin_trgm_ops);
-            """)
-            )
-            conn.execute(
-                text("""
+            """))
+            conn.execute(text("""
                 CREATE INDEX IF NOT EXISTS ix_trgm_trading_symbol 
                 ON instrument_master USING gin (trading_symbol gin_trgm_ops);
-            """)
-            )
+            """))
+
+            if vector_available:
+                # Text chunk indexes (defensive IF NOT EXISTS to support existing DBs)
+                conn.execute(text("""
+                        CREATE INDEX IF NOT EXISTS ix_text_chunks_ticker
+                        ON text_chunks (ticker);
+                        """))
+
+                # Optional full-text search index
+                conn.execute(text("""
+                        CREATE INDEX IF NOT EXISTS ix_text_chunks_fts
+                        ON text_chunks USING gin (to_tsvector('english', text));
+                        """))
+
+                # Vector ANN index: prefer hnsw, fall back to ivfflat.
+                try:
+                    conn.execute(text("""
+                            DO $$
+                            BEGIN
+                                BEGIN
+                                    EXECUTE 'CREATE INDEX IF NOT EXISTS ix_text_chunks_embedding_hnsw '
+                                            'ON text_chunks USING hnsw (embedding vector_cosine_ops)';
+                                EXCEPTION WHEN undefined_object THEN
+                                    EXECUTE 'CREATE INDEX IF NOT EXISTS ix_text_chunks_embedding_ivfflat '
+                                            'ON text_chunks USING ivfflat (embedding vector_cosine_ops) WITH (lists = 100)';
+                                END;
+                            END $$;
+                            """))
+                except Exception as e:
+                    import logging
+
+                    logging.getLogger(__name__).warning(
+                        f"Could not create vector index: {e}"
+                    )
 
             # Ensure unique constraints for ON CONFLICT operations
-            conn.execute(
-                text("""
+            conn.execute(text("""
                 DO $$ 
                 BEGIN 
                     -- Clean up and add constraint for ohlcv_data
@@ -150,8 +201,7 @@ class PostgresClient(IStructuredStorage):
                         ALTER TABLE instrument_master ADD CONSTRAINT uq_instrument_exchange_symbol UNIQUE (exchange, trading_symbol);
                     END IF;
                 END $$;
-            """)
-            )
+            """))
 
     @contextmanager
     def get_session(self):
@@ -465,8 +515,7 @@ class PostgresClient(IStructuredStorage):
     def get_fundamentals_info(self, ticker: str) -> Dict[str, Any]:
         """Get presence metadata and fundamentals snapshot for a ticker."""
         with self.get_session() as session:
-            statement = text(
-                """
+            statement = text("""
                 SELECT ticker, updated_at, name, industry, sector, market_cap, pe_ratio,
                        forward_pe, peg_ratio, price_to_book, debt_to_equity,
                        return_on_equity, profit_margins, revenue_growth,
@@ -474,8 +523,7 @@ class PostgresClient(IStructuredStorage):
                        target_mean_price, fifty_two_week_high, fifty_two_week_low
                 FROM company_fundamentals
                 WHERE ticker = :ticker
-                """
-            )
+                """)
             lookup_variants = self._fundamentals_lookup_variants(ticker)
             requested = str(ticker or "").strip().upper()
             requested_is_suffixed = requested.endswith(".NS") or requested.endswith(
@@ -531,9 +579,7 @@ class PostgresClient(IStructuredStorage):
                 updated_at_value = (
                     updated_at.isoformat()
                     if isinstance(updated_at, datetime)
-                    else str(updated_at)
-                    if updated_at is not None
-                    else None
+                    else str(updated_at) if updated_at is not None else None
                 )
                 return {
                     "ticker": self._canonical_equity_ticker(ticker),
@@ -926,13 +972,14 @@ class PostgresClient(IStructuredStorage):
                 .order_by(desc(InteractionLog.timestamp))
                 .limit(limit)
             ).all()
-        return [
-            {
-                "query_id": row.query_id,
-                "score": row.score,
-                "error_type": row.error_type,
-                "retries": row.retries,
-                "correction_applied": row.correction_applied,
-            }
-            for row in rows
-        ]
+            # Materialize while the session is open to avoid detached instances.
+            return [
+                {
+                    "query_id": row.query_id,
+                    "score": row.score,
+                    "error_type": row.error_type,
+                    "retries": row.retries,
+                    "correction_applied": row.correction_applied,
+                }
+                for row in rows
+            ]

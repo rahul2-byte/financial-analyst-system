@@ -3,42 +3,137 @@
 import json
 from typing import Any, Dict
 
-from app.config import settings
 from app.core.graph.graph_state import ResearchGraphState
 from app.core.graph.node_helpers import build_node_error, build_node_success
 from app.core.node_resources import NodeResources
 from app.core.prompts import prompt_manager
 from app.models.request_models import Message
+from app.core.research_plan_schemas import AgentExecutionInput
 from app.config.constants import MODEL_REASONING
+from app.core.research_schemas import ResearchAgentResult
+from agents.financial.analysis.payload_sanitizer import (
+    drop_findings_without_evidence_ids,
+)
 
 
 async def macro_analysis_node(
     state: ResearchGraphState, resources: NodeResources
 ) -> Dict[str, Any]:
-    """Analyzes macroeconomic trends."""
+    """Analyzes macroeconomic trends using pre-fetched data."""
     current_step = state.get("current_step") or {}
     params = current_step.get("parameters", {})
     if not isinstance(params, dict):
         params = {}
-    macro_data = params.get("macro_data", {})
+
+    execution_input = None
+    if isinstance(params.get("execution_input"), dict):
+        execution_input = AgentExecutionInput.model_validate(params["execution_input"])
+
+    ticker = (
+        execution_input.ticker
+        if execution_input is not None and execution_input.ticker
+        else params.get("ticker", "UNKNOWN")
+    )
+    raw_data = (
+        execution_input.evidence_bundle.structured_inputs.get("macro", {})
+        if execution_input is not None
+        else params.get("macro_data")
+        or params.get("raw_data")
+        or state.get("fetched_data", {}).get("macro", {})
+    )
+
     try:
-        prompt = prompt_manager.get_prompt(
-            "macro.user_node",
-            macro_data_json=json.dumps(macro_data),
+        if not raw_data:
+            agent_result = ResearchAgentResult(
+                agent="macro_analysis",
+                status="insufficient_evidence",
+                findings=[],
+                claims=[],
+                missing_evidence=["Raw macro-economic data is missing"],
+                confidence=0.0,
+            )
+
+            agent_result.audit = {
+                "node": "macro_analysis",
+                "ticker": ticker,
+                "status": agent_result.status,
+                "confidence": agent_result.confidence,
+                "findings_count": len(agent_result.findings),
+                "claims_count": len(agent_result.claims),
+                "missing_evidence_count": len(agent_result.missing_evidence),
+            }
+
+            return build_node_success(
+                agent_output_key="macro_analysis",
+                agent_output=agent_result.model_dump(mode="json"),
+                tool_name="analysis:macro_analysis_result",
+                input_parameters=params,
+                tool_output=agent_result.model_dump(mode="json"),
+            )
+
+        system_prompt = prompt_manager.get_prompt("macro.system")
+        user_prompt = prompt_manager.get_prompt(
+            "macro.user_node", ticker=ticker, data=json.dumps(raw_data, indent=2)
         )
+        if execution_input is not None:
+            user_prompt += (
+                f"\n\nResearch objective: {execution_input.objective}"
+                f"\nResearch question: {execution_input.research_question}"
+            )
+
         if params.get("correction_prompt"):
-            prompt += f"\n\nCORRECTION GUIDANCE:\n{params['correction_prompt']}"
+            user_prompt += f"\n\nCORRECTION GUIDANCE:\n{params['correction_prompt']}"
+
         response = await resources.llm_service.generate_message(
-            messages=[Message(role="user", content=prompt)],
+            messages=[
+                Message(role="system", content=system_prompt),
+                Message(role="user", content=user_prompt),
+            ],
             model=MODEL_REASONING,
+            response_format={"type": "json_object"},
         )
-        result = {"macro_data": macro_data, "analysis": response.content}
+
+        # Parse the structured JSON response
+        try:
+            raw_payload = (
+                json.loads(response.content)
+                if isinstance(response.content, str)
+                else response.content
+            )
+            raw_payload = drop_findings_without_evidence_ids(raw_payload)
+            # Validate against schema
+            agent_result = ResearchAgentResult.model_validate(
+                {"agent": "macro_analysis", **raw_payload}
+            )
+        except Exception:
+            # Fallback for parsing errors
+            agent_result = ResearchAgentResult(
+                agent="macro_analysis",
+                status="failed",
+                findings=[],
+                claims=[],
+                missing_evidence=[
+                    "Failed to parse LLM response into ResearchAgentResult"
+                ],
+                confidence=0.0,
+            )
+
+        agent_result.audit = {
+            "node": "macro_analysis",
+            "ticker": ticker,
+            "status": agent_result.status,
+            "confidence": agent_result.confidence,
+            "findings_count": len(agent_result.findings),
+            "claims_count": len(agent_result.claims),
+            "missing_evidence_count": len(agent_result.missing_evidence),
+        }
+
         return build_node_success(
             agent_output_key="macro_analysis",
-            agent_output=result,
-            tool_name="analysis:analyze_macro",
+            agent_output=agent_result.model_dump(mode="json"),
+            tool_name="analysis:macro_analysis_result",
             input_parameters=params,
-            tool_output=result,
+            tool_output=agent_result.model_dump(mode="json"),
         )
     except Exception as error:
         return build_node_error(error)

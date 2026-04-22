@@ -32,6 +32,7 @@ class ResearchGraphState(TypedDict):
     tool_registry: Annotated[List[Dict[str, Any]], operator.add]
     draft_report: Annotated[Optional[str], replace_value]
     final_report: Annotated[Optional[str], replace_value]
+    claim_verification: Annotated[Optional[Dict[str, Any]], replace_value]
     synthesis_retry_count: Annotated[int, replace_value]
     verification_retry_count: Annotated[int, replace_value]
     verification_passed: Annotated[bool, replace_value]
@@ -61,6 +62,7 @@ class ResearchGraphState(TypedDict):
     data_check: Annotated[Dict[str, Any], merge_dicts]
     data_plan: Annotated[List[Dict[str, Any]], replace_value]
     tasks: Annotated[List[Dict[str, Any]], replace_value]
+    task_contexts: Annotated[Dict[str, Any], replace_value]
     replanned_tasks: Annotated[List[Dict[str, Any]], replace_value]
     force_replan: Annotated[bool, replace_value]
     results: Annotated[Dict[str, Any], merge_dicts]
@@ -78,10 +80,10 @@ class ResearchGraphState(TypedDict):
     critic_decision: Annotated[Optional[str], replace_value]
     router_decision: Annotated[Optional[str], replace_value]
     iteration_count: Annotated[int, replace_value]
+    consecutive_research_plan_routes: Annotated[int, replace_value]
     retry_count_by_domain: Annotated[Dict[str, int], merge_dicts]
     freshness_policy: Annotated[Dict[str, Any], merge_dicts]
     evidence_strength: Annotated[float, replace_value]
-    execution_budget: Annotated[Dict[str, Any], merge_dicts]
     timeouts: Annotated[Dict[str, Any], merge_dicts]
     errors_detail: Annotated[List[Dict[str, Any]], operator.add]
     history: Annotated[List[Dict[str, Any]], operator.add]
@@ -108,6 +110,7 @@ def build_initial_graph_state(
         "tool_registry": [],
         "draft_report": None,
         "final_report": None,
+        "claim_verification": None,
         "synthesis_retry_count": 0,
         "verification_retry_count": 0,
         "verification_passed": False,
@@ -135,6 +138,7 @@ def build_initial_graph_state(
         "data_check": {},
         "data_plan": [],
         "tasks": [],
+        "task_contexts": {},
         "replanned_tasks": [],
         "force_replan": False,
         "results": {},
@@ -148,10 +152,10 @@ def build_initial_graph_state(
         "critic_decision": None,
         "router_decision": None,
         "iteration_count": 0,
+        "consecutive_research_plan_routes": 0,
         "retry_count_by_domain": {},
         "freshness_policy": {},
         "evidence_strength": 0.0,
-        "execution_budget": {},
         "timeouts": {"task_timeout_s": 10.0, "stage_timeout_s": 20.0},
         "errors_detail": [],
         "history": [],

@@ -15,25 +15,31 @@ llama_server:
   # Adjust n_gpu_layers based on your available VRAM. 0 means CPU only.
   args:
     -c: 16384
-    -ngl: 32
+    -ngl: 99 # Number of GPU layers, set to 99 to put all layers on GPU for best performance
     -np: 1
     --flash-attn: "on"
     --cache-type-k: "q4_0"
     --cache-type-v: "q4_0"
 
 models:
+  # reasoning:
+  #   name: "llama-3.1"
+  #   path: "ai-lab/models/meta-llama/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"
+  #   best_for: "General reasoning, synthesis, routing, and orchestration."
+  #   parameters_billions: 8
+  #   gpu_layers: 32
+
   reasoning:
-    name: "llama-3.1"
-    path: "ai-lab/models/meta-llama/Meta-Llama-3.1-8B-Instruct-Q4_K_M.gguf"
+    name: "gemma-4-E4B-it"
+    path: "ai-lab/models/gemma/gemma-4-E4B-it-Q4_K_M.gguf"
     best_for: "General reasoning, synthesis, routing, and orchestration."
     parameters_billions: 8
-    gpu_layers: 32
-  tool_calling:
-    name: "qwen-2.5"
-    path: "ai-lab/models/qwen-tool-use/Qwen2.5-3B-Instruct-Q5_K_L.gguf"
-    best_for: "Function calling, data extraction, and using MCP tools."
-    parameters_billions: 3
-    gpu_layers: 36
+    gpu_layers: 99  # All layers on GPU for best performance, adjust if for less VRAM.
+    args:
+      --reasoning: "on"
+      --temp: 1.0 
+      --top-p: 0.95
+      --top-k: 64
 
 # API and Application Settings
 api:

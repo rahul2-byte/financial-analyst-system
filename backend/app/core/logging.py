@@ -136,6 +136,9 @@ class SessionLogger:
         backend_root = Path(__file__).parent.parent.parent.resolve()
         self.session_dir = backend_root / "logs" / "research_sessions"
         self.log_file = self.session_dir / f"{self.timestamp}_{self.trace_id}.log"
+        self.jsonl_file = self.session_dir / f"{self.timestamp}_{self.trace_id}.jsonl"
+        self._event_sequence = 0
+        self._write_lock = threading.Lock()
 
         # Ensure directory exists
         self.session_dir.mkdir(parents=True, exist_ok=True)
@@ -164,6 +167,22 @@ START_TIME: {datetime.now(timezone.utc).isoformat()}
 """
         with open(self.log_file, "w", encoding="utf-8") as f:
             f.write(header)
+
+    def _append_jsonl(self, event_name: str, payload: dict[str, Any]) -> None:
+        """Append one structured event row to the session JSONL stream."""
+        with self._write_lock:
+            self._event_sequence += 1
+            record = {
+                "seq": self._event_sequence,
+                "ts": datetime.now(timezone.utc).isoformat(),
+                "trace_id": self.trace_id,
+                "query": self.query,
+                "event_name": event_name,
+                "payload": payload,
+            }
+            with open(self.jsonl_file, "a", encoding="utf-8") as f:
+                f.write(json.dumps(record, ensure_ascii=True) + "\n")
+                f.flush()
 
     def log_step(
         self,
@@ -211,6 +230,25 @@ EXPLANATION: {explanation}
 
         with open(self.log_file, "a", encoding="utf-8") as f:
             f.write(entry)
+            f.flush()
+
+        self._append_jsonl(
+            event_name=f"STEP_{step_name.upper()}",
+            payload={
+                "step_name": step_name.upper(),
+                "explanation": explanation,
+                "parameters": parameters or {},
+                "data": data,
+            },
+        )
+
+    def log_trace(self, event_name: str, payload: dict[str, Any]) -> None:
+        """Log a structured trace event with compact JSON payload."""
+        self.log_step(
+            step_name=f"TRACE_{event_name.upper()}",
+            explanation=f"Structured trace event: {event_name}",
+            data=payload,
+        )
 
     def log_error(self, error_name: str, message: str, data: Any = None):
         """
@@ -229,12 +267,13 @@ EXPLANATION: {explanation}
             now = datetime.now()
             cutoff = now - timedelta(days=self.RETENTION_DAYS)
 
-            for log_file in self.session_dir.glob("*.log"):
-                if log_file.stat().st_mtime < cutoff.timestamp():
-                    os.remove(log_file)
-                    get_logger(__name__).info(
-                        f"Deleted old session log: {log_file.name}"
-                    )
+            for pattern in ("*.log", "*.jsonl"):
+                for log_file in self.session_dir.glob(pattern):
+                    if log_file.stat().st_mtime < cutoff.timestamp():
+                        os.remove(log_file)
+                        get_logger(__name__).info(
+                            f"Deleted old session log: {log_file.name}"
+                        )
         except Exception as e:
             get_logger(__name__).error(f"Failed to cleanup old logs: {e}")
 

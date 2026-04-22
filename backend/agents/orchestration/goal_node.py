@@ -4,7 +4,7 @@ import json
 import re
 from typing import Any
 
-from app.config import settings
+from app.core.audit import build_node_audit_entry
 from app.core.orchestration_schemas import InteractivePlanPayload
 from app.core.instrument_resolver import resolve_instruments
 from app.core.contracts.graph_node import finalize_node_output
@@ -38,6 +38,39 @@ def _normalize_agents(candidates: list[Any]) -> list[str]:
 
 def _default_agents() -> list[str]:
     return list(_ALLOWED_RESEARCH_AGENTS)
+
+
+def _build_goal_audit(
+    state: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    goal: dict[str, Any] | None,
+    planner_mode: str,
+    proposed_timeframe: str | None,
+    normalized_timeframe: str | None,
+    approved_agents: list[str],
+    is_clarification_followup: bool,
+) -> dict[str, Any]:
+    context_state = dict(state)
+    context_state["goal"] = goal
+    context_state["timeframe"] = normalized_timeframe
+    audit = build_node_audit_entry("goal_node", context_state, payload)
+    audit["decision_summary"] = {
+        "planner_mode": planner_mode,
+        "proposed_timeframe": proposed_timeframe,
+        "normalized_timeframe": normalized_timeframe,
+        "approved_agents": approved_agents,
+        "ticker_resolution": (
+            goal.get("ticker_extraction_status")
+            if isinstance(goal, dict)
+            else "unresolved"
+        ),
+        "resolver_source": (
+            goal.get("resolver_source") if isinstance(goal, dict) else None
+        ),
+        "clarification_followup": is_clarification_followup,
+    }
+    return audit
 
 
 def _is_clarification_followup(
@@ -78,6 +111,21 @@ def _resolved_objective(
             return content
 
     return query
+
+
+def _is_broad_analysis_without_timeframe(
+    query: str,
+    normalized_timeframe: str | None,
+    planner_mode: str,
+) -> bool:
+    if normalized_timeframe is not None or planner_mode != "direct_execution":
+        return False
+    lowered = query.lower()
+    broad_terms = ["analyze", "analyse", "research", "deep dive", "full analysis"]
+    subject_terms = ["stock", "company", "bank", "share"]
+    return any(term in lowered for term in broad_terms) and any(
+        term in lowered for term in subject_terms
+    )
 
 
 async def _run_interactive_planner(
@@ -238,14 +286,26 @@ async def goal_node(state: dict[str, Any]) -> dict[str, Any]:
         query, conversation_history, is_clarification_followup
     )
 
-    if planner_mode == "ask_clarification" or (
-        proposed_timeframe is not None and normalized_timeframe is None
+    if (
+        planner_mode == "ask_clarification"
+        or (proposed_timeframe is not None and normalized_timeframe is None)
+        or _is_broad_analysis_without_timeframe(
+            query,
+            normalized_timeframe,
+            planner_mode,
+        )
     ):
         prompt_text = (
             planner_payload.assistant_response
             if planner_payload is not None and planner_payload.assistant_response
             else "Please clarify your preferred timeframe and focus for this analysis."
         )
+        if _is_broad_analysis_without_timeframe(
+            query, normalized_timeframe, planner_mode
+        ):
+            prompt_text = (
+                "Please clarify your preferred timeframe and focus for this analysis."
+            )
         payload = {
             "goal": None,
             "hypotheses": [],
@@ -269,6 +329,16 @@ async def goal_node(state: dict[str, Any]) -> dict[str, Any]:
             "data": {"plan_status": "awaiting_clarification"},
             "errors": [],
         }
+        payload["data"]["audit"] = _build_goal_audit(
+            state,
+            payload,
+            goal=None,
+            planner_mode="ask_clarification",
+            proposed_timeframe=proposed_timeframe,
+            normalized_timeframe=None,
+            approved_agents=_default_agents(),
+            is_clarification_followup=is_clarification_followup,
+        )
         return finalize_node_output("goal_node", payload)
 
     if planner_mode == "ask_plan_approval" and not is_clarification_followup:
@@ -309,6 +379,16 @@ async def goal_node(state: dict[str, Any]) -> dict[str, Any]:
             },
             "errors": [],
         }
+        payload["data"]["audit"] = _build_goal_audit(
+            state,
+            payload,
+            goal=None,
+            planner_mode="ask_plan_approval",
+            proposed_timeframe=proposed_timeframe,
+            normalized_timeframe=normalized_timeframe,
+            approved_agents=approved_agents,
+            is_clarification_followup=is_clarification_followup,
+        )
         return finalize_node_output("goal_node", payload)
 
     ticker: str | None = None
@@ -360,15 +440,21 @@ async def goal_node(state: dict[str, Any]) -> dict[str, Any]:
     hypotheses = [
         {
             "id": "h1",
-            "statement": "Price action and fundamentals jointly support a directional thesis.",
-            "rationale": "Cross-validate market structure with fundamentals.",
+            "statement": f"Validate whether {objective} is supported by company fundamentals and earnings durability.",
+            "rationale": "The planner should test company-specific drivers before relying on narrative synthesis.",
             "priority": "P0",
         },
         {
             "id": "h2",
-            "statement": "Macro and sentiment can invalidate the directional thesis.",
-            "rationale": "Use macro and news to detect regime risk.",
+            "statement": f"Identify whether price action, market narrative, macro regime, or sector conditions could invalidate {objective}.",
+            "rationale": "The planner should search for disconfirming qualitative and macro evidence, not just confirming evidence.",
             "priority": "P1",
+        },
+        {
+            "id": "h3",
+            "statement": f"Look for a credible contrarian case against the prevailing interpretation of {objective}.",
+            "rationale": "The planner should reserve a second-wave challenge step for consensus-risk review.",
+            "priority": "P2",
         },
     ]
     timeframe_policy = (
@@ -406,4 +492,14 @@ async def goal_node(state: dict[str, Any]) -> dict[str, Any]:
         "data": {"goal": goal, "hypotheses": hypotheses},
         "errors": [],
     }
+    payload["data"]["audit"] = _build_goal_audit(
+        state,
+        payload,
+        goal=goal,
+        planner_mode=planner_mode,
+        proposed_timeframe=proposed_timeframe,
+        normalized_timeframe=normalized_timeframe,
+        approved_agents=payload["approved_agents"],
+        is_clarification_followup=is_clarification_followup,
+    )
     return finalize_node_output("goal_node", payload)

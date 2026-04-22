@@ -31,8 +31,8 @@ To support this high-speed, memory-optimized, open-source architecture, we selec
 3.  **Observability & Tracing: OpenTelemetry + Phoenix**
     *   **Why:** The backend emits structured tracing spans via OTLP to Phoenix, enabling request-level execution auditability for node transitions, LLM calls, and tool execution events.
 
-4.  **Vector Storage: `Qdrant`**
-    *   **Why:** Already in the stack. Blazing fast (Rust-based) and memory-efficient, perfect for storing and retrieving chunked financial reports with complex payload filtering.
+4.  **Vector Storage: `pgvector`**
+    *   **Why:** Consolidates infrastructure. Blazing fast and memory-efficient, perfect for storing and retrieving chunked financial reports with complex payload filtering directly in PostgreSQL.
 
 ### Benefits of this Approach
 - **Auditability:** Every step, tool call, and mathematical calculation can be traced and audited.

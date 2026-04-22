@@ -218,7 +218,8 @@ async def test_research_planner_uses_goal_instruments_as_symbols() -> None:
 
     tasks = result["tasks"]
     assert tasks
-    assert tasks[0]["parameters"]["symbols"] == ["AAPL", "MSFT"]
+    # Deep research runs on the primary ticker only.
+    assert tasks[0]["parameters"]["symbols"] == ["AAPL"]
     assert tasks[0]["parameters"]["ticker"] == "AAPL"
 
 
@@ -269,10 +270,11 @@ async def test_data_fetch_node_fetches_ohlcv_for_all_goal_symbols() -> None:
     finally:
         setattr(resources, "_yf_fetcher", previous)
 
-    assert stub.price_calls == [("AAPL", "5y", "1d"), ("MSFT", "5y", "1d")]
+    # data_fetch_node only fetches the primary ticker.
+    assert stub.price_calls == [("AAPL", "5y", "1d")]
     dataset = result["data_status"]["ohlcv"]
     assert dataset["available"] is True
-    assert set(dataset["by_symbol"].keys()) == {"AAPL", "MSFT"}
+    assert set(dataset["by_symbol"].keys()) == {"AAPL"}
     assert dataset["coverage"] < 0.1
 
 
@@ -368,15 +370,9 @@ async def test_data_fetch_node_persists_multi_symbol_ohlcv_and_fundamentals() ->
         setattr(resources, "_sql_db", previous_sql)
         setattr(resources, "_vector_db", previous_vector)
 
-    assert len(sql_stub.saved_ohlcv) == 2
-    assert [getattr(rows[0], "ticker") for rows in sql_stub.saved_ohlcv] == [
-        "AAPL",
-        "MSFT",
-    ]
-    assert [payload["ticker"] for payload in sql_stub.fundamentals_payloads] == [
-        "AAPL",
-        "MSFT",
-    ]
+    assert len(sql_stub.saved_ohlcv) == 1
+    assert [getattr(rows[0], "ticker") for rows in sql_stub.saved_ohlcv] == ["AAPL"]
+    assert [payload["ticker"] for payload in sql_stub.fundamentals_payloads] == ["AAPL"]
 
 
 @pytest.mark.asyncio
@@ -514,7 +510,7 @@ async def test_data_fetch_node_uses_dataset_specific_coverage_rules(
 
     assert result["data_status"]["news"]["coverage"] == 0.1
     assert result["data_status"]["macro"]["coverage"] == 1.0
-    assert result["data_status"]["fundamentals"]["coverage"] == 0.2833
+    assert result["data_status"]["fundamentals"]["coverage"] == 0.5333
 
 
 @pytest.mark.asyncio

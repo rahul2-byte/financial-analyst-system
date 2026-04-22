@@ -193,9 +193,9 @@ def test_get_news_info_uses_shared_vector_db_resource(monkeypatch):
                 "latest_date": "2026-04-12T18:39:07.970267",
             }
 
-    class _FreshQdrantShouldNotBeUsed:
+    class _FreshPgVectorShouldNotBeUsed:
         def __init__(self, *args, **kwargs):
-            raise AssertionError("Fresh QdrantStorage should not be instantiated")
+            raise AssertionError("Fresh PgVectorStorage should not be instantiated")
 
     class _SharedVector:
         def get_news_info(self, ticker):
@@ -207,7 +207,7 @@ def test_get_news_info_uses_shared_vector_db_resource(monkeypatch):
 
     monkeypatch.setattr(tool_system_module, "resources", _Resources())
     monkeypatch.setattr(
-        "storage.vector.client.QdrantStorage", _FreshQdrantShouldNotBeUsed
+        "storage.vector.client.PgVectorStorage", _FreshPgVectorShouldNotBeUsed
     )
 
     executor = ToolExecutor()

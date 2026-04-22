@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from app.config import settings
 from app.core.contracts.graph_node import finalize_node_output
+from app.core.audit import build_node_audit_entry
 from app.core.intelligence import (
     EvaluationFeedback,
     IntelligenceAction,
@@ -95,6 +95,24 @@ def _memory_store():
 async def evaluator_node(state: dict[str, Any]) -> dict[str, Any]:
     final_output = state.get("final_output", {})
     final_output_json = json.dumps(final_output, ensure_ascii=True, default=str)
+
+    synthesis = state.get("results", {}).get("synthesis", {})
+    major_claims = [
+        c for c in synthesis.get("claims", []) if c.get("importance") == "major"
+    ]
+    verified_claim_ids = set(
+        state.get("claim_verification", {}).get("verified_claim_ids", [])
+    )
+    verified_major_claims = [
+        c.get("claim_id")
+        for c in major_claims
+        if c.get("claim_id") in verified_claim_ids
+    ]
+
+    unresolved_conflicts = state.get("conflict_record", {}).get(
+        "unresolved_claim_pairs", []
+    )
+
     system_prompt = prompt_manager.get_prompt("evaluator.system")
     user_prompt = prompt_manager.get_prompt(
         "evaluator.user",
@@ -102,6 +120,11 @@ async def evaluator_node(state: dict[str, Any]) -> dict[str, Any]:
         final_output_json=final_output_json,
         critic_decision=state.get("critic_decision", "none"),
         validation_passed=state.get("validation_passed", False),
+        verified_major_claims=verified_major_claims,
+        source_diversity_score=float(
+            state.get("coverage_report", {}).get("source_diversity_score", 0.5)
+        ),
+        unresolved_conflicts=unresolved_conflicts,
     )
 
     evaluation: EvaluatorResult | None = None
@@ -172,14 +195,13 @@ async def evaluator_node(state: dict[str, Any]) -> dict[str, Any]:
 
     if decision.action == IntelligenceAction.TERMINATE_SUCCESS:
         payload["next_action"] = "run_router"
-        return finalize_node_output("evaluator_node", payload)
-
-    if decision.action == IntelligenceAction.RETRY:
+    elif decision.action == IntelligenceAction.RETRY:
         payload.update(
             {
                 "next_action": "run_router",
                 "force_replan": True,
                 "tasks": [],
+                "task_contexts": {},
                 "replanned_tasks": _reprioritize_tasks(
                     list(state.get("tasks", [])),
                     decision.error_type,
@@ -192,25 +214,34 @@ async def evaluator_node(state: dict[str, Any]) -> dict[str, Any]:
                 "final_report": None,
             }
         )
-        return finalize_node_output("evaluator_node", payload)
-
-    terminal_output = {
-        "status": "failure",
-        "decision": "no_call",
-        "confidence_score": decision.normalized_score,
-        "final_confidence": decision.normalized_score,
-        "key_drivers": [],
-        "risks": [decision.feedback],
-        "data_used": state.get("data_status", {}),
-        "insufficiency_markers": [decision.error_type],
-        "reasoning": "System intelligence exhausted retry budget after evaluation failure.",
-        "next_action": "complete",
-    }
-    payload.update(
-        {
-            "next_action": "terminate_failure",
-            "final_output": terminal_output,
-            "final_report": json.dumps(terminal_output, ensure_ascii=True),
+    else:
+        terminal_output = {
+            "status": "failure",
+            "decision": "no_call",
+            "confidence_score": decision.normalized_score,
+            "final_confidence": decision.normalized_score,
+            "key_drivers": [],
+            "risks": [decision.feedback],
+            "data_used": state.get("data_status", {}),
+            "insufficiency_markers": [decision.error_type],
+            "reasoning": "System intelligence exhausted retry budget after evaluation failure.",
+            "next_action": "complete",
         }
-    )
+        payload.update(
+            {
+                "next_action": "terminate_failure",
+                "final_output": terminal_output,
+                "final_report": json.dumps(terminal_output, ensure_ascii=True),
+            }
+        )
+
+    audit = build_node_audit_entry("evaluator_node", state, payload)
+    audit["decision_summary"] = {
+        "evaluator_score": decision.normalized_score,
+        "evaluator_error_type": decision.error_type,
+        "intelligence_decision": decision.action.name,
+        "retry_count": decision.retry_count,
+    }
+    payload["data"]["audit"] = audit
+
     return finalize_node_output("evaluator_node", payload)

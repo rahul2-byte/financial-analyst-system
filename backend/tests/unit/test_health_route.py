@@ -46,7 +46,9 @@ async def test_health_route_reports_components_and_both_canaries(monkeypatch) ->
 
 
 @pytest.mark.asyncio
-async def test_health_route_keeps_core_health_green_when_external_canary_degrades(monkeypatch) -> None:
+async def test_health_route_keeps_core_health_green_when_external_canary_degrades(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr("app.routes.health._check_database_readiness", lambda: True)
     monkeypatch.setattr("app.routes.health._check_embedding_readiness", lambda: True)
 
@@ -65,8 +67,12 @@ async def test_health_route_keeps_core_health_green_when_external_canary_degrade
     assert payload["canaries"]["external"]["status"] == "degraded"
 
 
-def test_embedding_readiness_is_false_when_sentence_transformers_is_unavailable(monkeypatch) -> None:
-    monkeypatch.setattr("app.routes.health.embedding_service_module.SentenceTransformer", None)
+def test_embedding_readiness_is_false_when_sentence_transformers_is_unavailable(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "app.routes.health.embedding_service_module.SentenceTransformer", None
+    )
     monkeypatch.setattr("app.routes.health.EmbeddingService._instance", None)
 
     assert health._check_embedding_readiness() is False

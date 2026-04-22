@@ -1,58 +1,91 @@
 from __future__ import annotations
 
+import logging
 from typing import Any
 
 from app.core.contracts.graph_node import finalize_node_output
+from app.core.audit import build_node_audit_entry
 from agents.quality.evidence import (
-    evidence_ref_set,
     evidence_strength_from_outputs,
     mean,
-    signal_from_text,
-    top_metric_drivers,
 )
+
+logger = logging.getLogger(__name__)
 
 
 async def synthesis_node(state: dict[str, Any]) -> dict[str, Any]:
     results = state.get("results", {})
     tool_registry = state.get("tool_registry", [])
-    supported_agents = [
-        "fundamental_analysis",
-        "technical_analysis",
-        "sentiment_analysis",
-        "macro_analysis",
-        "contrarian_analysis",
-    ]
-    signals = [signal_from_text(results.get(agent, "")) for agent in supported_agents]
+    claim_verification = state.get("claim_verification")
 
-    bullish = sum(1 for s in signals if s == "bullish")
-    bearish = sum(1 for s in signals if s == "bearish")
+    verified_claim_ids = set(
+        claim_verification.get("verified_claim_ids", [])
+        if isinstance(claim_verification, dict)
+        else []
+    )
 
-    decision = "watchlist"
-    if bullish > bearish:
-        decision = "buy"
-    elif bearish > bullish:
-        decision = "sell"
+    all_claims = []
+    for agent, result in results.items():
+        if isinstance(result, dict) and "claims" in result:
+            claims = result.get("claims", [])
+            if not isinstance(claims, list):
+                continue
+            for claim in claims:
+                if not isinstance(claim, dict):
+                    continue
+                all_claims.append({**claim, "source_agent": agent})
 
-    evidence_strength = evidence_strength_from_outputs(results, tool_registry)
+    is_provisional_pass = claim_verification is None
+    synthesis_claims = (
+        all_claims
+        if is_provisional_pass
+        else [
+            claim for claim in all_claims if claim.get("claim_id") in verified_claim_ids
+        ]
+    )
+
+    # Heuristic decision based on verified claims' importance and sentiment (if we had sentiment on claims)
+    # For now, let's stick to a simpler aggregation of verified claims.
+
+    major_claims = [c for c in synthesis_claims if c.get("importance") == "major"]
+
+    # Simple decision logic based on major claims presence
+    if major_claims:
+        # If there are major claims, we might have enough to make a call
+        decision = "watchlist"  # Default to watchlist if we can't determine directionality easily
+        # In a real implementation, we'd use an LLM to synthesize the prose or more complex logic
+    else:
+        decision = "no_call"
+
+    state_evidence_strength = state.get("evidence_strength")
+    if state_evidence_strength in (None, 0.0):
+        evidence_strength = evidence_strength_from_outputs(results, tool_registry)
+    else:
+        evidence_strength = float(state_evidence_strength)
+
+    if not is_provisional_pass and not synthesis_claims:
+        evidence_strength = 0.0
+
     synthesis_confidence = mean(
         [0.6 + evidence_strength * 0.2, 0.55 + evidence_strength * 0.2]
     )
 
-    key_drivers = [f"signal_mix={signals}"] + top_metric_drivers(tool_registry)
-    all_refs = sorted(evidence_ref_set(tool_registry))
-    claims = [
-        {
-            "claim_id": "c1",
-            "text": "Cross-agent signal synthesis supports provisional directional thesis.",
-            "evidence_refs": all_refs[: min(3, len(all_refs))],
-        }
-    ]
+    key_drivers = (
+        [c.get("text") for c in major_claims]
+        if major_claims
+        else ["Insufficient verified major claims"]
+    )
 
     synthesis = {
         "decision": decision,
         "key_drivers": key_drivers,
-        "claims": claims,
-        "risks": ["partial evidence", "data freshness constraints"],
+        "claims": synthesis_claims,
+        "risks": [
+            r
+            for res in results.values()
+            if isinstance(res, dict)
+            for r in res.get("risks", [])
+        ],
         "data_used": state.get("data_status", {}),
         "insufficiency_markers": [
             dataset
@@ -61,15 +94,33 @@ async def synthesis_node(state: dict[str, Any]) -> dict[str, Any]:
         ],
     }
 
-    payload = {
+    payload: dict[str, Any] = {
         "results": {**results, "synthesis": synthesis},
         "evidence_strength": evidence_strength,
         "synthesis_confidence": synthesis_confidence,
         "status": "success",
-        "reasoning": "Synthesized agent signals with deterministic confidence weighting.",
+        "reasoning": (
+            f"Synthesized research from {len(synthesis_claims)} provisional claims."
+            if is_provisional_pass
+            else f"Synthesized research from {len(synthesis_claims)} verified claims."
+        ),
         "confidence_score": synthesis_confidence,
         "next_action": "run_critic",
         "data": {"synthesis": synthesis},
         "errors": [],
     }
+
+    audit = build_node_audit_entry("synthesis_node", state, payload)
+    audit["decision_summary"] = {
+        "available_agents": list(results.keys()),
+        "provisional_claim_count": len(synthesis_claims) if is_provisional_pass else 0,
+        "verified_claim_count": len(synthesis_claims) if not is_provisional_pass else 0,
+        "major_claim_count": len(major_claims),
+        "evidence_strength": evidence_strength,
+        "decision": decision,
+        "insufficiency_markers_count": len(synthesis.get("insufficiency_markers", [])),
+        "reasoning": payload["reasoning"],
+    }
+    payload["data"]["audit"] = audit
+
     return finalize_node_output("synthesis_node", payload)

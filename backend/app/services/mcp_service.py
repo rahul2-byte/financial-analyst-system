@@ -1,6 +1,5 @@
-import asyncio
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any
 from contextlib import AsyncExitStack
 
 from mcp import ClientSession, StdioServerParameters
@@ -11,7 +10,7 @@ logger = logging.getLogger(__name__)
 
 
 class MCPManager:
-    """Manages long-lived MCP connections for PostgreSQL and Qdrant."""
+    """Manages long-lived MCP connections for PostgreSQL and pgvector."""
 
     def __init__(self):
         self._exit_stack = AsyncExitStack()
@@ -30,7 +29,7 @@ class MCPManager:
             )
             await self._connect("postgres", pg_params)
 
-            # Note: We can add Qdrant MCP here when ready, or wrap our Qdrant instance.
+            # Note: We can add pgvector MCP here when ready, or wrap our pgvector instance.
             # For now we'll start with postgres to validate.
 
             logger.info("MCP Servers initialized successfully.")

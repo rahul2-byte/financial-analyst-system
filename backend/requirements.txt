@@ -8,7 +8,8 @@ mypy
 ruff
 sqlalchemy>=2.0.0
 sqlmodel
-qdrant-client
+pgvector
+psycopg2-binary
 requests
 python-dotenv
 yfinance

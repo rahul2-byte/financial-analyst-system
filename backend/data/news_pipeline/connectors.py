@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import asyncio
 import logging
 import re
 from datetime import datetime, timedelta, timezone
@@ -181,7 +180,9 @@ class ExaSearchConnector:
             intents=list(QueryTemplateLibrary.keys()),
             time_window_days=time_window_days,
         )
-        start_published_date = datetime.now(timezone.utc) - timedelta(days=time_window_days)
+        start_published_date = datetime.now(timezone.utc) - timedelta(
+            days=time_window_days
+        )
         results: list[RawSearchResult] = []
         seen_result_keys: set[str] = set()
         raw_items_seen = 0
@@ -235,8 +236,10 @@ class ExaSearchConnector:
                         f"{candidate_title} {candidate_snippet}", company
                     ):
                         continue
-                    result_key = article_url if candidate_title == title else (
-                        f"{article_url}#{candidate_title}"
+                    result_key = (
+                        article_url
+                        if candidate_title == title
+                        else (f"{article_url}#{candidate_title}")
                     )
                     if result_key in seen_result_keys:
                         continue

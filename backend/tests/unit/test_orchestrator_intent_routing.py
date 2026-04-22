@@ -2,10 +2,6 @@ import pytest
 
 from app.core.intent_classifier import IntentClassificationResult
 import app.core.orchestrator
-import importlib
-
-importlib.reload(app.core.orchestrator)
-from app.core.orchestrator import PipelineOrchestrator
 
 
 class _FailIfCalledGraph:

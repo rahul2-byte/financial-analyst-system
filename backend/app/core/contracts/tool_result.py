@@ -12,6 +12,12 @@ class ToolResult(BaseModel):
     input_parameters: dict[str, Any] = Field(default_factory=dict)
     output_data: Any
     extracted_metrics: dict[str, float] = Field(default_factory=dict)
+    warnings: list[str] = Field(default_factory=list)
+    partial: bool = False
+    retryable: bool = False
+    trace_id: str | None = None
+    source_count: int = 0
+    quality_score: float | None = None
 
     def auto_extract_metrics(self, max_depth: int = 10) -> None:
         """Flattens nested JSON into extracted_metrics for numeric cross-checking."""

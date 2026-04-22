@@ -3,114 +3,145 @@
 import json
 from typing import Any, Dict
 
-from app.config import settings
 from app.core.graph.graph_state import ResearchGraphState
 from app.core.graph.node_helpers import build_node_error, build_node_success
 from app.core.node_resources import NodeResources
 from app.models.request_models import Message
-from app.core.tools.tool_system import ToolNamespace, tool_executor, tool_registry
+from app.core.research_plan_schemas import AgentExecutionInput
+from app.core.prompts import prompt_manager
 from app.config.constants import MODEL_REASONING
+from app.core.research_schemas import ResearchAgentResult
+from agents.financial.analysis.payload_sanitizer import (
+    drop_findings_without_evidence_ids,
+)
 
 
 async def sentiment_analysis_node(
     state: ResearchGraphState, resources: NodeResources
 ) -> Dict[str, Any]:
-    """Uses LLM and Qdrant MCP for text RAG sentiment analysis."""
+    """Uses LLM to analyze pre-fetched sentiment evidence."""
     current_step = state.get("current_step") or {}
     params = current_step.get("parameters", {})
     if not isinstance(params, dict):
         params = {}
 
-    ticker = params.get("ticker", "UNKNOWN")
-    query = params.get("query", "")
+    execution_input = None
+    if isinstance(params.get("execution_input"), dict):
+        execution_input = AgentExecutionInput.model_validate(params["execution_input"])
 
-    # We provide the LLM with Qdrant MCP tools and ANALYSIS tools
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": t.name,
-                "description": t.description,
-                "parameters": t.parameters,
-            },
-        }
-        for t in tool_registry.get_tools_by_namespace(ToolNamespace.RESEARCH)
-        + tool_registry.get_tools_by_namespace(ToolNamespace.ANALYSIS)
-        if t.name in ["qdrant_search_vector_db", "submit_sentiment"]
-    ]
-
-    messages = [
-        Message(
-            role="system",
-            content="You are a sentiment analyst. You must use the 'qdrant_search_vector_db' tool to fetch recent news, filings, and transcript data for the ticker from the vector database. Analyze the sentiment of the retrieved texts, and submit your findings using the 'submit_sentiment' tool.",
-        ),
-        Message(
-            role="user",
-            content=f"Please analyze the sentiment for {ticker}. User Query Context: {query}",
-        ),
-    ]
-
-    final_result = None
-    response = None
+    evidence_text = ""
+    if execution_input is not None:
+        evidence_text = "\n\n---\n\n".join(
+            [
+                f"Source: {item.source} ({item.published_date})\nContent: {item.text}"
+                for item in execution_input.evidence_bundle.qualitative_inputs
+            ]
+        )
+    else:
+        evidence_text = params.get("text", "") or params.get("raw_data") or ""
 
     try:
-        for _ in range(5):
-            response = await resources.llm_service.generate_message(
-                messages=messages, model=MODEL_REASONING, tools=tools
+        if not evidence_text:
+            agent_result = ResearchAgentResult(
+                agent="sentiment_analysis",
+                status="insufficient_evidence",
+                findings=[],
+                claims=[],
+                missing_evidence=["Sentiment evidence text is missing"],
+                confidence=0.0,
             )
-            messages.append(response)
 
-            if not response.tool_calls:
-                break
-
-            for tool_call in response.tool_calls:
-                func = tool_call.get("function", {})
-                short_name = func.get("name")
-                args = json.loads(func.get("arguments", "{}"))
-
-                if short_name.startswith("qdrant_"):
-                    full_name = f"mcp_qdrant:{short_name.split('qdrant_', 1)[1]}"
-                else:
-                    full_name = f"analysis:{short_name}"
-
-                tool_result = await tool_executor.execute(full_name, args)
-
-                result_content = json.dumps(
-                    tool_result.error if not tool_result.success else tool_result.data,
-                    ensure_ascii=True,
-                    default=str,
-                )
-
-                if short_name == "submit_sentiment":
-                    final_result = args
-                    break
-
-                messages.append(
-                    Message(
-                        role="tool",
-                        content=result_content,
-                        name=short_name,
-                        tool_call_id=tool_call.get("id"),
-                    )
-                )
-
-            if final_result:
-                break
-
-        if not final_result:
-            final_content = response.content if response else "No analysis generated."
-            final_result = {
-                "sentiment": "neutral",
-                "score": 0.5,
-                "summary": final_content,
+            agent_result.audit = {
+                "node": "sentiment_analysis",
+                "ticker": (
+                    params.get("ticker", "UNKNOWN")
+                    if execution_input is None
+                    else execution_input.ticker
+                ),
+                "status": agent_result.status,
+                "confidence": agent_result.confidence,
+                "findings_count": len(agent_result.findings),
+                "claims_count": len(agent_result.claims),
+                "missing_evidence_count": len(agent_result.missing_evidence),
             }
+
+            return build_node_success(
+                agent_output_key="sentiment_analysis",
+                agent_output=agent_result.model_dump(mode="json"),
+                tool_name="analysis:sentiment_analysis_result",
+                input_parameters=params,
+                tool_output=agent_result.model_dump(mode="json"),
+            )
+
+        system_prompt = prompt_manager.get_prompt("sentiment.system")
+        user_prompt = prompt_manager.get_prompt(
+            "sentiment.user_node",
+            text=(
+                evidence_text
+                if isinstance(evidence_text, str)
+                else json.dumps(evidence_text)
+            ),
+        )
+        if execution_input is not None:
+            user_prompt += (
+                f"\n\nResearch objective: {execution_input.objective}"
+                f"\nResearch question: {execution_input.research_question}"
+            )
+
+        response = await resources.llm_service.generate_message(
+            messages=[
+                Message(role="system", content=system_prompt),
+                Message(role="user", content=user_prompt),
+            ],
+            model=MODEL_REASONING,
+            response_format={"type": "json_object"},
+        )
+
+        # Parse the structured JSON response
+        try:
+            raw_payload = (
+                json.loads(response.content)
+                if isinstance(response.content, str)
+                else response.content
+            )
+            raw_payload = drop_findings_without_evidence_ids(raw_payload)
+            # Validate against schema
+            agent_result = ResearchAgentResult.model_validate(
+                {"agent": "sentiment_analysis", **raw_payload}
+            )
+        except Exception:
+            # Fallback for parsing errors
+            agent_result = ResearchAgentResult(
+                agent="sentiment_analysis",
+                status="failed",
+                findings=[],
+                claims=[],
+                missing_evidence=[
+                    "Failed to parse LLM response into ResearchAgentResult"
+                ],
+                confidence=0.0,
+            )
+
+        agent_result.audit = {
+            "node": "sentiment_analysis",
+            "ticker": (
+                params.get("ticker", "UNKNOWN")
+                if execution_input is None
+                else execution_input.ticker
+            ),
+            "status": agent_result.status,
+            "confidence": agent_result.confidence,
+            "findings_count": len(agent_result.findings),
+            "claims_count": len(agent_result.claims),
+            "missing_evidence_count": len(agent_result.missing_evidence),
+        }
 
         return build_node_success(
             agent_output_key="sentiment_analysis",
-            agent_output=final_result,
-            tool_name="analysis:submit_sentiment",
+            agent_output=agent_result.model_dump(mode="json"),
+            tool_name="analysis:sentiment_analysis_result",
             input_parameters=params,
-            tool_output=final_result,
+            tool_output=agent_result.model_dump(mode="json"),
         )
     except Exception as error:
         return build_node_error(error)

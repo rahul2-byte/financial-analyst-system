@@ -29,7 +29,6 @@ class ValidationResult(BaseModel):
 from app.core.prompts import prompt_manager
 from app.models.request_models import Message
 from quant.validators import ReportValidator
-from app.config import settings
 from app.config.constants import MODEL_REASONING
 
 logger = logging.getLogger(__name__)

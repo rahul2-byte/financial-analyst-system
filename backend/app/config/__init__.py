@@ -86,10 +86,6 @@ class AppSettings:
         return self._get_env().DATABASE_URL
 
     @property
-    def QDRANT_URL(self) -> str:
-        return self._get_env().QDRANT_URL
-
-    @property
     def DEFAULT_LLM_MODEL(self) -> str:
         env_override = self._get_env().DEFAULT_LLM_MODEL
         if env_override:

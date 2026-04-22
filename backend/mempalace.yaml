@@ -1,0 +1,65 @@
+wing: backend
+rooms:
+  - name: scripts
+    description: Files from scripts/
+    keywords:
+      - scripts
+      - scripts
+  - name: common
+    description: Files from common/
+    keywords:
+      - common
+      - common
+  - name: storage
+    description: Files from storage/
+    keywords:
+      - storage
+      - storage
+  - name: data
+    description: Files from data/
+    keywords:
+      - data
+      - data
+  - name: quant
+    description: Files from quant/
+    keywords:
+      - quant
+      - quant
+  - name: agents
+    description: Files from agents/
+    keywords:
+      - agents
+      - agents
+  - name: configuration
+    description: Files from config/
+    keywords:
+      - configuration
+      - config
+  - name: app
+    description: Files from app/
+    keywords:
+      - app
+      - app
+  - name: planning
+    description: Files from requirements/
+    keywords:
+      - planning
+      - requirements
+  - name: backend
+    description: Files from models/
+    keywords:
+      - backend
+      - models
+  - name: documentation
+    description: Files from docs/
+    keywords:
+      - documentation
+      - docs
+  - name: costs
+    description: Files from financial/
+    keywords:
+      - costs
+      - financial
+  - name: general
+    description: Files that don't fit other rooms
+    keywords: []

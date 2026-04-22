@@ -22,10 +22,18 @@ class ToolStatus(BaseModel):
 class StreamEvent(BaseModel):
     """
     Structure for SSE events.
-    Aligned with frontend (hooks/useChat.ts and state/chat/messageReducer.ts).
+    Aligned with frontend stream handling.
     """
 
-    type: Literal["text_delta", "error", "done", "tool_status", "status", "chart"]
+    type: Literal[
+        "text_delta",
+        "error",
+        "done",
+        "tool_status",
+        "status",
+        "chart",
+        "final_payload",
+    ]
     content: Optional[str] = None
     message: Optional[str] = None
     tool_id: Optional[str] = None
@@ -40,3 +48,4 @@ class StreamEvent(BaseModel):
     data: Optional[Any] = None
     xAxisKey: Optional[str] = None
     seriesKeys: Optional[List[str]] = None
+    payload: Optional[Any] = None

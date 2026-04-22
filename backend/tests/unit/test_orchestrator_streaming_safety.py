@@ -79,7 +79,7 @@ async def test_does_not_duplicate_when_tokens_already_streamed(monkeypatch) -> N
 
 
 @pytest.mark.asyncio
-async def test_prefers_final_output_over_stale_plan_payload(monkeypatch) -> None:
+async def test_prefers_final_report_over_final_output(monkeypatch) -> None:
     _patch_financial_classifier(monkeypatch)
 
     orchestrator = PipelineOrchestrator()
@@ -90,12 +90,8 @@ async def test_prefers_final_output_over_stale_plan_payload(monkeypatch) -> None
                 "name": "LangGraph",
                 "data": {
                     "output": {
-                        "final_output": "FinalAnswer",
-                        "plan": {
-                            "response_mode": "ask_plan_approval",
-                            "assistant_response": "OldPlanText",
-                            "proposed_plan": "ObsoletePlanField",
-                        },
+                        "final_report": "# Executive Summary\n\nNarrative report",
+                        "final_output": {"status": "success", "decision": "watchlist"},
                     }
                 },
             }
@@ -104,6 +100,10 @@ async def test_prefers_final_output_over_stale_plan_payload(monkeypatch) -> None
 
     events = [event async for event in orchestrator.execute_query("Analyze AAPL")]
     text_payloads = [event.content for event in events if event.type == "text_delta"]
+    payload_events = [
+        event.payload for event in events if event.type == "final_payload"
+    ]
 
-    assert text_payloads == ["FinalAnswer"]
+    assert text_payloads == ["# Executive Summary\n\nNarrative report"]
+    assert payload_events == [{"status": "success", "decision": "watchlist"}]
     assert events[-1].type == "done"

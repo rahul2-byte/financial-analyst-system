@@ -90,10 +90,67 @@ def test_router_blocks_research_when_required_dataset_coverage_is_zero() -> None
     assert decide_next_action(state) == "terminate_insufficient_data"
 
 
-def test_router_terminates_when_confidence_stagnates_under_low_evidence() -> None:
+def test_router_runs_data_fetch_when_data_ready_but_not_materialized() -> None:
+    state = {
+        "iteration_count": 1,
+        "retry_count_by_domain": {},
+        "goal": {"objective": "test", "ticker": "AAPL"},
+        "timeframe_policy": {
+            "ohlcv": {"minimum_coverage_ratio": 0.8},
+            "news": {"minimum_coverage_ratio": 0.5},
+            "fundamentals": {"minimum_coverage_ratio": 0.75},
+            "macro": {"minimum_coverage_ratio": 1.0},
+        },
+        "data_status": {
+            "ohlcv": {"available": True, "freshness": 1.0, "coverage": 1.0},
+            "news": {"available": True, "freshness": 1.0, "coverage": 1.0},
+            "fundamentals": {"available": True, "freshness": 1.0, "coverage": 1.0},
+            "macro": {"available": True, "freshness": 1.0, "coverage": 1.0},
+        },
+        "fetched_data": {},
+        "tasks": [],
+        "results": {},
+        "critic_decision": None,
+        "confidence_score": 0.3,
+        "evidence_strength": 0.3,
+        "validation_passed": False,
+    }
+    assert decide_next_action(state) == "run_data_fetch"
+
+
+def test_router_treats_none_synthesis_as_not_ready() -> None:
+    state = {
+        "iteration_count": 1,
+        "retry_count_by_domain": {},
+        "goal": {"objective": "test", "ticker": "AAPL"},
+        "data_status": {
+            "ohlcv": {"available": True, "freshness": 1.0, "coverage": 1.0},
+            "news": {"available": True, "freshness": 1.0, "coverage": 1.0},
+            "fundamentals": {"available": True, "freshness": 1.0, "coverage": 1.0},
+            "macro": {"available": True, "freshness": 1.0, "coverage": 1.0},
+        },
+        "fetched_data": {
+            "ohlcv": {"by_symbol": {"AAPL": {"data": [1]}}},
+            "fundamentals": {"by_symbol": {"AAPL": {"marketCap": 1}}},
+            "macro": {"NIFTY_50": 1},
+            "news": [{"title": "x"}],
+        },
+        "tasks": [{"task_id": "fundamental_analysis"}],
+        "task_contexts": {},
+        "results": {"synthesis": None},
+        "critic_decision": None,
+        "confidence_score": 0.3,
+        "evidence_strength": 0.3,
+        "validation_passed": False,
+    }
+
+    assert decide_next_action(state) == "run_research_context"
+
+
+def test_router_relies_on_critic_owned_retries_under_low_evidence() -> None:
     state = {
         "iteration_count": 6,
-        "retry_count_by_domain": {"research": 2},
+        "retry_count_by_domain": {"critic": 2},
         "goal": {"objective": "test"},
         "data_status": {
             "ohlcv": {"available": True, "freshness": 0.9},
@@ -110,15 +167,14 @@ def test_router_terminates_when_confidence_stagnates_under_low_evidence() -> Non
         "validation_passed": False,
     }
 
-    assert decide_next_action(state) == "terminate_insufficient_data"
+    assert decide_next_action(state) == "run_research_plan"
 
 
-def test_router_prefers_progress_when_execution_budget_is_exhausted() -> None:
+def test_router_terminates_low_confidence_when_critic_retry_limit_is_hit() -> None:
     state = {
-        "iteration_count": 2,
-        "retry_count_by_domain": {},
+        "iteration_count": 4,
+        "retry_count_by_domain": {"critic": 3},
         "goal": {"objective": "test"},
-        "execution_budget": {"remaining": 0.0},
         "data_status": {
             "ohlcv": {"available": True, "freshness": 0.9},
             "news": {"available": True, "freshness": 0.9},
@@ -126,14 +182,44 @@ def test_router_prefers_progress_when_execution_budget_is_exhausted() -> None:
             "macro": {"available": True, "freshness": 0.9},
         },
         "tasks": [{"task_id": "t1"}],
-        "results": {},
-        "critic_decision": None,
-        "confidence_score": 0.5,
-        "evidence_strength": 0.5,
+        "results": {"synthesis": {"decision": "watchlist"}},
+        "critic_decision": "retry",
+        "confidence_score": 0.41,
+        "evidence_strength": 0.2,
         "validation_passed": False,
     }
 
-    assert decide_next_action(state) == "run_research_execution"
+    assert decide_next_action(state) == "terminate_low_confidence"
+
+
+def test_router_terminates_low_confidence_for_repeated_research_plan_loop() -> None:
+    state = {
+        "iteration_count": 8,
+        "retry_count_by_domain": {},
+        "goal": {"objective": "test"},
+        "data_status": {
+            "ohlcv": {"available": True, "freshness": 1.0, "coverage": 1.0},
+            "news": {"available": True, "freshness": 1.0, "coverage": 1.0},
+            "fundamentals": {"available": True, "freshness": 1.0, "coverage": 1.0},
+            "macro": {"available": True, "freshness": 1.0, "coverage": 1.0},
+        },
+        "tasks": [{"task_id": "t1"}],
+        "task_contexts": {"t1": {"summary": "ready"}},
+        "fetched_data": {
+            "ohlcv": {"by_symbol": {"AAPL": {"data": [{"Date": "2026-04-09"}]}}},
+            "fundamentals": {"by_symbol": {"AAPL": {"marketCap": 10}}},
+            "news": [{"title": "x", "summary": "y", "content": "z"}],
+            "macro": {"NIFTY_50": 22000.0},
+        },
+        "results": {"synthesis": {"decision": "watchlist"}},
+        "critic_decision": "retry",
+        "confidence_score": 0.5,
+        "evidence_strength": 0.2,
+        "validation_passed": False,
+        "consecutive_research_plan_routes": 3,
+    }
+
+    assert decide_next_action(state) == "terminate_low_confidence"
 
 
 def test_router_reuses_cached_research_results_before_reexecution() -> None:
@@ -216,7 +302,7 @@ def test_router_requires_evaluator_pass_before_terminating_success() -> None:
 def test_router_honors_critic_terminal_failure() -> None:
     state = {
         "iteration_count": 2,
-        "retry_count_by_domain": {"research": 3},
+        "retry_count_by_domain": {"critic": 3},
         "goal": {"objective": "test"},
         "data_status": {
             "ohlcv": {"available": True, "freshness": 0.9},
@@ -235,12 +321,13 @@ def test_router_honors_critic_terminal_failure() -> None:
     assert decide_next_action(state) == "terminate_failure"
 
 
-def test_router_prefers_progress_over_budget_termination_when_tasks_exist() -> None:
+def test_router_prefers_progress_when_retry_limit_is_hit_but_research_can_still_advance() -> (
+    None
+):
     state = {
         "iteration_count": 2,
-        "retry_count_by_domain": {"research": 3},
+        "retry_count_by_domain": {"critic": 3},
         "goal": {"objective": "test"},
-        "execution_budget": {"remaining": 0.0},
         "data_status": {
             "ohlcv": {"available": True, "freshness": 0.9},
             "news": {"available": True, "freshness": 0.9},
@@ -252,6 +339,35 @@ def test_router_prefers_progress_over_budget_termination_when_tasks_exist() -> N
         "critic_decision": None,
         "confidence_score": 0.2,
         "evidence_strength": 0.2,
+        "validation_passed": False,
+    }
+
+    assert decide_next_action(state) == "run_data_fetch"
+
+
+def test_router_runs_execution_after_task_contexts_are_ready() -> None:
+    state = {
+        "iteration_count": 2,
+        "retry_count_by_domain": {},
+        "goal": {"objective": "test"},
+        "data_status": {
+            "ohlcv": {"available": True, "freshness": 0.9, "coverage": 1.0},
+            "news": {"available": True, "freshness": 0.9, "coverage": 1.0},
+            "fundamentals": {"available": True, "freshness": 0.9, "coverage": 1.0},
+            "macro": {"available": True, "freshness": 0.9, "coverage": 1.0},
+        },
+        "tasks": [{"task_id": "t1"}],
+        "task_contexts": {"t1": {"agent": "fundamental_analysis"}},
+        "fetched_data": {
+            "ohlcv": {"by_symbol": {"AAPL": {"data": [{"Date": "2026-04-09"}]}}},
+            "fundamentals": {"by_symbol": {"AAPL": {"marketCap": 10}}},
+            "news": [{"title": "x", "summary": "y", "content": "z"}],
+            "macro": {"NIFTY_50": 22000.0},
+        },
+        "results": {},
+        "critic_decision": None,
+        "confidence_score": 0.5,
+        "evidence_strength": 0.5,
         "validation_passed": False,
     }
 

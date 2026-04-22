@@ -41,15 +41,17 @@ def test_build_graph_conditional_edges_match_route_contracts(monkeypatch):
         "run_data_plan",
         "run_data_fetch",
         "run_research_plan",
+        "run_research_context",
         "run_research_execution",
         "run_synthesis",
         "run_critic",
         "run_conflict_resolution",
         "run_validation",
+        "run_evaluator",
         "terminate_success",
         "terminate_awaiting_input",
         "terminate_insufficient_data",
-        "terminate_budget_exceeded",
+        "terminate_low_confidence",
         "terminate_failure",
     }
     assert set(recorder.conditional_edges["synthesis_node"].keys()) == {"run_critic"}
@@ -83,6 +85,9 @@ def test_build_graph_conditional_edges_match_route_contracts(monkeypatch):
     assert set(recorder.conditional_edges["research_plan_node"].keys()) == {
         "run_router",
     }
+    assert set(recorder.conditional_edges["research_context_node"].keys()) == {
+        "run_router",
+    }
     assert set(recorder.conditional_edges["data_plan_node"].keys()) == {
         "run_data_fetch",
     }
@@ -100,7 +105,7 @@ def test_router_has_terminal_paths(monkeypatch):
         "terminate_success",
         "terminate_awaiting_input",
         "terminate_insufficient_data",
-        "terminate_budget_exceeded",
+        "terminate_low_confidence",
         "terminate_failure",
     }
     assert terminal_routes.issubset(
@@ -134,13 +139,16 @@ def test_router_driven_nodes_return_to_router(monkeypatch):
         "goal_node",
         "data_fetch_node",
         "research_plan_node",
+        "research_context_node",
         "research_execution_node",
         "critic_node",
-        "evaluator_node",
     ]
     for node in return_to_router_nodes:
         assert recorder.conditional_edges[node] == {"run_router": "router_node"}
 
+    # Evaluator and Validation have more complex routing
+    assert "run_router" in recorder.conditional_edges["evaluator_node"]
+    assert "terminate_failure" in recorder.conditional_edges["evaluator_node"]
     assert recorder.conditional_edges["validation_node"] == {
         "run_evaluator": "evaluator_node",
         "terminate_failure": "__end__",
@@ -171,6 +179,19 @@ def test_router_maps_research_execution(monkeypatch):
     assert (
         recorder.conditional_edges["router_node"]["run_research_execution"]
         == "research_execution_node"
+    )
+
+
+def test_router_maps_research_context(monkeypatch):
+    recorder = _RecordingGraph()
+
+    monkeypatch.setattr(graph_builder, "StateGraph", lambda _: recorder)
+
+    graph_builder.build_graph()
+
+    assert (
+        recorder.conditional_edges["router_node"]["run_research_context"]
+        == "research_context_node"
     )
 
 
@@ -353,6 +374,19 @@ def test_runtime_graph_builder_imports_do_not_load_legacy_graph_modules() -> Non
             if module is not None:
                 sys.modules[module_name] = module
 
+            # `import_module()` also attaches submodules onto their parent packages.
+            # Restoring `sys.modules` alone can leave those package attributes pointing at
+            # the transient cold-import modules, which can poison later tests.
+            parent_name, _, child_name = module_name.rpartition(".")
+            parent_module = sys.modules.get(parent_name) if parent_name else None
+            if parent_module is None or not child_name:
+                continue
+            if module is None:
+                if hasattr(parent_module, child_name):
+                    delattr(parent_module, child_name)
+            else:
+                setattr(parent_module, child_name, module)
+
 
 def test_router_maps_data_plan(monkeypatch):
     recorder = _RecordingGraph()
@@ -404,7 +438,7 @@ def test_router_end_mappings(monkeypatch):
         == "__end__"
     )
     assert (
-        recorder.conditional_edges["router_node"]["terminate_budget_exceeded"]
+        recorder.conditional_edges["router_node"]["terminate_low_confidence"]
         == "__end__"
     )
     assert recorder.conditional_edges["router_node"]["terminate_failure"] == "__end__"
@@ -421,6 +455,7 @@ def test_router_to_router_loop_exists(monkeypatch):
         "goal_node",
         "data_fetch_node",
         "research_plan_node",
+        "research_context_node",
         "research_execution_node",
         "critic_node",
         "evaluator_node",
@@ -501,6 +536,15 @@ def test_research_planner_returns_router(monkeypatch):
     }
 
 
+def test_research_context_returns_router(monkeypatch):
+    recorder = _RecordingGraph()
+    monkeypatch.setattr(graph_builder, "StateGraph", lambda _: recorder)
+    graph_builder.build_graph()
+    assert recorder.conditional_edges["research_context_node"] == {
+        "run_router": "router_node"
+    }
+
+
 def test_data_planner_returns_data_fetch(monkeypatch):
     recorder = _RecordingGraph()
     monkeypatch.setattr(graph_builder, "StateGraph", lambda _: recorder)
@@ -549,6 +593,7 @@ def test_router_has_all_expected_nodes(monkeypatch):
         "data_plan_node",
         "data_fetch_node",
         "research_plan_node",
+        "research_context_node",
         "research_execution_node",
         "synthesis_node",
         "critic_node",
@@ -571,7 +616,7 @@ def test_router_terminal_values_map_to_end(monkeypatch):
         "terminate_success",
         "terminate_awaiting_input",
         "terminate_insufficient_data",
-        "terminate_budget_exceeded",
+        "terminate_low_confidence",
         "terminate_failure",
     ]:
         assert values[key] == "__end__"
@@ -631,6 +676,10 @@ def test_router_has_research_routes(monkeypatch):
         == "research_plan_node"
     )
     assert (
+        recorder.conditional_edges["router_node"]["run_research_context"]
+        == "research_context_node"
+    )
+    assert (
         recorder.conditional_edges["router_node"]["run_research_execution"]
         == "research_execution_node"
     )
@@ -665,6 +714,6 @@ def test_router_terminal_set(monkeypatch):
         "terminate_success",
         "terminate_awaiting_input",
         "terminate_insufficient_data",
-        "terminate_budget_exceeded",
+        "terminate_low_confidence",
         "terminate_failure",
     }.issubset(keys)

@@ -1,4 +1,3 @@
-import pytest
 from data.processors.text import is_article_relevant
 
 

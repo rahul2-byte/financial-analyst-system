@@ -20,11 +20,14 @@ export const MessageItem = React.memo(React.forwardRef<HTMLDivElement, MessageIt
     const isUser = message.role === "user";
     const shouldReduceMotion = useReducedMotion();
     const [isExpanded, setIsExpanded] = useState(!!message.isStreaming);
+    const [isStructuredExpanded, setIsStructuredExpanded] = useState(false);
     const isReasoningExpanded = Boolean(message.isStreaming) || isExpanded;
 
     const reasoningSteps = message.reasoning_steps || [];
     const hasReasoning = reasoningSteps.length > 0;
+    const hasStructuredOutput = !isUser && message.structured_output !== undefined;
     const reasoningId = `reasoning-${message.id}`;
+    const structuredId = `structured-${message.id}`;
 
     const getAnimationProps = (delay: number): HTMLMotionProps<"div"> => {
       if (shouldReduceMotion) return {};
@@ -50,12 +53,10 @@ export const MessageItem = React.memo(React.forwardRef<HTMLDivElement, MessageIt
         "flex w-full max-w-3xl gap-4",
         isUser ? "justify-end" : "justify-start"
       )}>
-        {/* Message Content Area */}
         <div className={cn(
           "flex flex-col gap-2 w-full",
           isUser ? "items-end max-w-[80%]" : "items-start"
         )}>
-          {/* Label & Time */}
           <div className={cn(
             "flex items-center gap-2 mb-1",
             isUser ? "flex-row-reverse" : "flex-row"
@@ -68,23 +69,22 @@ export const MessageItem = React.memo(React.forwardRef<HTMLDivElement, MessageIt
             </span>
           </div>
 
-          {/* Bubble / Content */}
           <div className={cn(
             "relative w-full transition-all duration-200",
-            isUser 
-              ? "bg-bg-secondary/30 text-text-primary px-4 py-3 rounded-2xl border border-border-subtle/50 text-right italic" 
+            isUser
+              ? "bg-bg-secondary/30 text-text-primary px-4 py-3 rounded-2xl border border-border-subtle/50 text-right italic"
               : "bg-transparent text-text-primary px-0 py-0"
           )}>
             {!isUser && hasReasoning && (
               <div className="mb-4">
-                <button 
+                <button
                   onClick={() => setIsExpanded(!isExpanded)}
                   aria-expanded={isReasoningExpanded}
                   aria-controls={reasoningId}
                   className={cn(
                     "flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all duration-200 group",
-                    isReasoningExpanded 
-                      ? "bg-bg-secondary/50 border-border-subtle/30" 
+                    isReasoningExpanded
+                      ? "bg-bg-secondary/50 border-border-subtle/30"
                       : "bg-bg-secondary/20 border-border-subtle/10 hover:bg-bg-secondary/40"
                   )}
                 >
@@ -97,11 +97,11 @@ export const MessageItem = React.memo(React.forwardRef<HTMLDivElement, MessageIt
                       <Loader2 className="absolute h-3.5 w-3.5 animate-spin text-accent-primary/50 scale-125" />
                     )}
                   </div>
-                  
+
                   <span className="text-xs font-semibold text-text-secondary tracking-tight">
                     {message.isStreaming ? "Reasoning..." : "Methodology"}
                   </span>
-                  
+
                   <div className="flex items-center gap-1.5 ml-1">
                     <span className="h-1 w-1 rounded-full bg-text-secondary/20" />
                     <span className="text-[10px] font-medium text-text-secondary/40">
@@ -109,10 +109,10 @@ export const MessageItem = React.memo(React.forwardRef<HTMLDivElement, MessageIt
                     </span>
                   </div>
 
-                    <ChevronDown className={cn(
-                      "h-3.5 w-3.5 text-text-secondary opacity-40 transition-transform duration-300 ml-1 group-hover:opacity-80",
-                      isReasoningExpanded && "rotate-180"
-                    )} />
+                  <ChevronDown className={cn(
+                    "h-3.5 w-3.5 text-text-secondary opacity-40 transition-transform duration-300 ml-1 group-hover:opacity-80",
+                    isReasoningExpanded && "rotate-180"
+                  )} />
                 </button>
 
                 <AnimatePresence>
@@ -138,18 +138,55 @@ export const MessageItem = React.memo(React.forwardRef<HTMLDivElement, MessageIt
               <MarkdownRenderer content={message.content} isStreaming={message.isStreaming} />
             </motion.div>
 
+            {!isUser && hasStructuredOutput && (
+              <motion.div className="mt-5" {...getAnimationProps(0.05)}>
+                <button
+                  onClick={() => setIsStructuredExpanded(!isStructuredExpanded)}
+                  aria-expanded={isStructuredExpanded}
+                  aria-controls={structuredId}
+                  className={cn(
+                    "flex items-center gap-2 px-3 py-1.5 rounded-lg border transition-all duration-200 group text-xs font-semibold",
+                    isStructuredExpanded
+                      ? "bg-bg-secondary/50 border-border-subtle/30 text-text-secondary"
+                      : "bg-bg-secondary/20 border-border-subtle/10 text-text-secondary hover:bg-bg-secondary/40"
+                  )}
+                >
+                  <span>Structured Output</span>
+                  <ChevronDown className={cn(
+                    "h-3.5 w-3.5 opacity-60 transition-transform duration-300",
+                    isStructuredExpanded && "rotate-180"
+                  )} />
+                </button>
+                <AnimatePresence>
+                  {isStructuredExpanded && (
+                    <motion.div
+                      id={structuredId}
+                      initial={{ height: 0, opacity: 0 }}
+                      animate={{ height: "auto", opacity: 1 }}
+                      exit={{ height: 0, opacity: 0 }}
+                      transition={{ duration: 0.25, ease: [0.23, 1, 0.32, 1] }}
+                      className="overflow-hidden"
+                    >
+                      <pre className="mt-3 overflow-x-auto rounded-xl border border-border-subtle/20 bg-bg-secondary/20 p-4 text-xs leading-6 text-text-secondary whitespace-pre-wrap break-words">
+                        {JSON.stringify(message.structured_output, null, 2)}
+                      </pre>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </motion.div>
+            )}
+
             <motion.div {...getAnimationProps(0.1)}>
-              <MessageActions 
-                message={message} 
-                isUser={isUser} 
-                isStreaming={!!message.isStreaming} 
+              <MessageActions
+                message={message}
+                isUser={isUser}
+                isStreaming={!!message.isStreaming}
               />
             </motion.div>
           </div>
 
-          {/* Charts */}
           {message.charts && message.charts.length > 0 && (
-            <motion.div 
+            <motion.div
               className="mt-6 flex flex-col gap-8 w-full"
               {...getAnimationProps(0.2)}
             >

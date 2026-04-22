@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -58,3 +58,4 @@ class ResearchAgentResult(BaseModel):
     missing_evidence: list[str] = Field(default_factory=list)
     citations: list[CitationRecord] = Field(default_factory=list)
     confidence: float = Field(ge=0.0, le=1.0)
+    audit: dict[str, Any] = Field(default_factory=dict)

@@ -1,6 +1,6 @@
 import pytest
 
-from agents.quality.nodes import critic_node
+from agents.quality.critic_node import critic_node
 
 
 @pytest.mark.asyncio

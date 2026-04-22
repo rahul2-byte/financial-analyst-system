@@ -3,116 +3,133 @@
 import json
 from typing import Any, Dict
 
-from app.config import settings
 from app.core.graph.graph_state import ResearchGraphState
 from app.core.graph.node_helpers import build_node_error, build_node_success
 from app.core.node_resources import NodeResources
 from app.models.request_models import Message
-from app.core.tools.tool_system import ToolNamespace, tool_executor, tool_registry
+from app.core.research_plan_schemas import AgentExecutionInput
+from app.core.prompts import prompt_manager
 from app.config.constants import MODEL_REASONING
+from app.core.research_schemas import ResearchAgentResult
+from agents.financial.analysis.payload_sanitizer import (
+    drop_findings_without_evidence_ids,
+)
 
 
 async def fundamental_analysis_node(
     state: ResearchGraphState, resources: NodeResources
 ) -> Dict[str, Any]:
-    """Uses LLM to fetch data via MCP and run FundamentalScanner."""
+    """Uses LLM to analyze pre-fetched fundamental data."""
     current_step = state.get("current_step") or {}
     params = current_step.get("parameters", {})
     if not isinstance(params, dict):
         params = {}
 
-    ticker = params.get("ticker", "UNKNOWN")
+    execution_input = None
+    if isinstance(params.get("execution_input"), dict):
+        execution_input = AgentExecutionInput.model_validate(params["execution_input"])
 
-    # We provide the LLM with MCP tools (from RESEARCH namespace) and ANALYSIS tools
-    tools = [
-        {
-            "type": "function",
-            "function": {
-                "name": t.name,
-                "description": t.description,
-                "parameters": t.parameters,
-            },
-        }
-        for t in tool_registry.get_tools_by_namespace(ToolNamespace.RESEARCH)
-        + tool_registry.get_tools_by_namespace(ToolNamespace.ANALYSIS)
-        if t.name
-        in ["postgres_query_database", "run_fundamental_scan", "submit_thesis"]
-    ]
-
-    messages = [
-        Message(
-            role="system",
-            content="You are a fundamental financial analyst. Your goal is to analyze a company's valuation and health. You must first query the 'company_fundamentals' table in the PostgreSQL database using the 'postgres_query_database' tool. Then, pass the raw JSON data you retrieve into the 'run_fundamental_scan' tool. Finally, synthesize the results and submit your thesis using the 'submit_thesis' tool.",
-        ),
-        Message(role="user", content=f"Please analyze the fundamentals for {ticker}."),
-    ]
-
-    final_result = None
-    tool_outputs = []
-    response = None
+    ticker = (
+        execution_input.ticker
+        if execution_input is not None and execution_input.ticker
+        else params.get("ticker", "UNKNOWN")
+    )
+    raw_data = (
+        execution_input.evidence_bundle.structured_inputs.get("fundamentals", {})
+        if execution_input is not None
+        else params.get("raw_data")
+        or state.get("fetched_data", {}).get("fundamentals", {})
+    )
 
     try:
-        for _ in range(5):  # Max 5 steps
-            response = await resources.llm_service.generate_message(
-                messages=messages, model=MODEL_REASONING, tools=tools
+        if not raw_data:
+            agent_result = ResearchAgentResult(
+                agent="fundamental_analysis",
+                status="insufficient_evidence",
+                findings=[],
+                claims=[],
+                missing_evidence=["Raw fundamental data is missing"],
+                confidence=0.0,
             )
-            messages.append(response)
 
-            if not response.tool_calls:
-                # Agent stopped calling tools, use final response
-                break
-
-            for tool_call in response.tool_calls:
-                func = tool_call.get("function", {})
-                short_name = func.get("name")
-                args = json.loads(func.get("arguments", "{}"))
-
-                # Resolve full tool name (postgres MCP or ANALYSIS)
-                if short_name.startswith("postgres_"):
-                    full_name = f"mcp_postgres:{short_name.split('postgres_', 1)[1]}"
-                else:
-                    full_name = f"analysis:{short_name}"
-
-                tool_result = await tool_executor.execute(full_name, args)
-
-                result_content = json.dumps(
-                    tool_result.error if not tool_result.success else tool_result.data,
-                    ensure_ascii=True,
-                    default=str,
-                )
-
-                tool_outputs.append(tool_result)
-
-                if short_name == "submit_thesis":
-                    final_result = args
-                    break
-
-                messages.append(
-                    Message(
-                        role="tool",
-                        content=result_content,
-                        name=short_name,
-                        tool_call_id=tool_call.get("id"),
-                    )
-                )
-
-            if final_result:
-                break
-
-        if not final_result:
-            final_content = response.content if response else "No analysis generated."
-            final_result = {
-                "investment_thesis": final_content,
-                "key_findings": [],
-                "confidence_score": 0.5,
+            agent_result.audit = {
+                "node": "fundamental_analysis",
+                "ticker": ticker,
+                "status": agent_result.status,
+                "confidence": agent_result.confidence,
+                "findings_count": len(agent_result.findings),
+                "claims_count": len(agent_result.claims),
+                "missing_evidence_count": len(agent_result.missing_evidence),
             }
+
+            return build_node_success(
+                agent_output_key="fundamental_analysis",
+                agent_output=agent_result.model_dump(mode="json"),
+                tool_name="analysis:fundamental_analysis_result",
+                input_parameters=params,
+                tool_output=agent_result.model_dump(mode="json"),
+            )
+
+        system_prompt = prompt_manager.get_prompt("fundamental.system")
+        user_prompt = prompt_manager.get_prompt(
+            "fundamental.user_node", ticker=ticker, data=json.dumps(raw_data, indent=2)
+        )
+        if execution_input is not None:
+            user_prompt += (
+                f"\n\nResearch objective: {execution_input.objective}"
+                f"\nResearch question: {execution_input.research_question}"
+            )
+
+        response = await resources.llm_service.generate_message(
+            messages=[
+                Message(role="system", content=system_prompt),
+                Message(role="user", content=user_prompt),
+            ],
+            model=MODEL_REASONING,
+            response_format={"type": "json_object"},
+        )
+
+        # Parse the structured JSON response
+        try:
+            raw_payload = (
+                json.loads(response.content)
+                if isinstance(response.content, str)
+                else response.content
+            )
+            raw_payload = drop_findings_without_evidence_ids(raw_payload)
+            # Validate against schema
+            agent_result = ResearchAgentResult.model_validate(
+                {"agent": "fundamental_analysis", **raw_payload}
+            )
+        except Exception:
+            # Fallback for parsing errors
+            agent_result = ResearchAgentResult(
+                agent="fundamental_analysis",
+                status="failed",
+                findings=[],
+                claims=[],
+                missing_evidence=[
+                    "Failed to parse LLM response into ResearchAgentResult"
+                ],
+                confidence=0.0,
+            )
+
+        agent_result.audit = {
+            "node": "fundamental_analysis",
+            "ticker": ticker,
+            "status": agent_result.status,
+            "confidence": agent_result.confidence,
+            "findings_count": len(agent_result.findings),
+            "claims_count": len(agent_result.claims),
+            "missing_evidence_count": len(agent_result.missing_evidence),
+        }
 
         return build_node_success(
             agent_output_key="fundamental_analysis",
-            agent_output=final_result,
-            tool_name="analysis:submit_thesis",
+            agent_output=agent_result.model_dump(mode="json"),
+            tool_name="analysis:fundamental_analysis_result",
             input_parameters=params,
-            tool_output=final_result,
+            tool_output=agent_result.model_dump(mode="json"),
         )
     except Exception as error:
         return build_node_error(error)

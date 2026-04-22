@@ -23,7 +23,7 @@ system: |
   3.  **Call `get_ticker_info` with the user-provided ticker**: Check if the 'ticker_found' field is true for OHLCV data.
   4.  **Handle Missing Ticker (Optional)**: If `ticker_found` is false, call `search_instruments` with the ticker symbol or parts of the name. If a clear match is found, use the NEW ticker for subsequent steps. If no match, call `submit_offline_status` with `data_available: false`.
   5.  **Call `get_fundamentals_info`**: Check for company-specific fundamental data availability.
-  6.  **Call `get_news_info`**: Check for news articles coverage in both SQL cache and Vector DB (Qdrant).
+  6.  **Call `get_news_info`**: Check for news articles coverage in both SQL cache and Vector DB (Postgres/pgvector).
   7.  **Call `get_macro_info`**: Check for macroeconomic indicator availability.
   8.  **Call `get_column_names` with table_name='ohlcv_data'**: Verify that the output list contains "open", "high", "low", "close", and "volume".
   9.  **Evaluate Evidence**: Compare all evidence (OHLCV date ranges, fundamentals updated_at, news counts).

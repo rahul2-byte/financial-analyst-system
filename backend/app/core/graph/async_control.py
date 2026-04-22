@@ -7,8 +7,8 @@ from typing import Any
 
 async def run_parallel_with_timeout(
     coroutines: list[Coroutine[Any, Any, Any]],
-    task_timeout_s: float,
-    stage_timeout_s: float,
+    task_timeout_s: float | None,
+    stage_timeout_s: float | None,
 ) -> tuple[list[Any | None], list[str]]:
     async def _run_one(
         index: int, coroutine: Coroutine[Any, Any, Any]

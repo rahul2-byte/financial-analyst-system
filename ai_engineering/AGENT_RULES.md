@@ -19,7 +19,7 @@ SentimentAgent
 
 RetrievalAgent
 
-- Uses embedding model + Qdrant
+- Uses embedding model + pgvector
 - Only retrieves context
 
 ResearchAgent

@@ -176,7 +176,31 @@ def derive_fundamental_schema_coverage(payload: Any) -> float:
 
 
 def extract_goal_symbols(goal: dict[str, Any]) -> list[str]:
-    symbols: list[str] = []
+    """Extract the *single* primary symbol for this research run.
+
+    The current research pipeline is single-ticker. Even if the goal contains
+    multiple instruments (e.g., a comparison query), downstream orchestration
+    should operate on one primary symbol.
+
+    Priority order (legacy-compatible intent):
+    1. `goal['ticker']` (explicit primary)
+    2. `goal['primary_instrument']['trading_symbol']`
+    3. First `trading_symbol` found in `goal['instruments']`
+
+    Returns:
+    - `[SYMBOL]` when a primary symbol can be determined
+    - `[]` when no symbol is present
+    """
+
+    ticker = goal.get("ticker")
+    if isinstance(ticker, str) and ticker.strip():
+        return [ticker.strip().upper()]
+
+    primary = goal.get("primary_instrument")
+    if isinstance(primary, dict):
+        primary_symbol = primary.get("trading_symbol")
+        if isinstance(primary_symbol, str) and primary_symbol.strip():
+            return [primary_symbol.strip().upper()]
 
     instruments = goal.get("instruments", [])
     if isinstance(instruments, list):
@@ -185,25 +209,23 @@ def extract_goal_symbols(goal: dict[str, Any]) -> list[str]:
                 continue
             symbol = instrument.get("trading_symbol")
             if isinstance(symbol, str) and symbol.strip():
-                normalized = symbol.strip().upper()
-                if normalized not in symbols:
-                    symbols.append(normalized)
+                return [symbol.strip().upper()]
 
-    primary = goal.get("primary_instrument")
-    if isinstance(primary, dict):
-        primary_symbol = primary.get("trading_symbol")
-        if isinstance(primary_symbol, str) and primary_symbol.strip():
-            normalized_primary = primary_symbol.strip().upper()
-            if normalized_primary not in symbols:
-                symbols.insert(0, normalized_primary)
+    return []
 
-    ticker = goal.get("ticker")
-    if isinstance(ticker, str) and ticker.strip():
-        normalized_ticker = ticker.strip().upper()
-        if normalized_ticker not in symbols:
-            symbols.insert(0, normalized_ticker)
 
-    return symbols
+def _derive_required_dimensions(hypotheses: list[dict[str, Any]]) -> list[str]:
+    """Derive required research dimensions from hypotheses."""
+    dimensions = []
+    for hypothesis in hypotheses:
+        statement = str(hypothesis.get("statement", "")).lower()
+        if "fundamental" in statement or "earnings" in statement:
+            dimensions.extend(["profitability", "valuation", "balance_sheet"])
+        if "macro" in statement:
+            dimensions.append("macro_regime")
+        if "sentiment" in statement or "news" in statement:
+            dimensions.append("qualitative_sentiment")
+    return sorted(set(dimensions))
 
 
 DEFAULT_TASK_TEMPLATES: list[dict[str, str]] = [

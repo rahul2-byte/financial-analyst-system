@@ -39,9 +39,9 @@ class NodeResources:
     @property
     def vector_db(self):
         if self._vector_db is None:
-            from storage.vector.client import QdrantStorage
+            from storage.vector.client import PgVectorStorage
 
-            self._vector_db = QdrantStorage()
+            self._vector_db = PgVectorStorage()
         return self._vector_db
 
     @property
@@ -51,5 +51,6 @@ class NodeResources:
 
             self._yf_fetcher = YFinanceFetcher()
         return self._yf_fetcher
+
 
 resources = NodeResources()

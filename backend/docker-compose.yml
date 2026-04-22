@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: docker.io/library/postgres:15
+    image: docker.io/pgvector/pgvector:pg15
     container_name: fin_postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-fin_user}
@@ -14,19 +14,6 @@ services:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fin_user} -d ${POSTGRES_DB:-fin_db}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  qdrant:
-    image: docker.io/qdrant/qdrant:latest
-    container_name: fin_qdrant
-    ports:
-      - "6333:6333"
-    volumes:
-      - qdrant_data:/qdrant/storage
-    healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:6333/readyz || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -46,4 +33,3 @@ services:
 
 volumes:
   postgres_data:
-  qdrant_data:

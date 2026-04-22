@@ -1,15 +1,14 @@
 import pytest
 import math
 from datetime import datetime, timedelta, timezone
-from storage.vector.client import QdrantStorage
-from unittest.mock import MagicMock, patch
+from storage.vector.client import PgVectorStorage
+from unittest.mock import patch
 
 
 def test_rrf_logic():
     """
     Verifies that Reciprocal Rank Fusion correctly combines results.
-    We'll mock the QdrantStorage and test its internal scoring logic if possible,
-    or just test the principle.
+    We'll test the ranking logic used by the vector store.
     """
     # Constant k=60
     # Score = 1/(rank + 60)
@@ -47,39 +46,38 @@ def test_temporal_decay():
 @pytest.mark.asyncio
 async def test_hybrid_search_mock():
     """
-    Verifies the integration of RRF and Decay in QdrantStorage.
+    Verifies the integration of RRF and Decay in PgVectorStorage.
     """
-    # Note: QdrantStorage initializes a client in __init__, so we mock it.
-    with patch("storage.vector.client.QdrantClient") as mock_client:
-        storage = QdrantStorage()
-        storage.client = mock_client
+    with patch(
+        "storage.vector.pgvector_storage.PgVectorStorage._fetch_vector_candidates"
+    ) as mock_vector, patch(
+        "storage.vector.pgvector_storage.PgVectorStorage._fetch_text_candidates"
+    ) as mock_text:
+
+        storage = PgVectorStorage()
 
         # Mock Vector results (Top 2)
-        mock_hit1 = MagicMock(
-            id="1",
-            payload={
-                "text": "Modern results",
-                "published_date": datetime.now(timezone.utc).isoformat(),
-            },
-        )
-        mock_hit2 = MagicMock(
-            id="2",
-            payload={
-                "text": "Old results",
-                "published_date": (
-                    datetime.now(timezone.utc) - timedelta(days=100)
-                ).isoformat(),
-            },
-        )
+        mock_hit1 = {
+            "id": "1",
+            "published_date": datetime.now(timezone.utc).isoformat(),
+            "metadata": {"text": "Modern results"},
+            "embedding": [0.1] * 1024,
+        }
+        mock_hit2 = {
+            "id": "2",
+            "published_date": (
+                datetime.now(timezone.utc) - timedelta(days=100)
+            ).isoformat(),
+            "metadata": {"text": "Old results"},
+            "embedding": [0.1] * 1024,
+        }
 
-        storage.client.search.return_value = [mock_hit1, mock_hit2]
-
-        # Mock Text results (Top 1)
-        storage.client.scroll.return_value = ([mock_hit1], None)
+        mock_vector.return_value = [mock_hit1, mock_hit2]
+        mock_text.return_value = [mock_hit1]
 
         # Run hybrid search
-        results = storage.hybrid_search(
-            query_embedding=[0.1] * 384, query_text="Modern", limit=5
+        results = storage.search(
+            query_embedding=[0.1] * 1024, query_text="Modern", limit=5
         )
 
         assert len(results) >= 1

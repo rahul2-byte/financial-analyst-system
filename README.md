@@ -25,7 +25,7 @@ Built with **FastAPI**, this is the core engine of the platform.
 - **Orchestrator**: Manages the multi-turn agent execution flow.
 - **Llama.cpp Integration**: Provides on-demand LLM inference using GGUF models.
 - **Quant Engine**: Deterministic Python logic for financial indicators and scanners.
-- **Storage**: Hybrid storage utilizing **PostgreSQL** for structured market data and **Qdrant** for vector-based search (News, Filings).
+- **Storage**: Hybrid storage utilizing **PostgreSQL** for structured market data and **pgvector** for vector-based search (News, Filings).
 
 ### 2. **Frontend** (`frontend/`)
 A high-performance **React/Next.js** application.
@@ -98,7 +98,7 @@ Start the required services using Docker:
 ```bash
 docker compose -f backend/docker-compose.yml up -d
 ```
-This will spin up **PostgreSQL**, **Qdrant**, and **Phoenix** (for observability).
+This will spin up **PostgreSQL** (with **pgvector**) and **Phoenix** (for observability).
 
 ---
 

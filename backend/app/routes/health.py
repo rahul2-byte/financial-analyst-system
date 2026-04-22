@@ -27,7 +27,10 @@ def _check_database_readiness() -> bool:
 def _check_embedding_readiness() -> bool:
     try:
         service = EmbeddingService()
-        return service.is_loaded or embedding_service_module.SentenceTransformer is not None
+        return (
+            service.is_loaded
+            or embedding_service_module.SentenceTransformer is not None
+        )
     except Exception:
         return False
 

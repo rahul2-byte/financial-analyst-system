@@ -62,10 +62,6 @@ class EnvSettings(BaseSettings):
     POSTGRES_HOST: str = "localhost"
     POSTGRES_PORT: int = 5432
 
-    QDRANT_HOST: str = "localhost"
-    QDRANT_PORT: int = 6333
-    QDRANT_COLLECTION: str = "financial_context"
-
     CHUNK_SIZE: int = 1000
     CHUNK_OVERLAP: int = 200
     BATCH_SIZE_YEARS: int = 5
@@ -104,7 +100,3 @@ class EnvSettings(BaseSettings):
             f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}"
             f"@{self.POSTGRES_HOST}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
         )
-
-    @property
-    def QDRANT_URL(self) -> str:
-        return f"http://{self.QDRANT_HOST}:{self.QDRANT_PORT}"

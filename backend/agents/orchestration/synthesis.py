@@ -3,7 +3,6 @@
 import logging
 from typing import Any, Dict
 
-from app.config import settings
 from app.config.constants import MODEL_REASONING
 from app.core.graph.graph_state import ResearchGraphState
 from app.core.node_resources import NodeResources

@@ -45,7 +45,9 @@ class LlamaServerManager:
 
     async def _check_health(self, timeout: float = 2.0) -> bool:
         try:
-            async with httpx.AsyncClient(timeout=timeout, limits=_httpx_limits()) as client:
+            async with httpx.AsyncClient(
+                timeout=timeout, limits=_httpx_limits()
+            ) as client:
                 response = await client.get(self._health_url())
                 if response.status_code != 200:
                     return False

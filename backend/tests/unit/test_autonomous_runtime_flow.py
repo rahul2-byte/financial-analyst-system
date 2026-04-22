@@ -51,7 +51,7 @@ async def test_runtime_graph_reaches_terminal_state_without_recursion_error() ->
         "retry_count_by_domain": {},
         "freshness_policy": {},
         "evidence_strength": 0.0,
-        "execution_budget": {},
+        "consecutive_research_plan_routes": 0,
         "timeouts": {},
         "errors_detail": [],
         "history": [],

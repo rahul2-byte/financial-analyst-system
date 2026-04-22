@@ -60,6 +60,11 @@ export function applyStreamEventToMessage(message: Message, event: StreamEvent):
     return updated;
   }
 
+  if (event.type === "final_payload") {
+    updated.structured_output = event.payload;
+    return updated;
+  }
+
   if (event.type === "done") {
     updated.isStreaming = false;
     return updated;

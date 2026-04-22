@@ -105,8 +105,7 @@ async def test_exa_search_connector_maps_exa_result_object_fields():
     assert len(results) == 1
     assert results[0].title == "HDFC Bank raises deposit rates"
     assert (
-        results[0].snippet
-        == "HDFC Bank updated retail deposit rates across products."
+        results[0].snippet == "HDFC Bank updated retail deposit rates across products."
     )
     assert results[0].author == "PTI"
     assert results[0].publish_time == published
@@ -166,7 +165,9 @@ Author: None
     ### India's HDFC Bank delayed action in AT-1 bond mis-selling, former chair tells CNBC-TV18
 
 Reuters 12d ago
-""".replace("__PUBLISHED__", published.isoformat())
+""".replace(
+        "__PUBLISHED__", published.isoformat()
+    )
 
     class _Client:
         async def search(self, *, query, num_results, start_published_date):
@@ -190,7 +191,9 @@ Reuters 12d ago
         "HDFC Bank raises deposit rates for select retail products",
         "India's HDFC Bank delayed action in AT-1 bond mis-selling, former chair tells CNBC-TV18",
     ]
-    assert all(item.url == "https://finance.yahoo.com/quote/HDB/news/" for item in results)
+    assert all(
+        item.url == "https://finance.yahoo.com/quote/HDB/news/" for item in results
+    )
     assert all(item.search_provider == "exa" for item in results)
 
 
@@ -215,7 +218,9 @@ Reuters 2d ago
 ### India's HDFC Bank delayed action in AT-1 bond mis-selling, former chair tells CNBC-TV18
 
 Reuters 12d ago
-""".replace("__PUBLISHED__", published.isoformat())
+""".replace(
+        "__PUBLISHED__", published.isoformat()
+    )
 
     class _Client:
         async def search(self, *, query, num_results, start_published_date):
@@ -258,7 +263,9 @@ Reuters 2h ago
 ### India's HDFC Bank delayed action in AT-1 bond mis-selling, former chair tells CNBC-TV18
 
 Reuters 12d ago
-""".replace("__PUBLISHED__", stale_published.isoformat())
+""".replace(
+        "__PUBLISHED__", stale_published.isoformat()
+    )
 
     class _Client:
         async def search(self, *, query, num_results, start_published_date):
@@ -277,7 +284,9 @@ Reuters 12d ago
     results = await connector.fetch(company, time_window_days=1)
 
     assert len(results) == 1
-    assert results[0].title == "HDFC Bank raises deposit rates for select retail products"
+    assert (
+        results[0].title == "HDFC Bank raises deposit rates for select retail products"
+    )
 
 
 @pytest.mark.asyncio
@@ -349,7 +358,9 @@ Reuters 1d ago
                     url="https://finance.yahoo.com/quote/HDB/news/",
                     id="https://finance.yahoo.com/quote/HDB/news/",
                     text=portal_text,
-                    published_date=(datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+                    published_date=(
+                        datetime.now(timezone.utc) - timedelta(days=1)
+                    ).isoformat(),
                 )
             ]
 
@@ -383,7 +394,9 @@ Reuters 12d ago
                     url="https://finance.yahoo.com/quote/HDB/news/",
                     id="https://finance.yahoo.com/quote/HDB/news/",
                     text=portal_text,
-                    published_date=(datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+                    published_date=(
+                        datetime.now(timezone.utc) - timedelta(days=1)
+                    ).isoformat(),
                 )
             ]
 
@@ -487,14 +500,18 @@ Reuters 12d ago
                     url="https://finance.yahoo.com/quote/HDB/news/",
                     id="https://finance.yahoo.com/quote/HDB/news/",
                     text=portal_text,
-                    published_date=(datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+                    published_date=(
+                        datetime.now(timezone.utc) - timedelta(days=1)
+                    ).isoformat(),
                 ),
                 _ExaResult(
                     title="HDFC Bank opens rural branches",
                     url="https://example.com/hdfc-rural-branches",
                     id="https://example.com/hdfc-rural-branches",
                     text="HDFC Bank expands its rural branch footprint.",
-                    published_date=(datetime.now(timezone.utc) - timedelta(days=1)).isoformat(),
+                    published_date=(
+                        datetime.now(timezone.utc) - timedelta(days=1)
+                    ).isoformat(),
                 ),
             ]
 

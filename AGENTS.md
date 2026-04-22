@@ -14,7 +14,7 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
   - `agents/`: Single-responsibility agents (Fundamental, Technical, Risk, etc.).
   - `quant/`: Deterministic logic for financial indicators and scanners.
   - `app/`: Core services, routes (`/api/chat`, `/api/health`), and Pydantic config.
-  - `storage/`: PostgreSQL (TimescaleDB for market data) and Qdrant (vector storage).
+  - `storage/`: PostgreSQL (TimescaleDB for market data and pgvector for vector storage).
 - **`frontend/`**: Next.js 16 (App Router), React 19, Tailwind CSS 4.
   - `components/`: UI blocks (Charts via Recharts, Virtual lists via TanStack).
   - `app/`: Server-side components and routing.
@@ -111,7 +111,7 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
 - **Flow:** Every data point must be Validated and Normalized before Storage.
 - **Logs:** All pipeline steps must log execution time and source attribution for audit trails.
 - **Inference:** Uses `llama.cpp` for local inference and OpenTelemetry for observability.
-- **Storage:** PostgreSQL (TimescaleDB) for time-series and Qdrant for vector embeddings.
+- **Storage:** PostgreSQL (TimescaleDB) for time-series and pgvector for vector embeddings.
 
 ---
 
@@ -165,3 +165,11 @@ These rules represent the core interaction principles for all agents and MUST be
 
 **End of Protocol.**
 
+## graphify
+
+This project has a graphify knowledge graph at graphify-out/.
+
+Rules:
+- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
+- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
+- After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)

@@ -23,6 +23,8 @@ async def test_research_planner_filters_tasks_by_approved_agents() -> None:
     ]
     for task in tasks:
         assert task["parameters"]["timeframe"] == "5y"
+        assert task["objective"]
+        assert task["research_question"]
 
 
 @pytest.mark.asyncio
@@ -68,15 +70,17 @@ async def test_research_planner_maps_fetched_data_into_agent_parameters() -> Non
     result = await research_plan_node(state)
 
     tasks = {task["agent"]: task for task in result["tasks"]}
-    assert tasks["fundamental_analysis"]["parameters"]["raw_data"]["marketCap"] == 100
-    assert tasks["technical_analysis"]["parameters"]["ohlcv_data"] == [
-        {"Date": "2026-04-01"}
+    assert tasks["fundamental_analysis"]["structured_requirements"]["datasets"] == [
+        "fundamentals"
     ]
-    assert "AAPL news" in tasks["sentiment_analysis"]["parameters"]["text"]
-    assert tasks["macro_analysis"]["parameters"]["macro_data"]["USD_INR"] == 83.1
-    assert (
-        tasks["contrarian_analysis"]["parameters"]["market_data"]["fundamentals"][
-            "marketCap"
-        ]
-        == 100
-    )
+    assert tasks["technical_analysis"]["structured_requirements"]["datasets"] == [
+        "ohlcv"
+    ]
+    assert tasks["sentiment_analysis"]["qualitative_requirements"]["enabled"] is True
+    assert tasks["macro_analysis"]["structured_requirements"]["datasets"] == ["macro"]
+    assert tasks["contrarian_analysis"]["depends_on"] == [
+        "fundamental_analysis",
+        "technical_analysis",
+        "sentiment_analysis",
+        "macro_analysis",
+    ]

@@ -2,12 +2,13 @@ from __future__ import annotations
 
 from typing import Any
 
-MAX_ITERATIONS = 16
 RETRY_LIMIT = 3
-CONFIDENCE_THRESHOLD = 0.75
-EVIDENCE_STRENGTH_THRESHOLD = 0.55
-FRESHNESS_THRESHOLD = 0.6
-EVALUATION_THRESHOLD = 0.8
+CRITIC_RETRY_LIMIT = 3
+RESEARCH_PLAN_LOOP_LIMIT = 3
+CONFIDENCE_THRESHOLD = 0.5
+EVIDENCE_STRENGTH_THRESHOLD = 0.45
+FRESHNESS_THRESHOLD = 0.4
+EVALUATION_THRESHOLD = 0.6
 
 
 def _dataset_ready(
@@ -34,6 +35,30 @@ def _required_data_ready(
     return True
 
 
+def _required_payloads_materialized(state: dict[str, Any]) -> bool:
+    fetched = state.get("fetched_data", {})
+    if not isinstance(fetched, dict):
+        return False
+
+    def _has_by_symbol_payload(value: Any) -> bool:
+        if not isinstance(value, dict):
+            return False
+        by_symbol = value.get("by_symbol")
+        return isinstance(by_symbol, dict) and any(bool(v) for v in by_symbol.values())
+
+    if not _has_by_symbol_payload(fetched.get("ohlcv")):
+        return False
+    if not _has_by_symbol_payload(fetched.get("fundamentals")):
+        return False
+    if not isinstance(fetched.get("macro"), dict) or not fetched.get("macro"):
+        return False
+    news_value = fetched.get("news")
+    if not isinstance(news_value, list) or not news_value:
+        return False
+
+    return True
+
+
 def _available_dataset_count(data_status: dict[str, Any]) -> int:
     required = ("ohlcv", "news", "fundamentals", "macro")
     return sum(
@@ -56,16 +81,30 @@ def _is_confidence_stagnating(
     return max(sample) - min(sample) <= tolerance
 
 
-def _has_cached_research_results(state: dict[str, Any]) -> bool:
+def _has_required_research_results(state: dict[str, Any]) -> bool:
     results = state.get("results", {})
-    selected = state.get("approved_agents", [])
-    if not selected:
+    required = set(state.get("required_agents", state.get("approved_agents", [])))
+    if not required:
         return False
-    return all(results.get(agent) for agent in selected)
+    return all(results.get(agent) for agent in required)
+
+
+def _task_contexts_ready(state: dict[str, Any]) -> bool:
+    tasks = state.get("tasks", [])
+    task_contexts = state.get("task_contexts", {})
+    if not tasks:
+        return False
+    if not isinstance(task_contexts, dict):
+        return False
+    return all(
+        isinstance(task, dict) and str(task.get("task_id", "")) in task_contexts
+        for task in tasks
+    )
 
 
 def _best_effort_progress_action(state: dict[str, Any]) -> str:
     results = state.get("results", {})
+    has_synthesis = isinstance(results, dict) and isinstance(results.get("synthesis"), dict)
     critic_decision = state.get("critic_decision")
 
     if critic_decision == "terminate_failure":
@@ -74,35 +113,35 @@ def _best_effort_progress_action(state: dict[str, Any]) -> str:
         return "run_conflict_resolution"
     if critic_decision == "approve" and not bool(state.get("validation_passed", False)):
         return "run_validation"
-    if "synthesis" in results:
+    if has_synthesis:
         if critic_decision is None:
             return "run_critic"
         if critic_decision == "retry":
-            return "terminate_insufficient_data"
+            return "terminate_low_confidence"
         if critic_decision == "approve":
             return (
                 "terminate_success"
                 if bool(state.get("validation_passed", False))
                 else "run_validation"
             )
-    if _has_cached_research_results(state):
+    if _has_required_research_results(state):
         return "run_synthesis"
+    if state.get("tasks") and not _task_contexts_ready(state):
+        return "run_research_context"
     if state.get("tasks"):
         return "run_research_execution"
     if state.get("goal"):
         return "run_research_plan"
-    return "terminate_budget_exceeded"
+    return "terminate_failure"
 
 
 def decide_next_action(state: dict[str, Any]) -> str:
     if state.get("plan_status") in {"awaiting_clarification", "awaiting_approval"}:
         return "terminate_awaiting_input"
 
-    iteration_count = int(state.get("iteration_count", 0))
-    if iteration_count >= MAX_ITERATIONS:
-        return "terminate_budget_exceeded"
-
     retry_counts = state.get("retry_count_by_domain", {})
+    critic_retries = int(retry_counts.get("critic", 0))
+    repeated_replans = int(state.get("consecutive_research_plan_routes", 0))
 
     if not state.get("goal"):
         return "run_goal"
@@ -114,15 +153,22 @@ def decide_next_action(state: dict[str, Any]) -> str:
             return "run_data_check"
         return "terminate_insufficient_data"
 
+    results = state.get("results", {})
+    has_synthesis = isinstance(results, dict) and isinstance(results.get("synthesis"), dict)
+    # Required datasets may be present in storage, but research execution needs the
+    # payloads materialized into state["fetched_data"] first. Once synthesis is
+    # already produced (or required agent results are cached), we avoid forcing
+    # a fetch/materialize loop.
+    if (
+        isinstance(results, dict)
+        and not has_synthesis
+        and not _has_required_research_results(state)
+        and not _required_payloads_materialized(state)
+    ):
+        return "run_data_fetch"
+
     if bool(state.get("force_replan", False)):
         return "run_research_plan"
-
-    if (
-        int(state.get("iteration_count", 0)) >= 4
-        and _is_confidence_stagnating(list(state.get("confidence_history", [])))
-        and float(state.get("evidence_strength", 0.0)) < EVIDENCE_STRENGTH_THRESHOLD
-    ):
-        return "terminate_insufficient_data"
 
     if not state.get("tasks"):
         return "run_research_plan"
@@ -132,36 +178,28 @@ def decide_next_action(state: dict[str, Any]) -> str:
         return "terminate_failure"
     if critic_decision == "conflict":
         return "run_conflict_resolution"
+    if critic_decision == "retry":
+        if critic_retries >= CRITIC_RETRY_LIMIT:
+            return "terminate_low_confidence"
+        if repeated_replans >= RESEARCH_PLAN_LOOP_LIMIT:
+            return "terminate_low_confidence"
+        return "run_research_plan"
 
     non_fetch_retries = [
         count for domain, count in retry_counts.items() if domain != "data_fetch"
     ]
-    remaining_budget = float(state.get("execution_budget", {}).get("remaining", 1.0))
-    if (
-        any(count >= RETRY_LIMIT for count in non_fetch_retries)
-        or remaining_budget <= 0.0
-    ):
+    if any(count >= RETRY_LIMIT for count in non_fetch_retries):
         return _best_effort_progress_action(state)
 
-    results = state.get("results", {})
-    if "synthesis" not in results:
-        if _has_cached_research_results(state):
+    if not has_synthesis:
+        if _has_required_research_results(state):
             return "run_synthesis"
+        if not _task_contexts_ready(state):
+            return "run_research_context"
         return "run_research_execution"
-
-    evidence_strength = float(state.get("evidence_strength", 0.0))
-    if evidence_strength < EVIDENCE_STRENGTH_THRESHOLD:
-        if retry_counts.get("research", 0) < RETRY_LIMIT:
-            return "run_research_plan"
-        return "terminate_insufficient_data"
 
     if critic_decision is None:
         return "run_critic"
-
-    if critic_decision == "retry":
-        if retry_counts.get("research", 0) < RETRY_LIMIT:
-            return "run_research_plan"
-        return "terminate_insufficient_data"
 
     if critic_decision == "approve" and not bool(state.get("validation_passed", False)):
         return "run_validation"
@@ -183,3 +221,45 @@ def decide_next_action(state: dict[str, Any]) -> str:
         )
 
     return "run_research_execution"
+
+
+def build_router_decision_snapshot(state: dict[str, Any]) -> dict[str, Any]:
+    data_status = state.get("data_status", {})
+    timeframe_policy = state.get("timeframe_policy", {})
+    retry_counts = state.get("retry_count_by_domain", {})
+    confidence_history = list(state.get("confidence_history", []))
+    available_count = (
+        _available_dataset_count(data_status) if isinstance(data_status, dict) else 0
+    )
+
+    return {
+        "iteration_count": int(state.get("iteration_count", 0) or 0),
+        "consecutive_research_plan_routes": int(
+            state.get("consecutive_research_plan_routes", 0) or 0
+        ),
+        "plan_status": state.get("plan_status"),
+        "goal_present": bool(state.get("goal")),
+        "force_replan": bool(state.get("force_replan", False)),
+        "required_data_ready": (
+            _required_data_ready(data_status, timeframe_policy)
+            if isinstance(data_status, dict) and isinstance(timeframe_policy, dict)
+            else False
+        ),
+        "required_payloads_materialized": _required_payloads_materialized(state),
+        "available_dataset_count": available_count,
+        "task_contexts_ready": _task_contexts_ready(state),
+        "required_research_results_ready": _has_required_research_results(state),
+        "critic_decision": state.get("critic_decision"),
+        "validation_passed": bool(state.get("validation_passed", False)),
+        "evaluation_passed": bool(state.get("evaluation_passed", False)),
+        "evidence_strength": float(state.get("evidence_strength", 0.0) or 0.0),
+        "confidence_score": float(state.get("confidence_score", 0.0) or 0.0),
+        "confidence_stagnating": _is_confidence_stagnating(confidence_history),
+        "retry_count_by_domain": (
+            {str(k): int(v) for k, v in retry_counts.items()}
+            if isinstance(retry_counts, dict)
+            else {}
+        ),
+        "critic_retry_limit": CRITIC_RETRY_LIMIT,
+        "research_plan_loop_limit": RESEARCH_PLAN_LOOP_LIMIT,
+    }

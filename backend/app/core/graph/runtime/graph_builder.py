@@ -15,6 +15,7 @@ from agents.quality.nodes import (
     evaluator_node,
     synthesis_node,
 )
+from agents.financial.research.research_context_node import research_context_node
 from agents.financial.research.research_plan_node import research_plan_node
 from agents.financial.research.research_execution_node import research_execution_node
 from agents.orchestration.router_node import router_node
@@ -73,6 +74,7 @@ def build_graph() -> Any:
     graph.add_node("data_plan_node", data_plan_node)
     graph.add_node("data_fetch_node", data_fetch_node)
     graph.add_node("research_plan_node", research_plan_node)
+    graph.add_node("research_context_node", research_context_node)
     graph.add_node("research_execution_node", research_execution_node)
     graph.add_node("synthesis_node", synthesis_node)
     graph.add_node("critic_node", critic_node)
@@ -91,6 +93,7 @@ def build_graph() -> Any:
             "run_data_plan": "data_plan_node",
             "run_data_fetch": "data_fetch_node",
             "run_research_plan": "research_plan_node",
+            "run_research_context": "research_context_node",
             "run_research_execution": "research_execution_node",
             "run_synthesis": "synthesis_node",
             "run_critic": "critic_node",
@@ -100,7 +103,7 @@ def build_graph() -> Any:
             "terminate_success": END,
             "terminate_awaiting_input": END,
             "terminate_insufficient_data": END,
-            "terminate_budget_exceeded": END,
+            "terminate_low_confidence": END,
             "terminate_failure": END,
         },
     )
@@ -126,6 +129,9 @@ def build_graph() -> Any:
     )
     graph.add_conditional_edges(
         "research_plan_node", _route_to_router, {"run_router": "router_node"}
+    )
+    graph.add_conditional_edges(
+        "research_context_node", _route_to_router, {"run_router": "router_node"}
     )
     graph.add_conditional_edges(
         "research_execution_node", _route_to_router, {"run_router": "router_node"}

@@ -21,6 +21,7 @@ describe("useChat", () => {
       onChunk({ type: "text_delta", content: "Hel" });
       onChunk({ type: "text_delta", content: "lo" });
       await Promise.resolve();
+      onChunk({ type: "final_payload", payload: { status: "success", decision: "watchlist" } });
       onChunk({ type: "done" });
     });
 
@@ -34,6 +35,7 @@ describe("useChat", () => {
       expect(result.current.messages).toHaveLength(2);
       expect(result.current.messages[1].content).toBe("Hello");
       expect(result.current.messages[1].isStreaming).toBe(false);
+      expect(result.current.messages[1].structured_output).toEqual({ status: "success", decision: "watchlist" });
       expect(result.current.isLoading).toBe(false);
     });
   });

@@ -172,13 +172,3 @@ class ConflictRecord(BaseModel):
     iteration_count: int = 0
     agent_outputs: dict = Field(default_factory=dict)
     final_perspective: Optional[str] = None  # Combined perspective if conflict persists
-
-
-from app.core.research_schemas import (
-    CitationRecord,
-    EvidenceRecord,
-    FindingRecord,
-    ClaimRecord,
-    CoverageReport,
-    ResearchAgentResult,
-)
