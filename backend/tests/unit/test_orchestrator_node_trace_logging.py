@@ -282,3 +282,83 @@ async def test_orchestrator_maps_chain_events_to_node_traces(monkeypatch) -> Non
     assert "pipeline_chain_start" in trace_names
     assert "node_start" in trace_names
     assert "node_end" in trace_names
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_emits_opik_node_spans(monkeypatch):
+    import app.core.observability as obs
+    from app.core.intent_classifier import IntentClassificationResult
+    
+    metadata_calls = []
+    
+    class MockOpikContext:
+        def update_current_span(self, name=None, metadata=None):
+            if metadata:
+                metadata_calls.append(metadata)
+        def update_current_trace(self, input=None, tags=None, metadata=None, **kwargs):
+            pass
+            
+    monkeypatch.setattr(obs, "opik_context", MockOpikContext())
+    monkeypatch.setattr(obs, "observe", lambda **kw: lambda f: f)
+    
+    async def _stub_classifier(_query: str, _history):
+        return IntentClassificationResult(
+            label="financial",
+            is_financial_request=True,
+            confidence=0.95,
+            assistant_response="",
+        )
+
+    class _StubGraph:
+        async def astream_events(self, *_args, **_kwargs):
+            yield {
+                "event": "on_node_start",
+                "name": "router_node",
+                "data": {"input": {}},
+            }
+            yield {
+                "event": "on_node_end",
+                "name": "router_node",
+                "data": {
+                    "output": {
+                        "status": "success",
+                        "next_action": "run_goal",
+                        "errors": [],
+                    }
+                },
+            }
+            yield {
+                "event": "on_chain_end",
+                "name": "LangGraph",
+                "data": {
+                    "output": {
+                        "status": "success",
+                        "next_action": "complete",
+                        "final_output": "done",
+                        "data": {},
+                        "errors": [],
+                    }
+                },
+            }
+
+    monkeypatch.setattr("app.core.orchestrator.classify_query_intent", _stub_classifier)
+    monkeypatch.setattr("app.core.orchestrator.SessionLogger.get_logger", lambda _q: type("StubLogger", (), {"log_step": lambda *a, **k: None, "log_trace": lambda *a, **k: None, "log_error": lambda *a, **k: None})())
+    
+    importlib = __import__("importlib")
+    orchestrator_mod = importlib.import_module("app.core.orchestrator")
+    # Patch the opik_context that orchestrator_mod imported
+    monkeypatch.setattr(orchestrator_mod, "opik_context", MockOpikContext(), raising=False)
+
+    orchestrator = orchestrator_mod.PipelineOrchestrator()
+    orchestrator.research_graph = _StubGraph()
+
+    events = [
+        event
+        async for event in orchestrator.execute_query(
+            "Analyze AAPL"
+        )
+    ]
+    
+    assert len(metadata_calls) > 0
+    # There should be an update with duration_ms from on_node_end
+    assert any("duration_ms" in m for m in metadata_calls)

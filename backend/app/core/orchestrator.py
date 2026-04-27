@@ -15,7 +15,7 @@ from app.core.intent_classifier import (
 )
 from app.core.query_scope import normalize_research_scope
 from app.core.validators import sanitize_user_query, validate_query_not_malicious
-from app.core.observability import langfuse_context
+from app.core.observability import langfuse_context, observe, opik_context
 from app.core.logging import SessionLogger
 from app.core.graph.graph_state import build_initial_graph_state
 from app.core.graph.runtime.graph_builder import get_research_graph
@@ -173,6 +173,7 @@ class PipelineOrchestrator:
             "metadata": {str(k): metadata[k] for k in list(metadata.keys())[:10]},
         }
 
+    @observe(name="pipeline.execute_query", as_type="trace")
     async def execute_query(
         self,
         user_query: str,
@@ -421,6 +422,14 @@ class PipelineOrchestrator:
                     state_summary = summarize_node_state(context_state)
                     output_summary = summarize_node_output(output_payload)
                     last_state_snapshot = state_summary
+
+                    opik_context.update_current_span(
+                        metadata={
+                            "node_name": node_name,
+                            "duration_ms": duration_ms,
+                            "status": output_payload.get("status"),
+                        }
+                    )
 
                     session_logger.log_trace(
                         "node_end",
