@@ -5,6 +5,7 @@ from typing import Any
 
 from app.core.contracts.graph_node import finalize_node_output
 from app.core.audit import build_node_audit_entry
+from app.core.observability import observe, opik_context
 from agents.quality.evidence import (
     evidence_strength_from_outputs,
     mean,
@@ -13,6 +14,7 @@ from agents.quality.evidence import (
 logger = logging.getLogger(__name__)
 
 
+@observe(name="Quality:Synthesis", as_type="span")
 async def synthesis_node(state: dict[str, Any]) -> dict[str, Any]:
     results = state.get("results", {})
     tool_registry = state.get("tool_registry", [])
@@ -68,6 +70,14 @@ async def synthesis_node(state: dict[str, Any]) -> dict[str, Any]:
 
     synthesis_confidence = mean(
         [0.6 + evidence_strength * 0.2, 0.55 + evidence_strength * 0.2]
+    )
+
+    opik_context.update_current_span(
+        metadata={
+            "evidence_strength": evidence_strength,
+            "provisional_claims": len(synthesis_claims) if is_provisional_pass else 0,
+            "verified_claims": len(synthesis_claims) if not is_provisional_pass else 0,
+        }
     )
 
     key_drivers = (

@@ -6,6 +6,7 @@ from typing import Any, Dict
 from app.core.graph.graph_state import ResearchGraphState
 from app.core.graph.node_helpers import build_node_error, build_node_success
 from app.core.node_resources import NodeResources
+from app.core.observability import observe, opik_context
 from app.core.prompts import prompt_manager
 from app.models.request_models import Message
 from app.core.research_plan_schemas import AgentExecutionInput
@@ -16,6 +17,7 @@ from agents.financial.analysis.payload_sanitizer import (
 )
 
 
+@observe(name="Agent:Macro", as_type="span")
 async def macro_analysis_node(
     state: ResearchGraphState, resources: NodeResources
 ) -> Dict[str, Any]:
@@ -127,6 +129,13 @@ async def macro_analysis_node(
             "claims_count": len(agent_result.claims),
             "missing_evidence_count": len(agent_result.missing_evidence),
         }
+
+        opik_context.update_current_span(
+            metadata={
+                "claims_generated": len(agent_result.claims),
+                "findings_generated": len(agent_result.findings),
+            }
+        )
 
         return build_node_success(
             agent_output_key="macro_analysis",

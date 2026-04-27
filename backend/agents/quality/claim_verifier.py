@@ -1,5 +1,6 @@
 from typing import Any
 from dataclasses import dataclass
+from app.core.observability import observe, opik_context
 
 
 @dataclass
@@ -25,12 +26,14 @@ def is_data_gap_claim(text: Any) -> bool:
     return any(marker in normalized for marker in data_gap_markers)
 
 
+@observe(name="Quality:VerifyClaims", as_type="span")
 def verify_claims(
     synthesis_claims: list[dict[str, Any]],
     citation_index: dict[str, Any],
     evidence_strength: float,
 ) -> ClaimVerificationResult:
     """Validate claim-to-citation links and evidence sufficiency."""
+    opik_context.update_current_span(metadata={"claims_checked": len(synthesis_claims)})
     verified_ids = []
     invalid_major_ids = []
     details = {}
@@ -53,7 +56,16 @@ def verify_claims(
             details[claim_id] = "Missing evidence references"
             continue
 
-        # Check if refs exist in index (not implemented here yet, assuming they do)
+        if citation_index:
+            missing_refs = [ref for ref in evidence_refs if str(ref) not in citation_index]
+            if missing_refs:
+                if importance == "major":
+                    invalid_major_ids.append(claim_id)
+                details[claim_id] = (
+                    f"Invalid evidence refs: {', '.join(str(ref) for ref in missing_refs)}"
+                )
+                continue
+
         verified_ids.append(claim_id)
         details[claim_id] = "Verified via evidence links"
 

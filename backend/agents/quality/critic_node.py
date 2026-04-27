@@ -5,6 +5,7 @@ from typing import Any
 
 from app.core.contracts.graph_node import finalize_node_output
 from app.core.audit import build_node_audit_entry
+from app.core.observability import observe, opik_context
 from agents.quality.claim_verifier import is_data_gap_claim, verify_claims
 from agents.quality.conflict_arbitrator import arbitrate_conflicts
 from app.core.graph.router_policy import (
@@ -35,6 +36,7 @@ def _reprioritize_tasks(
     return replanned
 
 
+@observe(name="Quality:Critic", as_type="span")
 async def critic_node(state: dict[str, Any]) -> dict[str, Any]:
     synthesis = state.get("results", {}).get("synthesis", {})
     synthesis_claims = synthesis.get("claims", [])
@@ -106,6 +108,14 @@ async def critic_node(state: dict[str, Any]) -> dict[str, Any]:
             ),
             correction_prompt,
         )
+
+    opik_context.update_current_span(
+        metadata={
+            "decision": decision,
+            "force_replan": force_replan,
+            "correction_prompt": correction_prompt,
+        }
+    )
 
     payload: dict[str, Any] = {
         "critic_decision": decision,
