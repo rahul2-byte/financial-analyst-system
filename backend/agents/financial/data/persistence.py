@@ -15,10 +15,12 @@ from typing import Any, TypedDict
 import pandas as pd
 
 from app.core.node_resources import resources
+from app.core.observability import observe
 from data.schemas.market import OHLCVData
 
 from agents.financial.data.news.metadata import build_news_chunk_metadata
 from agents.financial.data.news.metrics import build_news_cache_summary
+from agents.financial.data.news.dedupe import dedupe_articles_by_url
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,7 @@ class PersistOutcome(TypedDict):
     error: str | None
 
 
+@observe(name="Data:PersistDataset", as_type="span")
 def persist_dataset(
     *,
     dataset: str,
@@ -112,11 +115,10 @@ def persist_dataset(
 
         elif dataset == "news" and isinstance(payload, list) and payload:
             chunks: list[Any] = []
-            normalized_articles: list[dict[str, Any]] = []
-            for article in payload:
-                if not isinstance(article, dict):
-                    continue
-                normalized_articles.append(article)
+            normalized_articles = dedupe_articles_by_url(
+                [article for article in payload if isinstance(article, dict)]
+            )
+            for article in normalized_articles:
                 title = article.get("title", "")
                 summary = article.get("summary", "")
                 content = article.get("content", "")

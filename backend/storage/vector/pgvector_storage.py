@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+from hashlib import sha256
 from datetime import datetime
 from typing import Any, List, Optional
 
@@ -10,9 +11,11 @@ from sqlalchemy import text as sql_text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from app.config import settings
+from app.core.observability import observe, opik_context
 from data.interfaces.storage import IVectorStorage
 from data.processors.text import TextProcessor
 from data.schemas.text import ProcessedChunk
+from agents.financial.data.news.dedupe import news_url_identity
 from storage.sql.models import TextChunk
 
 logger = logging.getLogger(__name__)
@@ -67,7 +70,14 @@ class PgVectorStorage(IVectorStorage):
 
     def chunk_and_upsert(self, text: str, metadata: dict) -> List[ProcessedChunk]:
         processor = TextProcessor(use_embeddings=True)
-        chunks = processor.process_and_embed(text, metadata)
+        chunk_metadata = dict(metadata or {})
+        if "chunk_id_prefix" not in chunk_metadata:
+            identity = news_url_identity(chunk_metadata)
+            ticker = str(chunk_metadata.get("ticker", "UNKNOWN")).strip().upper()
+            if identity:
+                digest = sha256(identity.encode("utf-8")).hexdigest()[:16]
+                chunk_metadata["chunk_id_prefix"] = f"news:{ticker}:{digest}"
+        chunks = processor.process_and_embed(text, chunk_metadata)
         if chunks:
             self.upsert_chunks(chunks)
         return chunks
@@ -129,13 +139,22 @@ class PgVectorStorage(IVectorStorage):
         )
         session.exec(stmt)
 
+    @observe(name="RAG:HybridSearch", as_type="span")
     def search(
         self,
         query_embedding: Optional[List[float]] = None,
         limit: int = 5,
         query_text: Optional[str] = None,
         ticker: Optional[str] = None,
+        recency_window_days: Optional[int] = None,
     ) -> List[ProcessedChunk]:
+        opik_context.update_current_span(
+            metadata={
+                "query_text": query_text,
+                "limit": limit,
+                "recency_window_days": recency_window_days,
+            }
+        )
         vector_candidates: list[dict[str, Any]] = []
         text_candidates: list[dict[str, Any]] = []
 
@@ -163,6 +182,13 @@ class PgVectorStorage(IVectorStorage):
                     ticker=ticker,
                     limit=TEXT_CANDIDATES,
                 )
+
+        vector_candidates = self._filter_recent_candidates(
+            vector_candidates, recency_window_days
+        )
+        text_candidates = self._filter_recent_candidates(
+            text_candidates, recency_window_days
+        )
 
         if query_text:
             fused = self._fuse_candidates(vector_candidates, text_candidates, limit)
@@ -280,6 +306,26 @@ class PgVectorStorage(IVectorStorage):
             return self._parse_published_date(metadata.get("published_date"))
         return None
 
+    def _filter_recent_candidates(
+        self,
+        candidates: list[dict[str, Any]],
+        recency_window_days: Optional[int],
+    ) -> list[dict[str, Any]]:
+        if recency_window_days is None:
+            return candidates
+
+        max_age_days = max(int(recency_window_days), 0)
+        now = self._now()
+        recent: list[dict[str, Any]] = []
+        for candidate in candidates:
+            pub_date = self._candidate_published_date(candidate)
+            if pub_date is None:
+                continue
+            age_days = max(0.0, (now - pub_date).total_seconds() / 86400.0)
+            if age_days <= max_age_days:
+                recent.append(candidate)
+        return recent
+
     def _fuse_candidates(
         self,
         vector_candidates: list[dict[str, Any]],
@@ -306,10 +352,11 @@ class PgVectorStorage(IVectorStorage):
         for cid, rrf_score in scores.items():
             row = items[cid]
             pub_date = self._candidate_published_date(row)
-            days_old = 0
             if pub_date is not None:
                 delta_days = (now - pub_date).total_seconds() / 86400.0
                 days_old = max(0, int(delta_days))
+            else:
+                days_old = 3650
             decay = math.exp(-TEMPORAL_DECAY_LAMBDA * days_old)
             rescored.append((row, rrf_score * decay))
 

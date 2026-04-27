@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from data.news_pipeline.connectors import ExaSearchConnector
 from data.news_pipeline.extractor import ArticleExtractor
+from app.core.observability import observe, opik_context
 from data.news_pipeline.models import (
     CompanyContext,
     NewsPipelineRecord,
@@ -40,6 +41,7 @@ class NewsPipelineRunner:
         self.url_normalizer = URLNormalizer()
         self.duplicate_detector = DuplicateDetector()
 
+    @observe(name="Data:FetchNewsPipeline", as_type="span")
     async def run(
         self, *, company: CompanyContext, time_window_days: int
     ) -> list[NewsPipelineRecord]:
@@ -128,4 +130,13 @@ class NewsPipelineRunner:
                 scored.append(updated)
 
         scored.sort(key=lambda item: item.quality_score, reverse=True)
-        return scored[: self.max_articles_per_company]
+        final_list = scored[: self.max_articles_per_company]
+        
+        opik_context.update_current_span(
+            metadata={
+                "raw_results": len(raw_results),
+                "deduped": len(deduped),
+                "final_scored": len(final_list),
+            }
+        )
+        return final_list
