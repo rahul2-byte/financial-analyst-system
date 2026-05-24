@@ -87,8 +87,15 @@ class TextProcessor:
         chunks = []
         serialized_metadata = self._serialize_metadata(metadata)
         ticker = self._require_ticker(serialized_metadata)
+        chunk_id_prefix = serialized_metadata.pop("chunk_id_prefix", None)
+        stable_prefix = (
+            str(chunk_id_prefix).strip()
+            if isinstance(chunk_id_prefix, str) and chunk_id_prefix.strip()
+            else None
+        )
         start = 0
         text_len = len(text)
+        chunk_index = 0
 
         while start < text_len:
             end = start + self.chunk_size
@@ -124,12 +131,17 @@ class TextProcessor:
             if chunk_text:
                 chunks.append(
                     ProcessedChunk(
-                        chunk_id=str(uuid.uuid4()),
+                        chunk_id=(
+                            f"{stable_prefix}:{chunk_index}"
+                            if stable_prefix
+                            else str(uuid.uuid4())
+                        ),
                         ticker=ticker,
                         text=chunk_text,
                         metadata=serialized_metadata,
                     )
                 )
+                chunk_index += 1
 
             # Move start forward, respecting overlap
             start = max(start + 1, end - self.chunk_overlap)

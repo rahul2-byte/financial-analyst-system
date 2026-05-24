@@ -259,6 +259,34 @@ async def test_run_local_offline_audit_reports_missing_news_reason() -> None:
 
 
 @pytest.mark.asyncio
+async def test_run_local_offline_audit_handles_nondict_dataset_payloads() -> None:
+    class _BrokenSqlDb(_StubSqlDb):
+        def get_ticker_info(self, ticker):
+            return None
+
+        def get_fundamentals_info(self, ticker):
+            return "bad-payload"
+
+    sql_db = _BrokenSqlDb(exact={"AAPL": {"trading_symbol": "AAPL"}})
+    previous = _swap_resources(
+        sql_db=sql_db,
+        vector_db=_StubVectorDb({"AAPL": {"has_news": True, "news_count": 2}}),
+        llm_service=_ExplodingLLMService(),
+    )
+
+    try:
+        offline, errors = await _run_local_offline_audit("AAPL")
+    finally:
+        _restore_resources(previous)
+
+    assert errors == []
+    assert offline is not None
+    assert offline.ticker_used == "AAPL"
+    assert offline.ohlcv_data["has_data"] is False
+    assert offline.fundamentals_data["has_data"] is False
+
+
+@pytest.mark.asyncio
 async def test_data_check_node_uses_deterministic_audit_to_update_goal_ticker() -> None:
     sql_db = _StubSqlDb(
         ranked={
@@ -325,3 +353,23 @@ async def test_data_check_node_uses_deterministic_audit_to_update_goal_ticker() 
     assert result["data_status"]["fundamentals"]["available"] is True
     assert result["data_status"]["news"]["available"] is True
     assert result["data_status"]["macro"]["available"] is True
+
+
+@pytest.mark.asyncio
+async def test_data_check_node_surfaces_offline_audit_failures(monkeypatch) -> None:
+    async def _boom(_ticker: str):
+        raise RuntimeError("db unavailable")
+
+    monkeypatch.setattr(
+        "agents.financial.data.data_check_node._run_local_offline_audit", _boom
+    )
+
+    result = await data_check_node(
+        {
+            "goal": {"ticker": "AAPL"},
+            "data_status": {},
+        }
+    )
+
+    assert result["status"] == "partial"
+    assert result["errors"] == ["offline_audit_error: db unavailable"]

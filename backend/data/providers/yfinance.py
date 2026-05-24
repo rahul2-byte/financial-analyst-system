@@ -21,6 +21,7 @@ import numpy as np
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 from app.core.observability import observe
+from app.core.ticker import Ticker, parse_ticker
 from data.interfaces.fetcher import IDataFetcher
 from data.schemas.market import OHLCVData
 from data.schemas.text import NewsArticle
@@ -39,7 +40,7 @@ class YFinanceFetcher(IDataFetcher):
     - Error handling for missing data
     """
 
-    def _format_ticker(self, ticker: str) -> str:
+    def _format_ticker(self, ticker: str | Ticker) -> str:
         """
         Auto-append .NS for Indian stocks if no suffix is provided.
 
@@ -49,10 +50,9 @@ class YFinanceFetcher(IDataFetcher):
         Returns:
             Formatted ticker with appropriate suffix
         """
-        ticker = ticker.upper()
-        if not any(suffix in ticker for suffix in [".", "=", "^"]):
-            return f"{ticker}{INDIAN_STOCK_SUFFIX}"
-        return ticker
+        return parse_ticker(ticker).provider_format_yfinance(
+            default_exchange_suffix=INDIAN_STOCK_SUFFIX,
+        )
 
     def _parse_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         """

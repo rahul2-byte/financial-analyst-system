@@ -187,6 +187,7 @@ class LlamaCppService(LLMServiceInterface):
             f"Failed after {MAX_RETRIES} attempts. Last error: {last_error}"
         )
 
+    @observe(name="LLM:GenerateStream")
     def generate_stream(
         self, messages: List[Message], model: str, **kwargs
     ) -> AsyncGenerator[Dict[str, Any], None]:

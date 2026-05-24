@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Optional
 
 from sqlmodel import Field, SQLModel
@@ -9,7 +9,7 @@ class InteractionLog(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     query_id: str = Field(index=True)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     input: str
     output: str
     score: float
@@ -23,7 +23,7 @@ class ErrorLog(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     query_id: str = Field(index=True)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     error_type: str
     correction_applied: str
     details: Optional[str] = None
@@ -33,7 +33,7 @@ class PerformanceMetric(SQLModel, table=True):
     __tablename__ = "performance_metrics"
 
     id: Optional[int] = Field(default=None, primary_key=True)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     agent_name: str = Field(index=True)
     success_rate: float
     average_score: float

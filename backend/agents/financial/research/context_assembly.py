@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from agents.financial.data.news.dedupe import sha256
 from app.core.node_resources import resources
 from app.core.research_plan_schemas import (
     AgentEvidenceBundle,
@@ -49,13 +50,24 @@ def _news_fallback_items(fetched_data: dict[str, Any]) -> list[QualitativeEviden
         content = "\n".join(part for part in [title, summary] if part)
         if not content:
             continue
+        identity = (
+            str(article.get("canonical_url") or article.get("url") or article.get("link"))
+            or content
+        )
+        evidence_id = f"fallback-news:{sha256(identity)[:16]}"
         items.append(
             QualitativeEvidenceItem(
+                evidence_id=evidence_id,
                 text=content,
                 source=str(article.get("source", "Fetched news")),
                 published_date=str(article.get("published_date", "")),
                 source_type="news",
-                metadata={"fallback": True},
+                metadata={
+                    "fallback": True,
+                    "evidence_id": evidence_id,
+                    "url": str(article.get("url", "")),
+                    "canonical_url": str(article.get("canonical_url", "")),
+                },
             )
         )
     return items
@@ -81,6 +93,7 @@ def _vector_items(
             query_text=requirements.query_text,
             ticker=task.ticker,
             limit=requirements.limit,
+            recency_window_days=requirements.recency_window_days,
         )
     except Exception as exc:  # noqa: BLE001
         report.failure_reason = f"retrieval_failed: {exc}"
@@ -88,6 +101,7 @@ def _vector_items(
 
     items = [
         QualitativeEvidenceItem(
+            evidence_id=str(chunk.chunk_id),
             text=chunk.text,
             source=str(
                 chunk.metadata.get("source", chunk.metadata.get("domain", "Unknown"))
@@ -96,7 +110,11 @@ def _vector_items(
                 chunk.metadata.get("published_date", chunk.metadata.get("date", ""))
             ),
             source_type=str(chunk.metadata.get("source_type", "news")),
-            metadata={str(key): value for key, value in chunk.metadata.items()},
+            metadata={
+                **{str(key): value for key, value in chunk.metadata.items()},
+                "evidence_id": str(chunk.chunk_id),
+                "ticker": chunk.ticker,
+            },
         )
         for chunk in chunks
         if getattr(chunk, "text", "")

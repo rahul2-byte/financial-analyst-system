@@ -1,5 +1,5 @@
 from typing import Optional, Dict, Any, List
-from datetime import datetime
+from datetime import datetime, UTC
 from uuid import uuid4
 
 from sqlalchemy import UniqueConstraint, Index
@@ -56,7 +56,7 @@ class CompanyFundamentals(SQLModel, table=True):
     __tablename__ = "company_fundamentals"
 
     ticker: str = Field(primary_key=True)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     name: Optional[str] = None
     industry: Optional[str] = None
     sector: Optional[str] = None
@@ -81,7 +81,7 @@ class FinancialStatements(SQLModel, table=True):
     __tablename__ = "financial_statements"
 
     ticker: str = Field(primary_key=True)
-    updated_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     income_statement: Dict[str, Any] = Field(
         default_factory=dict, sa_column=Column(JSON)
     )
@@ -92,7 +92,7 @@ class FinancialStatements(SQLModel, table=True):
 class MacroIndicators(SQLModel, table=True):
     __tablename__ = "macro_indicators"
 
-    date: datetime = Field(default_factory=datetime.utcnow, primary_key=True)
+    date: datetime = Field(default_factory=lambda: datetime.now(UTC), primary_key=True)
     nifty_50: Optional[float] = None
     india_vix: Optional[float] = None
     usd_inr: Optional[float] = None
@@ -111,7 +111,7 @@ class CacheIndex(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     ticker: str = Field(index=True)
     dataset_type: str = Field(index=True)  # "ohlcv", "fundamentals", "news"
-    last_updated: datetime = Field(default_factory=datetime.utcnow)
+    last_updated: datetime = Field(default_factory=lambda: datetime.now(UTC))
     available_range: Optional[str] = None
     extra_info: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
@@ -123,7 +123,7 @@ class ResearchAuditLog(SQLModel, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     query_id: str = Field(index=True)
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     agent_name: str
     action: str
     data: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))

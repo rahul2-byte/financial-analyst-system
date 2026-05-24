@@ -29,7 +29,8 @@ import logging
 
 from app.core.audit import build_node_audit_entry
 from app.core.contracts.graph_node import finalize_node_output
-from app.core.node_resources import resources
+from app.core.node_resources import resources  # noqa: F401 - legacy test patch point
+from app.core.observability import observe, opik_context
 from data.news_pipeline.query_templates import QueryTemplateLibrary
 from agents.shared.utils import (
     derive_news_coverage_score,
@@ -38,7 +39,7 @@ from agents.shared.utils import (
 )
 
 from agents.financial.data.policy import (
-    DATA_FETCH_FRESHNESS_THRESHOLD as DATA_FRESHNESS_THRESHOLD,
+    DATA_FETCH_FRESHNESS_THRESHOLD,
     NEWS_FRESHNESS_THRESHOLD,
     REQUIRED_DATASETS,
 )
@@ -101,17 +102,6 @@ class DatasetOperationResult(TypedDict):
     should_persist: bool
 
 
-def _dataset_ready_from_status(
-    status: dict[str, Any], requirements: dict[str, Any]
-) -> bool:
-    if not bool(status.get("available", False)):
-        return False
-    if float(status.get("freshness", 0.0)) < DATA_FRESHNESS_THRESHOLD:
-        return False
-    minimum_coverage = float(requirements.get("minimum_coverage_ratio", 0.0) or 0.0)
-    return float(status.get("coverage", 0.0)) >= minimum_coverage
-
-
 def _build_materialize_plan(timeframe_policy: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         {
@@ -122,6 +112,52 @@ def _build_materialize_plan(timeframe_policy: dict[str, Any]) -> list[dict[str, 
         }
         for dataset in REQUIRED_DATASETS
     ]
+
+
+def _dataset_ready_for_materialization(
+    dataset: str,
+    status: dict[str, Any],
+    timeframe_policy: dict[str, Any],
+) -> bool:
+    if not status.get("available", False):
+        return False
+    if float(status.get("freshness", 0.0)) < DATA_FETCH_FRESHNESS_THRESHOLD:
+        return False
+    minimum_coverage = float(
+        timeframe_policy.get(dataset, {}).get("minimum_coverage_ratio", 0.0)
+    )
+    return float(status.get("coverage", 0.0)) >= minimum_coverage
+
+
+def _required_status_ready_for_materialization(
+    data_status: dict[str, Any],
+    timeframe_policy: dict[str, Any],
+) -> bool:
+    return all(
+        _dataset_ready_for_materialization(
+            dataset,
+            dict(data_status.get(dataset, {})),
+            timeframe_policy,
+        )
+        for dataset in REQUIRED_DATASETS
+    )
+
+
+def _required_payloads_materialized(fetched_data: dict[str, Any]) -> bool:
+    def _has_by_symbol_payload(value: Any) -> bool:
+        if not isinstance(value, dict):
+            return False
+        by_symbol = value.get("by_symbol")
+        return isinstance(by_symbol, dict) and any(bool(v) for v in by_symbol.values())
+
+    if not _has_by_symbol_payload(fetched_data.get("ohlcv")):
+        return False
+    if not _has_by_symbol_payload(fetched_data.get("fundamentals")):
+        return False
+    if not isinstance(fetched_data.get("macro"), dict) or not fetched_data.get("macro"):
+        return False
+    news_value = fetched_data.get("news")
+    return isinstance(news_value, list) and bool(news_value)
 
 
 def _load_ohlcv_from_sql(
@@ -217,10 +253,10 @@ def _store_data(
     payload: Any,
     ticker: str | None,
     payload_by_symbol: dict[str, Any] | None = None,
-) -> None:
+) -> dict[str, Any]:
     # Backwards-compatible shim: persistence is now owned by
     # `agents.financial.data.persistence`.
-    persist_dataset(
+    return persist_dataset(
         dataset=dataset,
         payload=payload,
         ticker=ticker,
@@ -315,11 +351,6 @@ def build_operation_context(
     current_status = dict(state.get("data_status", {}))
     fetched_data = dict(state.get("fetched_data", {}))
     dataset_state = dict(current_status.get(dataset, {}))
-
-    if action == "materialize" and not _dataset_ready_from_status(
-        dataset_state, requirements
-    ):
-        action = "fetch"
 
     return {
         "dataset": dataset,
@@ -584,12 +615,14 @@ async def fetch_or_refresh_dataset(
     }
 
 
-def persist_dataset_result(result: DatasetOperationResult, ticker: str | None) -> None:
+def persist_dataset_result(
+    result: DatasetOperationResult, ticker: str | None
+) -> dict[str, Any] | None:
     if not result["should_persist"]:
-        return
+        return None
 
     dataset_payload = result["dataset_payload"]
-    _store_data(
+    return _store_data(
         dataset=result["dataset"],
         payload=result["fetched"],
         ticker=ticker,
@@ -607,6 +640,7 @@ def apply_dataset_result(
     current_status: dict[str, Any],
     touched_data_status: dict[str, dict[str, Any]],
     fetched_data: dict[str, Any],
+    persistence_outcome: dict[str, Any] | None = None,
 ) -> bool:
     dataset = result["dataset"]
     dataset_state = dict(result["dataset_state"])
@@ -615,7 +649,10 @@ def apply_dataset_result(
     dataset_state["source"] = result["source"]
     dataset_state["coverage"] = result["coverage"]
     dataset_state["freshness"] = result["freshness"]
-    dataset_state["error"] = (
+    persistence_error = None
+    if persistence_outcome is not None and not bool(persistence_outcome.get("ok")):
+        persistence_error = str(persistence_outcome.get("error") or "PERSISTENCE_FAILED")
+    dataset_state["error"] = persistence_error or (
         result["error"]
         if result["error"]
         else (None if result["available"] else "INSUFFICIENT_DATA")
@@ -627,6 +664,7 @@ def apply_dataset_result(
     return bool(result["performed_network_fetch"])
 
 
+@observe(name="Data:Fetch", as_type="span")
 async def data_fetch_node(state: dict[str, Any]) -> dict[str, Any]:
     current_status = dict(state.get("data_status", {}))
     fetched_data = dict(state.get("fetched_data", {}))
@@ -652,7 +690,11 @@ async def data_fetch_node(state: dict[str, Any]) -> dict[str, Any]:
     query = state.get("user_query", "")
     timeframe_policy = dict(state.get("timeframe_policy", {}))
 
-    if not isinstance(data_plan, list) or not data_plan:
+    if _required_status_ready_for_materialization(
+        current_status, timeframe_policy
+    ) and not _required_payloads_materialized(fetched_data):
+        data_plan = _build_materialize_plan(timeframe_policy)
+    elif not isinstance(data_plan, list) or not data_plan:
         data_plan = _build_materialize_plan(timeframe_policy)
 
     for item in data_plan:
@@ -675,19 +717,27 @@ async def data_fetch_node(state: dict[str, Any]) -> dict[str, Any]:
         if result is None:
             result = await fetch_or_refresh_dataset(context)
 
-        persist_dataset_result(result, ticker)
+        persistence_outcome = persist_dataset_result(result, ticker)
         performed_network_fetch = (
             apply_dataset_result(
                 result=result,
                 current_status=current_status,
                 touched_data_status=touched_data_status,
                 fetched_data=fetched_data,
+                persistence_outcome=persistence_outcome,
             )
             or performed_network_fetch
         )
 
     if performed_network_fetch:
         retries["data_fetch"] = retries.get("data_fetch", 0) + 1
+
+    opik_context.update_current_span(
+        metadata={
+            "performed_network_fetch": performed_network_fetch,
+            "datasets_touched": list(touched_data_status.keys()),
+        }
+    )
 
     payload = {
         "data_status": current_status,

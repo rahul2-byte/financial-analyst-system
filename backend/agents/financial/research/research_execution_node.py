@@ -11,6 +11,7 @@ from app.core.contracts.graph_node import finalize_node_output
 from app.core.graph.agent_map import AGENT_NODE_MAP
 from app.core.graph.async_control import run_parallel_with_timeout
 from app.core.node_resources import resources
+from app.core.observability import observe, opik_context
 from app.core.research_plan_schemas import AgentExecutionInput, ResearchTaskSpec
 
 
@@ -66,6 +67,7 @@ def _resolve_execution_input(
     return execution_input.model_dump(mode="json")
 
 
+@observe(name="Research:Execution", as_type="span")
 async def research_execution_node(state: dict[str, Any]) -> dict[str, Any]:
     parsed_tasks: list[ResearchTaskSpec] = []
     validation_errors: list[str] = []
@@ -89,7 +91,11 @@ async def research_execution_node(state: dict[str, Any]) -> dict[str, Any]:
         )
 
     staged_tasks = _stage_tasks(parsed_tasks)
-    results: dict[str, Any] = dict(state.get("results", {}))
+    results: dict[str, Any] = {
+        agent: payload
+        for agent, payload in dict(state.get("results", {})).items()
+        if isinstance(payload, dict)
+    }
     tool_registry: list[dict[str, Any]] = list(state.get("tool_registry", []))
     errors: list[str] = []
     hard_errors: list[str] = []
@@ -189,8 +195,8 @@ async def research_execution_node(state: dict[str, Any]) -> dict[str, Any]:
 
         completed, timeout_errors = await run_parallel_with_timeout(
             coroutines,
-            task_timeout_s=None,
-            stage_timeout_s=None,
+            task_timeout_s=state.get("timeouts", {}).get("task_timeout_s"),
+            stage_timeout_s=state.get("timeouts", {}).get("stage_timeout_s"),
         )
         errors.extend(timeout_errors)
         timeout_error_count += len(timeout_errors)
@@ -265,6 +271,16 @@ async def research_execution_node(state: dict[str, Any]) -> dict[str, Any]:
                 if is_req:
                     hard_errors.append(message)
                 continue
+            if not isinstance(payload, dict):
+                is_req = agent in required_agents
+                message = f"{'Required agent' if is_req else 'Agent'} '{agent}' produced invalid payload"
+                errors.append(message)
+                stage_entry["agents_with_errors"].append(
+                    {"agent": agent, "error": "invalid payload"}
+                )
+                if is_req:
+                    hard_errors.append(message)
+                continue
             results[agent] = payload
 
         stage_diagnostics.append(stage_entry)
@@ -277,6 +293,14 @@ async def research_execution_node(state: dict[str, Any]) -> dict[str, Any]:
         status = "failure"
     elif errors:
         status = "partial"
+
+    opik_context.update_current_span(
+        metadata={
+            "status": status,
+            "tasks_executed": len(results),
+            "tool_registry_count": len(tool_registry),
+        }
+    )
 
     payload = {
         "results": results,

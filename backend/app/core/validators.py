@@ -17,6 +17,8 @@ import html
 import re
 from typing import Tuple, Optional
 
+from app.core.ticker import parse_ticker
+
 MALICIOUS_PATTERNS: list[str] = [
     r"ignore\s+(all\s+)?(previous|above|prior)",
     r"forget\s+(everything|all)\s+you\s+(know|were|have)",
@@ -86,13 +88,13 @@ def validate_ticker(ticker: Optional[str]) -> Tuple[bool, str]:
     if not ticker:
         return False, "Ticker is required"
 
-    ticker = ticker.strip().upper()
+    try:
+        parsed_ticker = parse_ticker(ticker)
+    except ValueError as exc:
+        return False, str(exc)
 
-    if len(ticker) > 10:
+    if len(parsed_ticker.canonical) > 10:
         return False, "Ticker too long"
-
-    if not re.match(r"^[A-Z0-9\.\-\^]+$", ticker):
-        return False, "Invalid ticker format"
 
     return True, ""
 

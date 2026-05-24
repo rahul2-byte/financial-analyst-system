@@ -830,7 +830,6 @@ def initialize_tool_system() -> None:
         matches = re.findall(r"`([a-z_]+)`", prompt)
         prompt_tool_names.update(matches)
 
-    available_tool_names = {t.name for t in tool_registry.list_tools()}
     # We only care about tools mentioned in the context of "use the X tool"
     # This is a heuristic, but good for catching blatant mismatches.
     # Actually, the plan just says "assert prompt-declared tool names exist".

@@ -1,16 +1,17 @@
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from app.core.contracts.graph_node import finalize_node_output
 from app.core.audit import build_node_audit_entry
 from app.core.node_resources import resources
+from app.core.observability import observe, opik_context
 from app.core.report_renderer import generate_narrative_report
 from app.core.research_quality import evaluate_research_gate
 from agents.quality.claim_verifier import is_data_gap_claim
 
 
+@observe(name="Quality:ValidationGate", as_type="span")
 async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
     synthesis = state.get("results", {}).get("synthesis", {})
     if not isinstance(synthesis, dict) or not synthesis:
@@ -88,6 +89,15 @@ async def validation_node(state: dict[str, Any]) -> dict[str, Any]:
             state.get("coverage_report", {}).get("source_diversity_score", 0.5)
         ),
         unresolved_conflicts=len(unresolved_conflicts),
+    )
+
+    opik_context.update_current_span(
+        metadata={
+            "gate_status": gate.status,
+            "gate_code": gate.code,
+            "major_claims": len(major_claims),
+            "verified_major_claims": len(verified_major_claims),
+        }
     )
 
     if gate.status == "hard_stop":

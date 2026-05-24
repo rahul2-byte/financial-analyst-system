@@ -13,24 +13,21 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from app.core.ticker import parse_ticker
+
 
 def canonicalize_ticker(ticker: str) -> str:
     """Normalize a ticker to its canonical form.
 
-    Rules (legacy):
-    - Uppercase and strip whitespace.
-    - Remove common Indian equity suffixes (".NS", ".BO") if present.
-
-    Returns an empty string for empty/whitespace input.
+    Empty/whitespace input returns an empty string for legacy callers.
+    Non-empty input delegates validation and normalization to the central ticker
+    parser.
     """
 
-    value = (ticker or "").strip().upper()
+    value = (ticker or "").strip()
     if not value:
         return ""
-    for suffix in (".NS", ".BO"):
-        if value.endswith(suffix):
-            return value[: -len(suffix)]
-    return value
+    return parse_ticker(value).canonical
 
 
 def ticker_variants(ticker: str) -> list[str]:
@@ -40,14 +37,15 @@ def ticker_variants(ticker: str) -> list[str]:
     This function provides a stable list of candidates for querying.
     """
 
-    canonical = canonicalize_ticker(ticker)
-    raw = (ticker or "").strip().upper()
-    variants: list[str] = []
-    for candidate in (raw, canonical, f"{canonical}.NS", f"{canonical}.BO"):
-        cleaned = (candidate or "").strip().upper()
-        if cleaned and cleaned not in variants:
-            variants.append(cleaned)
-    return variants
+    value = (ticker or "").strip()
+    if not value:
+        return []
+    parsed_ticker = parse_ticker(value)
+    variants = list(parsed_ticker.db_lookup_variants)
+    if parsed_ticker.exchange_suffix is None:
+        return variants
+
+    return list(dict.fromkeys([parsed_ticker.provider_symbol, *variants]))
 
 
 @dataclass(frozen=True)
@@ -86,7 +84,9 @@ def should_accept_ranked_symbol_match(
         return False, None
 
     if len(results) == 1:
-        return (top_score >= policy.min_top_score), symbol.strip().upper()
+        if top_score >= policy.min_top_score:
+            return True, symbol.strip().upper()
+        return False, symbol.strip().upper()
 
     runner_up = results[1]
     second_score = float(runner_up.get("score", 0.0) or 0.0)

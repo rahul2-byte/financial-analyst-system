@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   postgres:
-    image: docker.io/pgvector/pgvector:pg15
+    image: docker.io/pgvector/pgvector:pg18
     container_name: fin_postgres
     environment:
       POSTGRES_USER: ${POSTGRES_USER:-fin_user}
@@ -11,25 +11,12 @@ services:
     ports:
       - "5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-fin_user} -d ${POSTGRES_DB:-fin_db}"]
       interval: 10s
       timeout: 5s
       retries: 5
-
-  # Arize Phoenix - Lightweight Observability (OTel Native)
-  phoenix:
-    image: docker.io/arizephoenix/phoenix:latest
-    container_name: fin_phoenix
-    ports:
-      - "6006:6006" # UI
-      - "4317:4317" # OTLP gRPC
-      - "4318:4318" # OTLP HTTP
-    environment:
-      - PHOENIX_PORT=6006
-      - PHOENIX_HOST=0.0.0.0
-    restart: always
 
 volumes:
   postgres_data:

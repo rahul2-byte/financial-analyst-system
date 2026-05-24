@@ -20,6 +20,7 @@ from typing import Any
 
 from app.core.audit import build_node_audit_entry
 from app.core.contracts.graph_node import finalize_node_output
+from app.core.observability import observe, opik_context
 
 
 def _dataset_requirements(
@@ -59,6 +60,7 @@ def _build_data_plan_audit(
     return audit
 
 
+@observe(name="Data:Plan", as_type="span")
 async def data_plan_node(state: dict[str, Any]) -> dict[str, Any]:
     # Defensive narrowing: upstream state is `dict[str, Any]`.
     checker_raw = state.get("data_check")
@@ -78,7 +80,7 @@ async def data_plan_node(state: dict[str, Any]) -> dict[str, Any]:
             {
                 "dataset": dataset,
                 "priority": "P0",
-                "action": "fetch",
+                "action": "materialize",
                 "requirements": _dataset_requirements(dataset, timeframe_policy),
             }
         )
@@ -91,6 +93,14 @@ async def data_plan_node(state: dict[str, Any]) -> dict[str, Any]:
                 "requirements": _dataset_requirements(dataset, timeframe_policy),
             }
         )
+
+    opik_context.update_current_span(
+        metadata={
+            "missing_count": len(missing),
+            "stale_count": len(stale),
+            "operations_count": len(data_plan),
+        }
+    )
 
     payload = {
         "data_plan": data_plan,

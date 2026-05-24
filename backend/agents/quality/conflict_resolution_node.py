@@ -4,8 +4,10 @@ from typing import Any
 
 from app.core.audit import build_node_audit_entry
 from app.core.contracts.graph_node import finalize_node_output
+from app.core.observability import observe
 
 
+@observe(name="Quality:ConflictResolution", as_type="span")
 async def conflict_resolution_node(state: dict[str, Any]) -> dict[str, Any]:
     results = dict(state.get("results", {}))
     synthesis = dict(results.get("synthesis", {}))

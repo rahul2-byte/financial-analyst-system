@@ -7,11 +7,7 @@ from urllib.parse import urlparse
 
 import pandas as pd
 
-from agents.financial.data.news.dedupe import (
-    EPOCH_UTC,
-    article_dedupe_key,
-    parse_iso_datetime,
-)
+from agents.financial.data.news.dedupe import EPOCH_UTC, news_url_identity, parse_iso_datetime
 from agents.shared.utils import derive_news_freshness_score
 
 
@@ -92,7 +88,7 @@ def build_news_cache_summary(
     """
 
     dedupe_keys = {
-        dedupe for article in payload if (dedupe := article_dedupe_key(article))
+        dedupe for article in payload if (dedupe := news_url_identity(article))
     }
     covered_intent_types = sorted(
         {
@@ -137,7 +133,7 @@ def build_news_cache_summary(
         intent_dedupe_keys = {
             dedupe
             for article in intent_articles
-            if (dedupe := article_dedupe_key(article))
+            if (dedupe := news_url_identity(article))
         }
         coverage_by_intent[intent_type] = {
             "article_count": len(intent_articles),

@@ -73,6 +73,10 @@ class EnvSettings(BaseSettings):
     LANGFUSE_PUBLIC_KEY: str | None = None
     LANGFUSE_SECRET_KEY: str | None = None
     OPIK_USE_LOCAL: bool = True
+    OPIK_URL_OVERRIDE: str = "http://localhost:5173/api"
+    OPIK_URL: str = "http://localhost:5173/api"
+    ENABLE_OBSERVABILITY: bool = True
+    OPIK_PROJECT_NAME: str = "Default Project"
 
     DEFAULT_LLM_MODEL: str | None = None
     FALLBACK_LLM_MODEL: str = "llama-3b"
@@ -90,6 +94,7 @@ class EnvSettings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=True,
+        extra="ignore",
     )
 
     @property

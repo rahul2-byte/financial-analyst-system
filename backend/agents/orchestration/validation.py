@@ -7,6 +7,10 @@ from typing import Dict, Any
 from pydantic import BaseModel, Field
 
 from app.core.node_resources import NodeResources
+from app.core.prompts import prompt_manager
+from app.models.request_models import Message
+from quant.validators import ReportValidator
+from app.config.constants import MODEL_REASONING
 
 
 class ValidationResult(BaseModel):
@@ -25,11 +29,6 @@ class ValidationResult(BaseModel):
         ge=0.0, le=1.0, description="Confidence in the validation decision"
     )
 
-
-from app.core.prompts import prompt_manager
-from app.models.request_models import Message
-from quant.validators import ReportValidator
-from app.config.constants import MODEL_REASONING
 
 logger = logging.getLogger(__name__)
 

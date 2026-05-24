@@ -17,13 +17,13 @@ Usage:
 """
 
 import hashlib
+import inspect
 import json
 import logging
 import time
 import threading
 from typing import Any, Optional, Callable, Dict, Tuple
 from functools import wraps
-import asyncio
 
 logger = logging.getLogger(__name__)
 
@@ -146,7 +146,7 @@ def _make_cache_wrapper(cache: Cache, ttl: float):
             cache.set(cache_key, result, ttl)
             return result
 
-        return async_wrapper if asyncio.iscoroutinefunction(func) else sync_wrapper
+        return async_wrapper if inspect.iscoroutinefunction(func) else sync_wrapper
 
     return wrapper
 

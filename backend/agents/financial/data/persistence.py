@@ -115,10 +115,9 @@ def persist_dataset(
 
         elif dataset == "news" and isinstance(payload, list) and payload:
             chunks: list[Any] = []
-            normalized_articles = dedupe_articles_by_url(
-                [article for article in payload if isinstance(article, dict)]
-            )
-            for article in normalized_articles:
+            normalized_articles = [article for article in payload if isinstance(article, dict)]
+            deduped_articles = dedupe_articles_by_url(normalized_articles)
+            for article in deduped_articles:
                 title = article.get("title", "")
                 summary = article.get("summary", "")
                 content = article.get("content", "")

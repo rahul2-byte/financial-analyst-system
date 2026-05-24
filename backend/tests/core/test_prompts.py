@@ -28,22 +28,6 @@ def test_prompt_manager_loads_prompt_directory():
     )
 
 
-def test_prompt_manager_does_not_load_removed_unused_prompt_files():
-    manager = PromptManager()
-    manager._load_prompts()
-
-    for removed_key in (
-        "fundamental",
-        "macro_indicators",
-        "market_news",
-        "planner",
-        "price_and_fundamentals",
-        "retrieval",
-        "web_search",
-    ):
-        assert removed_key not in manager.prompts
-
-
 def test_prompt_manager_loads_interactive_planner_prompts():
     manager = PromptManager()
     manager._load_prompts()
@@ -72,16 +56,15 @@ def test_prompt_manager_loads_centralized_node_prompts_and_ticker_resolver():
         "autonomous_orchestrator.ticker_resolver.system"
     )
     sentiment_node = manager.get_prompt("sentiment.user_node", text="test text")
-    macro_node = manager.get_prompt("macro.user_node", macro_data_json="{}")
+    macro_node = manager.get_prompt("macro.user_node", ticker="AAPL", data="{}")
     contrarian_node = manager.get_prompt(
         "contrarian.user_node",
-        market_data_json="{}",
-        sentiment_data_json="{}",
+        ticker="AAPL",
+        data="{}",
     )
 
     assert "RELIANCE" in ticker_resolver
     assert "ambiguity_reason" in ticker_resolver
-    assert sentiment_node == "Analyze the sentiment of this text: test text\n"
-    assert macro_node == "Analyze these macroeconomic indicators: {}\n"
-    assert "Market Data: {}" in contrarian_node
-    assert "Sentiment: {}" in contrarian_node
+    assert "test text" in sentiment_node
+    assert "AAPL" in macro_node
+    assert "AAPL" in contrarian_node

@@ -14,12 +14,13 @@ Usage:
 """
 
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, UTC
 from contextlib import contextmanager
 from sqlmodel import SQLModel, Session, create_engine, select, func, text
 from sqlalchemy import desc
 from sqlalchemy.pool import QueuePool
 from app.config import settings
+from app.core.ticker import parse_ticker
 from data.interfaces.storage import IStructuredStorage
 from data.schemas.market import OHLCVData
 from storage.sql.models import (
@@ -44,20 +45,20 @@ POOL_TIMEOUT = 30
 class PostgresClient(IStructuredStorage):
     @staticmethod
     def _canonical_equity_ticker(ticker: str) -> str:
-        value = str(ticker or "").strip().upper()
-        if value.endswith(".NS") or value.endswith(".BO"):
-            return value[:-3]
-        return value
+        return parse_ticker(ticker).canonical
 
     @classmethod
     def _fundamentals_lookup_variants(cls, ticker: str) -> list[str]:
-        requested = str(ticker or "").strip().upper()
-        canonical = cls._canonical_equity_ticker(ticker)
-        variants: list[str] = []
-        for candidate in (requested, canonical, f"{canonical}.NS", f"{canonical}.BO"):
-            if candidate and candidate not in variants:
-                variants.append(candidate)
-        return variants
+        return list(parse_ticker(ticker).db_lookup_variants)
+
+    @classmethod
+    def _fundamentals_lookup_variants_for_request(cls, ticker: str) -> list[str]:
+        parsed_ticker = parse_ticker(ticker)
+        variants = list(parsed_ticker.db_lookup_variants)
+        if parsed_ticker.exchange_suffix is None:
+            return variants
+
+        return list(dict.fromkeys([parsed_ticker.provider_symbol, *variants]))
 
     """
     PostgreSQL client with connection pooling.
@@ -524,11 +525,9 @@ class PostgresClient(IStructuredStorage):
                 FROM company_fundamentals
                 WHERE ticker = :ticker
                 """)
-            lookup_variants = self._fundamentals_lookup_variants(ticker)
-            requested = str(ticker or "").strip().upper()
-            requested_is_suffixed = requested.endswith(".NS") or requested.endswith(
-                ".BO"
-            )
+            lookup_variants = self._fundamentals_lookup_variants_for_request(ticker)
+            parsed_ticker = parse_ticker(ticker)
+            requested_is_suffixed = parsed_ticker.exchange_suffix is not None
             best_row: dict[str, Any] | None = None
             best_score: tuple[float, int] | None = None
             completeness_fields = (
@@ -737,7 +736,7 @@ class PostgresClient(IStructuredStorage):
                 for key, value in data.items():
                     if hasattr(existing, key) and key != "ticker":
                         setattr(existing, key, value)
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = datetime.now(UTC)
                 session.add(existing)
             else:
                 new_fund = CompanyFundamentals(
@@ -778,7 +777,7 @@ class PostgresClient(IStructuredStorage):
                 existing.income_statement = data.get("income_statement", {})
                 existing.balance_sheet = data.get("balance_sheet", {})
                 existing.cash_flow = data.get("cash_flow", {})
-                existing.updated_at = datetime.utcnow()
+                existing.updated_at = datetime.now(UTC)
                 session.add(existing)
             else:
                 new_stmt = FinancialStatements(
@@ -873,7 +872,7 @@ class PostgresClient(IStructuredStorage):
             ).first()
 
             if existing:
-                existing.last_updated = datetime.utcnow()
+                existing.last_updated = datetime.now(UTC)
                 if available_range:
                     existing.available_range = available_range
                 if extra_info:

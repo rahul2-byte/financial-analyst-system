@@ -3,8 +3,8 @@ from datetime import UTC, datetime
 import pytest
 
 from agents.financial.data import data_fetch_node as data_fetch_module
-from agents.financial.data.data_check_node import _merge_local_audit_status
 from agents.financial.data.data_check_node import data_check_node
+from agents.financial.data.status_merge import merge_local_audit_status
 from app.core.node_resources import resources
 from app.core.orchestration_schemas import OfflineStatus
 from data.news_pipeline.query_templates import QueryTemplateLibrary
@@ -169,7 +169,7 @@ def test_store_data_persists_rich_news_cache_summary_and_chunk_metadata(monkeypa
     assert extra_info["last_fetch_at"] == "2026-04-11T12:00:00+00:00"
     assert extra_info["latest_published_at"] == "2026-04-11T11:30:00+00:00"
     assert extra_info["article_count"] == 3
-    assert extra_info["deduped_article_count"] == 2
+    assert extra_info["deduped_article_count"] == 3
     assert extra_info["trusted_article_count"] == 2
     assert extra_info["open_web_article_count"] == 3
     assert extra_info["covered_intent_types"] == ["company_news", "macro_sector"]
@@ -185,7 +185,7 @@ def test_store_data_persists_rich_news_cache_summary_and_chunk_metadata(monkeypa
     assert extra_info["coverage_by_intent"] == {
         "company_news": {
             "article_count": 2,
-            "deduped_article_count": 1,
+            "deduped_article_count": 2,
             "trusted_article_count": 2,
             "open_web_article_count": 2,
         },
@@ -214,6 +214,156 @@ def test_store_data_persists_rich_news_cache_summary_and_chunk_metadata(monkeypa
     assert first_chunk.metadata["is_trusted_domain"] is True
     assert first_chunk.metadata["timeframe"] == "7d"
     assert first_chunk.metadata["fetched_at"] == "2026-04-11T12:00:00+00:00"
+
+
+def test_store_data_discards_duplicate_news_articles_by_canonical_then_raw_url(
+    monkeypatch,
+):
+    sql_stub = _StubSQLDB()
+    vector_stub = _StubVectorDB()
+
+    monkeypatch.setattr(data_fetch_module.resources, "_sql_db", sql_stub)
+    monkeypatch.setattr(data_fetch_module.resources, "_vector_db", vector_stub)
+
+    payload = [
+        {
+            "ticker": "AAPL",
+            "title": "Apple first canonical story",
+            "summary": "First version",
+            "content": "Body",
+            "url": "https://news.example.com/apple-ai?utm_source=rss&id=1",
+            "canonical_url": "https://news.example.com/apple-ai?id=1",
+            "published_date": "2026-04-11T11:30:00+00:00",
+            "source_type": "open_web",
+            "intent_type": "company_news",
+            "query_variant": "Apple latest company news strategic updates",
+            "timeframe": "7d",
+            "fetched_at": "2026-04-11T12:00:00+00:00",
+            "title_hash": "title-1",
+        },
+        {
+            "ticker": "AAPL",
+            "title": "Apple duplicate canonical story",
+            "summary": "Second version",
+            "content": "Body",
+            "url": "https://other.example.com/apple-ai-copy",
+            "canonical_url": "https://news.example.com/apple-ai?id=1",
+            "published_date": "2026-04-11T11:00:00+00:00",
+            "source_type": "open_web",
+            "intent_type": "company_news",
+            "query_variant": "Apple latest company news strategic updates",
+            "timeframe": "7d",
+            "fetched_at": "2026-04-11T12:00:00+00:00",
+            "title_hash": "title-2",
+        },
+        {
+            "ticker": "AAPL",
+            "title": "Apple raw URL duplicate story",
+            "summary": "Third version",
+            "content": "Body",
+            "url": "https://news.example.com/apple-raw?utm_medium=email&id=2",
+            "published_date": "2026-04-11T10:00:00+00:00",
+            "source_type": "open_web",
+            "intent_type": "company_news",
+            "query_variant": "Apple latest company news strategic updates",
+            "timeframe": "7d",
+            "fetched_at": "2026-04-11T12:00:00+00:00",
+            "title_hash": "title-3",
+        },
+        {
+            "ticker": "AAPL",
+            "title": "Apple raw URL duplicate story copy",
+            "summary": "Fourth version",
+            "content": "Body",
+            "url": "https://news.example.com/apple-raw?id=2&utm_source=rss",
+            "published_date": "2026-04-11T09:00:00+00:00",
+            "source_type": "open_web",
+            "intent_type": "company_news",
+            "query_variant": "Apple latest company news strategic updates",
+            "timeframe": "7d",
+            "fetched_at": "2026-04-11T12:00:00+00:00",
+            "title_hash": "title-4",
+        },
+    ]
+
+    data_fetch_module._store_data("news", payload, "AAPL")
+
+    assert len(vector_stub.upserts) == 2
+    _, _, extra_info = sql_stub.cache_updates[0]
+    assert extra_info["article_count"] == 4
+    assert extra_info["deduped_article_count"] == 2
+    assert extra_info["chunk_count"] == 2
+
+
+def test_store_data_preserves_intent_coverage_when_duplicate_url_serves_multiple_queries(
+    monkeypatch,
+):
+    sql_stub = _StubSQLDB()
+    vector_stub = _StubVectorDB()
+
+    monkeypatch.setattr(data_fetch_module.resources, "_sql_db", sql_stub)
+    monkeypatch.setattr(data_fetch_module.resources, "_vector_db", vector_stub)
+
+    payload = [
+        {
+            "ticker": "AAPL",
+            "title": "Apple supplier strategy update",
+            "summary": "One article reused across query intents.",
+            "content": "Shared body.",
+            "url": "https://news.example.com/shared-article",
+            "canonical_url": "https://news.example.com/shared-article",
+            "published_date": "2026-04-11T11:30:00+00:00",
+            "source_type": "open_web",
+            "intent_type": "company_news",
+            "query_variant": "Apple latest company news strategic updates",
+            "timeframe": "7d",
+            "fetched_at": "2026-04-11T12:00:00+00:00",
+            "dedupe_key": "shared-article",
+            "title_hash": "title-1",
+        },
+        {
+            "ticker": "AAPL",
+            "title": "Apple supplier strategy update",
+            "summary": "One article reused across query intents.",
+            "content": "Shared body.",
+            "url": "https://news.example.com/shared-article?utm_source=rss",
+            "canonical_url": "https://news.example.com/shared-article",
+            "published_date": "2026-04-11T11:30:00+00:00",
+            "source_type": "open_web",
+            "intent_type": "macro_sector",
+            "query_variant": "Apple sector trends regulation competition macro outlook",
+            "timeframe": "7d",
+            "fetched_at": "2026-04-11T12:00:00+00:00",
+            "dedupe_key": "shared-article",
+            "title_hash": "title-2",
+        },
+    ]
+
+    data_fetch_module._store_data("news", payload, "AAPL")
+
+    assert len(vector_stub.upserts) == 1
+    _, _, extra_info = sql_stub.cache_updates[0]
+    assert extra_info["article_count"] == 2
+    assert extra_info["deduped_article_count"] == 1
+    assert extra_info["covered_intent_types"] == ["company_news", "macro_sector"]
+    assert extra_info["query_variants"] == [
+        "Apple latest company news strategic updates",
+        "Apple sector trends regulation competition macro outlook",
+    ]
+    assert extra_info["coverage_by_intent"] == {
+        "company_news": {
+            "article_count": 1,
+            "deduped_article_count": 1,
+            "trusted_article_count": 0,
+            "open_web_article_count": 1,
+        },
+        "macro_sector": {
+            "article_count": 1,
+            "deduped_article_count": 1,
+            "trusted_article_count": 0,
+            "open_web_article_count": 1,
+        },
+    }
 
 
 def test_store_data_persists_pipeline_quality_metadata(monkeypatch):
@@ -385,7 +535,7 @@ def test_merge_local_audit_status_derives_news_status():
     data_status = {}
     timeframe_policy = {"news": {"minimum_coverage_ratio": 0.5}}
 
-    result = _merge_local_audit_status(data_status, "AAPL", offline, timeframe_policy)
+    result = merge_local_audit_status(data_status, "AAPL", offline, timeframe_policy)
 
     assert result["news"]["available"] is True
 
@@ -409,7 +559,7 @@ def test_merge_local_audit_status_marks_news_unavailable_if_not_fresh():
         },
     )
     data_status = {}
-    result = _merge_local_audit_status(data_status, "AAPL", offline, {})
+    result = merge_local_audit_status(data_status, "AAPL", offline, {})
     assert result["news"]["available"] is False
     assert result["news"]["error"] == "NEWS_STALE"
 
@@ -433,7 +583,7 @@ def test_merge_local_audit_status_marks_news_unavailable_if_not_vector_ready():
         },
     )
     data_status = {}
-    result = _merge_local_audit_status(data_status, "AAPL", offline, {})
+    result = merge_local_audit_status(data_status, "AAPL", offline, {})
     assert result["news"]["available"] is False
     assert result["news"]["error"] == "NEWS_VECTOR_NOT_READY"
 
@@ -451,7 +601,7 @@ def test_merge_local_audit_status_derives_news_coverage_ratio():
         },
     )
     data_status = {}
-    result = _merge_local_audit_status(data_status, "AAPL", offline, {})
+    result = merge_local_audit_status(data_status, "AAPL", offline, {})
     assert result["news"]["coverage"] == 0.4  # 2/5
 
 

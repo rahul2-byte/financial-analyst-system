@@ -9,6 +9,7 @@ from app.core.orchestration_schemas import InteractivePlanPayload
 from app.core.instrument_resolver import resolve_instruments
 from app.core.contracts.graph_node import finalize_node_output
 from app.core.node_resources import resources
+from app.core.observability import observe, opik_context
 from app.core.policies.json_parse_policy import parse_json_from_llm_response
 from app.core.prompts import prompt_manager
 from app.models.request_models import Message
@@ -251,6 +252,7 @@ async def _resolve_ticker_with_llm(
     return ticker, candidates, hints
 
 
+@observe(name="Research:GoalExtraction", as_type="span")
 async def goal_node(state: dict[str, Any]) -> dict[str, Any]:
     query = state.get("user_query", "")
     conversation_history = state.get("conversation_history", [])
@@ -279,11 +281,25 @@ async def goal_node(state: dict[str, Any]) -> dict[str, Any]:
     proposed_agents = _normalize_agents(
         planner_payload.proposed_agents if planner_payload is not None else []
     )
+
+    conversation_history_dicts = [
+        {"role": str(m.get("role")), "content": str(m.get("content"))}
+        for m in conversation_history
+        if isinstance(m, dict)
+    ]
     is_clarification_followup = _is_clarification_followup(
-        conversation_history, normalized_timeframe
+        conversation_history_dicts, normalized_timeframe
     )
     objective = _resolved_objective(
-        query, conversation_history, is_clarification_followup
+        query, conversation_history_dicts, is_clarification_followup
+    )
+
+    opik_context.update_current_span(
+        metadata={
+            "proposed_timeframe": proposed_timeframe,
+            "normalized_timeframe": normalized_timeframe,
+            "proposed_agents": proposed_agents,
+        }
     )
 
     if (
@@ -400,7 +416,7 @@ async def goal_node(state: dict[str, Any]) -> dict[str, Any]:
     }
     try:
         ticker, llm_candidates, resolution_hints = await _resolve_ticker_with_llm(
-            query, conversation_history
+            query, conversation_history_dicts
         )
     except Exception:  # noqa: BLE001
         ticker = None

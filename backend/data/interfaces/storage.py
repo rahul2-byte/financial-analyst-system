@@ -47,6 +47,7 @@ class IVectorStorage(ABC):
         limit: int = 5,
         query_text: Optional[str] = None,
         ticker: Optional[str] = None,
+        recency_window_days: Optional[int] = None,
     ) -> List[ProcessedChunk]:
         """Search for relevant chunks using vector similarity or hybrid approach."""
         pass

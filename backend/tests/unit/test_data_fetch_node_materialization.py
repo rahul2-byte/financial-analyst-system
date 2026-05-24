@@ -238,6 +238,119 @@ async def test_data_fetch_updates_cache_index_for_news_without_storing_payload(
 
 
 @pytest.mark.asyncio
+async def test_data_fetch_materializes_missing_payloads_despite_stale_plan(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(resources, "_sql_db", _StubSQLDB())
+    monkeypatch.setattr(resources, "_yf_fetcher", _StubYFinanceFetcher())
+    monkeypatch.setattr(
+        resources,
+        "_vector_db",
+        _StubVectorDB(
+            {
+                "AAPL": [
+                    {
+                        "ticker": "AAPL",
+                        "text": "Cached vector news chunk",
+                        "source": "pgvector",
+                        "published_date": "2026-04-10T00:00:00+00:00",
+                        "url": "https://example.com/cached",
+                    }
+                ]
+            }
+        ),
+    )
+
+    async def _no_online_news_fetch(**_kwargs):
+        raise AssertionError("stale refresh plan should not trigger online news fetch")
+
+    monkeypatch.setattr(
+        data_fetch_module, "_fetch_planned_news", _no_online_news_fetch
+    )
+
+    state = {
+        "goal": {"ticker": "AAPL"},
+        "timeframe_policy": {
+            "ohlcv": {"period": "1y", "interval": "1d", "expected_points": 1},
+            "news": {"minimum_items": 1, "stale_after_days": 2},
+            "fundamentals": {"required_fields": ["marketCap", "currentPrice"]},
+            "macro": {"required_fields": ["NIFTY_50"]},
+        },
+        "data_status": {
+            "ohlcv": {"available": True, "freshness": 1.0, "coverage": 1.0},
+            "news": {"available": True, "freshness": 1.0, "coverage": 1.0},
+            "fundamentals": {"available": True, "freshness": 1.0, "coverage": 1.0},
+            "macro": {"available": True, "freshness": 1.0, "coverage": 1.0},
+        },
+        "fetched_data": {"news": [{"title": "already materialized"}]},
+        "data_plan": [
+            {"dataset": "news", "action": "refresh", "requirements": {"minimum_items": 1}}
+        ],
+        "retry_count_by_domain": {"data_fetch": 1},
+        "user_query": "test",
+        "conversation_history": [],
+    }
+
+    result = await data_fetch_node(state)
+
+    fetched = result["fetched_data"]
+    assert "ohlcv" in fetched and isinstance(fetched["ohlcv"], dict)
+    assert "fundamentals" in fetched and isinstance(fetched["fundamentals"], dict)
+    assert "macro" in fetched and isinstance(fetched["macro"], dict)
+    assert isinstance(fetched.get("news"), list) and fetched["news"]
+    assert result["retry_count_by_domain"].get("data_fetch") == 1
+
+
+@pytest.mark.asyncio
+async def test_data_fetch_surfaces_news_persistence_failure(monkeypatch) -> None:
+    monkeypatch.setattr(resources, "_sql_db", _RecordingSQLDB())
+    monkeypatch.setattr(resources, "_vector_db", _StubVectorDB({}))
+
+    async def _stub_fetch_planned_news(**_kwargs):
+        return [
+            {
+                "ticker": "AAPL",
+                "title": "Online news",
+                "summary": "Online summary",
+                "content": "Online content",
+                "source": "online",
+                "published_date": "2026-04-10T00:00:00+00:00",
+                "url": "https://example.com/online",
+                "fetched_at": "2026-04-10T00:00:00+00:00",
+            }
+        ]
+
+    monkeypatch.setattr(
+        data_fetch_module, "_fetch_planned_news", _stub_fetch_planned_news
+    )
+    monkeypatch.setattr(
+        data_fetch_module,
+        "_store_data",
+        lambda **_kwargs: {"ok": False, "error": "vector write failed"},
+    )
+
+    state = {
+        "goal": {"ticker": "AAPL"},
+        "timeframe_policy": {"news": {"minimum_items": 1, "stale_after_days": 2}},
+        "data_status": {
+            "news": {"available": False, "freshness": 0.0, "coverage": 0.0}
+        },
+        "fetched_data": {},
+        "data_plan": [
+            {"dataset": "news", "action": "fetch", "requirements": {"minimum_items": 1}}
+        ],
+        "retry_count_by_domain": {},
+        "user_query": "test",
+        "conversation_history": [],
+    }
+
+    result = await data_fetch_node(state)
+
+    assert result["data_status"]["news"]["available"] is True
+    assert result["data_status"]["news"]["error"] == "vector write failed"
+
+
+@pytest.mark.asyncio
 async def test_data_fetch_materializes_news_with_suffix_canonicalization(
     monkeypatch,
 ) -> None:
@@ -346,7 +459,7 @@ async def test_data_fetch_materializes_news_with_typo_tolerant_resolution(
     assert "typo-resolved" in str(news[0].get("summary", ""))
 
 
-def test_build_operation_context_merges_requirements_and_falls_back_from_materialize() -> (
+def test_build_operation_context_keeps_materialize_action() -> (
     None
 ):
     state = {
@@ -377,7 +490,7 @@ def test_build_operation_context_merges_requirements_and_falls_back_from_materia
     )
 
     assert context["dataset"] == "ohlcv"
-    assert context["action"] == "fetch"
+    assert context["action"] == "materialize"
     assert context["requirements"] == {
         "period": "1y",
         "interval": "1d",

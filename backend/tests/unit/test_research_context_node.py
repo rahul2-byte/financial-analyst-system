@@ -79,6 +79,11 @@ async def test_research_context_node_uses_agent_specific_retrieval_queries(monke
     contrarian = contexts["contrarian_analysis"]
     assert sentiment["evidence_bundle"]["retrieval"]["returned_count"] == 1
     assert contrarian["evidence_bundle"]["retrieval"]["returned_count"] == 1
+    evidence_item = sentiment["evidence_bundle"]["qualitative_inputs"][0]
+    assert evidence_item["evidence_id"] == "1"
+    assert evidence_item["metadata"]["evidence_id"] == "1"
+    assert result["citation_index"]["1"]["source"] == "Reuters"
+    assert result["citation_index"]["1"]["published_date"] == "2026-04-10"
 
 
 @pytest.mark.asyncio
@@ -127,7 +132,11 @@ async def test_research_context_node_uses_explicit_news_fallback_when_retrieval_
     )
     assert context["evidence_bundle"]["retrieval"]["retrieval_source"] == "vector_db"
     assert context["evidence_bundle"]["warnings"] == ["used_fetched_news_fallback"]
-    assert "RSS Title" in context["evidence_bundle"]["qualitative_inputs"][0]["text"]
+    evidence_item = context["evidence_bundle"]["qualitative_inputs"][0]
+    assert "RSS Title" in evidence_item["text"]
+    assert evidence_item["evidence_id"]
+    assert evidence_item["metadata"]["evidence_id"] == evidence_item["evidence_id"]
+    assert result["citation_index"][evidence_item["evidence_id"]]["source"] == "Fetched news"
 
 
 @pytest.mark.asyncio

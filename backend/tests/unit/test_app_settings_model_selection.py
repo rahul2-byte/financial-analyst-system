@@ -46,3 +46,10 @@ def test_default_llm_model_prefers_env_override_when_set():
     )
 
     assert settings.DEFAULT_LLM_MODEL == "mistral-env"
+
+
+def test_opik_local_urls_include_api_prefix_by_default():
+    settings = Settings()
+
+    assert settings.OPIK_URL == "http://localhost:5173/api"
+    assert settings.OPIK_URL_OVERRIDE == "http://localhost:5173/api"

@@ -32,6 +32,7 @@ class RetrievalReport(BaseModel):
 
 
 class QualitativeEvidenceItem(BaseModel):
+    evidence_id: str | None = None
     text: str = Field(min_length=1)
     source: str = "Unknown"
     published_date: str = ""

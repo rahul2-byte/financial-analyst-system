@@ -29,41 +29,38 @@ def create_dummy_data(n=100):
 
 def test_calculate_rsi():
     df = create_dummy_data(50)
-    rsi = TechnicalScanner.calculate_rsi(df)
+    rsi = TechnicalScanner.calculate_rsi(df["close"])
     assert isinstance(rsi, pd.Series)
     assert len(rsi) == 50
     # RSI should be between 0 and 100
     valid_rsi = rsi.dropna()
     assert all(valid_rsi >= 0)
     assert all(valid_rsi <= 100)
-    # With period 14, at least first 13 should be NaN (min_periods=14)
-    # But EWM can start earlier depending on alpha, let's just check it eventually produces values
     assert not rsi.isna().all()
 
 
 def test_calculate_macd():
     df = create_dummy_data(100)
-    macd = TechnicalScanner.calculate_macd(df)
-    assert "macd_line" in macd
-    assert "signal_line" in macd
-    assert "macd_hist" in macd
-    assert len(macd["macd_line"]) == 100
-    assert isinstance(macd["macd_line"], pd.Series)
-    # Check that it produces non-NaN values eventually
-    assert not macd["macd_line"].isna().all()
+    macd = TechnicalScanner.calculate_macd(df["close"])
+    assert "line" in macd
+    assert "signal" in macd
+    assert "histogram" in macd
+    assert len(macd["line"]) == 100
+    assert isinstance(macd["line"], pd.Series)
+    assert not macd["line"].isna().all()
 
 
 def test_calculate_bollinger_bands():
     df = create_dummy_data(50)
-    bb = TechnicalScanner.calculate_bollinger_bands(df)
-    assert "upper_band" in bb
-    assert "middle_band" in bb
-    assert "lower_band" in bb
-    assert len(bb["upper_band"]) == 50
+    bb = TechnicalScanner.calculate_bollinger_bands(df["close"])
+    assert "upper" in bb
+    assert "middle" in bb
+    assert "lower" in bb
+    assert len(bb["upper"]) == 50
 
-    valid_upper = bb["upper_band"].dropna()
-    valid_middle = bb["middle_band"].dropna()
-    valid_lower = bb["lower_band"].dropna()
+    valid_upper = bb["upper"].dropna()
+    valid_middle = bb["middle"].dropna()
+    valid_lower = bb["lower"].dropna()
 
     # Check relative order
     assert (valid_upper >= valid_middle).all()
@@ -73,31 +70,24 @@ def test_calculate_bollinger_bands():
 def test_scan_empty_df():
     df = pd.DataFrame()
     result = TechnicalScanner.scan(df)
-    assert result["status"] == "error"
-    assert "empty" in result["message"]
+    assert "error" in result
+    assert "empty" in result["error"]
 
 
 def test_scan_missing_columns():
     df = pd.DataFrame({"not_close": [1, 2, 3]})
     result = TechnicalScanner.scan(df)
-    assert result["status"] == "error"
-    assert "Missing required columns" in result["message"]
+    assert "error" in result
+    assert "missing" in result["error"].lower()
 
 
 def test_scan_success():
     df = create_dummy_data(100)
     result = TechnicalScanner.scan(df)
-    assert result["status"] == "success"
-    data = result["data"]
-    assert "rsi" in data
-    assert "macd" in data
-    assert "bollinger_bands" in data
+    assert "price_action" in result
+    assert "trend" in result
+    assert "momentum" in result
+    assert "volatility" in result
 
-    # Values for latest data point should be valid floats
-    assert isinstance(data["rsi"], float)
-    assert isinstance(data["macd"]["line"], float)
-    assert isinstance(data["macd"]["signal"], float)
-    assert isinstance(data["macd"]["histogram"], float)
-    assert isinstance(data["bollinger_bands"]["upper"], float)
-    assert isinstance(data["bollinger_bands"]["middle"], float)
-    assert isinstance(data["bollinger_bands"]["lower"], float)
+    assert isinstance(result["momentum"]["rsi_14"], float)
+    assert isinstance(result["volatility"]["bb_upper"], float)

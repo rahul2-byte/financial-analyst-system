@@ -124,6 +124,24 @@ class TestValidateTicker:
         # The yfinance provider handles suffix separately
         assert isinstance(is_valid, bool)
 
+    def test_ticker_with_whitespace_and_lowercase_suffix_passes(self):
+        """Ticker validation should use centralized normalization."""
+        is_valid, reason = validate_ticker("  reliance.ns ")
+        assert is_valid
+        assert reason == ""
+
+    def test_ticker_with_provider_operator_passes(self):
+        """Central ticker parsing supports provider operators."""
+        is_valid, reason = validate_ticker("NIFTY=F")
+        assert is_valid
+        assert reason == ""
+
+    def test_operator_only_ticker_is_invalid(self):
+        """Central ticker parsing rejects operator-only symbols."""
+        is_valid, reason = validate_ticker(".")
+        assert not is_valid
+        assert reason == "Invalid ticker format"
+
     def test_ticker_too_long_is_invalid(self):
         """Ticker over 10 chars should be invalid."""
         is_valid, _ = validate_ticker("A" * 11)

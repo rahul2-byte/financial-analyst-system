@@ -12,6 +12,7 @@ from app.core.graph.router_policy import (
 )
 from app.core.audit import build_node_audit_entry
 from app.core.node_resources import resources
+from app.core.observability import observe, opik_context
 from app.core.report_renderer import generate_narrative_report
 
 
@@ -105,9 +106,19 @@ def _build_low_confidence_output(state: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+@observe(name="Research:Router", as_type="span")
 async def router_node(state: dict[str, Any]) -> dict[str, Any]:
     next_iteration = int(state.get("iteration_count", 0)) + 1
     decision = decide_next_action(state)
+
+    opik_context.update_current_span(
+        metadata={
+            "router_decision": decision,
+            "iteration": next_iteration,
+            "force_replan": bool(state.get("force_replan", False)),
+        }
+    )
+
     consecutive_research_plan_routes = (
         int(state.get("consecutive_research_plan_routes", 0)) + 1
         if decision == "run_research_plan"

@@ -97,7 +97,7 @@ async def test_data_plan_audit_logs_prioritized_operations() -> None:
     assert audit["decision_summary"]["symbols"] == ["AAPL"]
     assert audit["decision_summary"]["next_action"] == "run_data_fetch"
     assert audit["decision_summary"]["planned_operations"] == [
-        {"dataset": "news", "action": "fetch", "priority": "P0"},
+        {"dataset": "news", "action": "materialize", "priority": "P0"},
         {"dataset": "fundamentals", "action": "refresh", "priority": "P1"},
     ]
 
@@ -135,7 +135,7 @@ async def test_data_fetch_audit_logs_dataset_outcomes(monkeypatch) -> None:
         def upsert_fundamentals(self, payload):
             return None
 
-        def update_cache_index(self, **kwargs):
+        def update_cache_index(self, *args, **kwargs):
             return None
 
         def save_fundamentals(self, ticker, payload):
@@ -214,7 +214,7 @@ async def test_data_fetch_audit_only_reports_datasets_touched_by_current_plan(
         def upsert_fundamentals(self, payload):
             return None
 
-        def update_cache_index(self, **kwargs):
+        def update_cache_index(self, *args, **kwargs):
             return None
 
         def save_fundamentals(self, ticker, payload):

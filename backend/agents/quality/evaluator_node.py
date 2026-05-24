@@ -11,6 +11,7 @@ from app.core.intelligence import (
     SystemIntelligenceLayer,
 )
 from app.core.node_resources import resources
+from app.core.observability import observe, opik_context
 from app.core.orchestration_schemas import EvaluatorResult
 from app.core.policies.json_parse_policy import parse_json_from_llm_response
 from app.core.prompts import prompt_manager
@@ -92,6 +93,7 @@ def _memory_store():
         return None
 
 
+@observe(name="Quality:Evaluator", as_type="span")
 async def evaluator_node(state: dict[str, Any]) -> dict[str, Any]:
     final_output = state.get("final_output", {})
     final_output_json = json.dumps(final_output, ensure_ascii=True, default=str)
@@ -169,6 +171,14 @@ async def evaluator_node(state: dict[str, Any]) -> dict[str, Any]:
         ),
         current_retries=int(state.get("retry_count_by_domain", {}).get("research", 0)),
         agent_name="evaluator",
+    )
+
+    opik_context.update_current_span(
+        metadata={
+            "score": decision.normalized_score,
+            "error_type": decision.error_type,
+            "action": decision.action,
+        }
     )
 
     evaluation_payload = {

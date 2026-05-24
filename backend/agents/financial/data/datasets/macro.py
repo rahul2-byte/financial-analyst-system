@@ -5,7 +5,7 @@ Behavior-preserving extraction from `agents.financial.data.data_fetch_node`.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, UTC
 from typing import Any
 
 from agents.shared.utils import derive_snapshot_freshness_score

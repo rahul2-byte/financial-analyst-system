@@ -5,6 +5,22 @@ from __future__ import annotations
 import hashlib
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+
+
+TRACKING_PARAMS = {
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_content",
+    "utm_term",
+    "ref",
+    "source",
+    "via",
+    "mc_cid",
+    "fbclid",
+    "gclid",
+}
 
 
 def sha256(value: str) -> str:
@@ -66,6 +82,59 @@ def article_dedupe_key(article: dict[str, Any]) -> str:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return ""
+
+
+def normalize_url_identity(value: Any) -> str:
+    """Normalize a URL for deterministic same-article identity checks."""
+
+    if not isinstance(value, str) or not value.strip():
+        return ""
+
+    parsed = urlparse(value.strip())
+    kept_params = [
+        (key, param_value)
+        for key, param_value in parse_qsl(parsed.query, keep_blank_values=True)
+        if key not in TRACKING_PARAMS
+    ]
+    return urlunparse(
+        (
+            parsed.scheme.lower(),
+            parsed.netloc.lower(),
+            parsed.path,
+            parsed.params,
+            urlencode(sorted(kept_params)),
+            "",
+        )
+    )
+
+
+def news_url_identity(article: dict[str, Any]) -> str:
+    """Return canonical URL first, then normalized raw URL/link, then hash fallback."""
+
+    for key in ("canonical_url", "url", "link"):
+        identity = normalize_url_identity(article.get(key))
+        if identity:
+            return identity
+    for key in ("article_hash", "dedupe_key"):
+        value = article.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+    return ""
+
+
+def dedupe_articles_by_url(articles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Keep the first article for each canonical/raw URL identity."""
+
+    seen: set[str] = set()
+    deduped: list[dict[str, Any]] = []
+    for article in articles:
+        identity = news_url_identity(article)
+        if identity and identity in seen:
+            continue
+        if identity:
+            seen.add(identity)
+        deduped.append(article)
+    return deduped
 
 
 EPOCH_UTC = datetime.fromtimestamp(0, tz=UTC)

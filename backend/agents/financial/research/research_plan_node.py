@@ -20,6 +20,7 @@ from agents.financial.research.query_derivation import (
 from agents.shared.utils import extract_goal_symbols, selected_agents, task_sort_key
 from app.core.audit import build_node_audit_entry
 from app.core.contracts.graph_node import finalize_node_output
+from app.core.observability import observe, opik_context
 from app.core.research_plan_schemas import ResearchTaskSpec
 
 
@@ -96,6 +97,7 @@ def _build_task(
     return task
 
 
+@observe(name="Research:Planner", as_type="span")
 async def research_plan_node(state: dict[str, Any]) -> dict[str, Any]:
     goal = dict(state.get("goal", {}))
     extracted = extract_goal_symbols(goal)
@@ -187,6 +189,14 @@ async def research_plan_node(state: dict[str, Any]) -> dict[str, Any]:
         for t in tasks
         if isinstance(t, dict) and t.get("task_id")
     }
+
+    opik_context.update_current_span(
+        metadata={
+            "task_count": len(tasks),
+            "assigned_agents": assigned_agents,
+        }
+    )
+
     audit = build_node_audit_entry("research_plan_node", state, payload)
     audit["decision_summary"] = {
         "assigned_agents": assigned_agents,

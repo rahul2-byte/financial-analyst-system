@@ -352,13 +352,13 @@ async def test_orchestrator_emits_opik_node_spans(monkeypatch):
     orchestrator = orchestrator_mod.PipelineOrchestrator()
     orchestrator.research_graph = _StubGraph()
 
-    events = [
+    _events = [
         event
         async for event in orchestrator.execute_query(
             "Analyze AAPL"
         )
     ]
-    
+
     assert len(metadata_calls) > 0
     # There should be an update with duration_ms from on_node_end
     assert any("duration_ms" in m for m in metadata_calls)
