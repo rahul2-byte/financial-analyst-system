@@ -1,0 +1,258 @@
+/* FIN-AI Components - Message styles, activity timeline, welcome widget */
+
+/* Welcome widget - centered, shown on empty state */
+#welcome {
+  width: 1fr;
+  height: auto;
+  align: center middle;
+  layout: vertical;
+  padding: 2;
+}
+
+.welcome-title {
+  width: auto;
+  height: auto;
+  color: $fin-accent;
+  text-style: bold;
+  margin-bottom: 1;
+}
+
+.welcome-subtitle {
+  width: auto;
+  height: auto;
+  color: $fin-muted;
+  margin-bottom: 2;
+}
+
+.welcome-section-label {
+  width: auto;
+  height: auto;
+  color: $fin-muted;
+  text-style: dim;
+  margin-bottom: 1;
+}
+
+.suggestion-button {
+  width: 1fr;
+  height: 1;
+  padding: 0 1;
+  margin-bottom: 1;
+  background: $fin-surface;
+  border: solid $fin-border;
+  color: $fin-text;
+}
+
+.suggestion-button:hover {
+  background: $fin-surface-raised;
+  border: solid $fin-accent;
+}
+
+.welcome-commands {
+  width: auto;
+  height: 1;
+  color: $fin-muted;
+  text-style: dim;
+  margin-top: 2;
+}
+
+/* User message: thin left rule, compact */
+.user-message {
+  width: 1fr;
+  height: auto;
+  layout: horizontal;
+  padding: 1 0;
+  margin: 0;
+}
+
+.user-message-rule {
+  width: 0;
+  height: auto;
+  border-left: solid $fin-accent;
+  margin-right: 1;
+}
+
+.user-message-content {
+  width: 1fr;
+  height: auto;
+  color: $fin-text;
+}
+
+.user-label {
+  width: auto;
+  height: auto;
+  color: $fin-accent;
+  text-style: dim;
+  margin-right: 1;
+}
+
+/* Assistant message: markdown body with proper measure */
+.assistant-message {
+  width: 1fr;
+  height: auto;
+  padding: 1 0;
+  margin: 0;
+}
+
+.assistant-label {
+  width: auto;
+  height: auto;
+  color: $fin-muted;
+  text-style: dim;
+  margin-bottom: 1;
+}
+
+.assistant-label.streaming::after {
+  content: "  streaming";
+}
+
+.assistant-label.interrupted::after {
+  content: "  interrupted";
+}
+
+.assistant-body {
+  width: 1fr;
+  height: auto;
+  color: $fin-text;
+  overflow: auto;
+}
+
+/* Command invocation: muted line, not a block */
+.command-line {
+  width: 1fr;
+  height: 1;
+  padding: 0 1;
+  margin: 1 0;
+  color: $fin-muted;
+  text-style: dim;
+}
+
+/* Clarification: warning-tinted block */
+.clarification-block {
+  width: 1fr;
+  height: auto;
+  background: $fin-surface;
+  border: solid $fin-warning;
+  border-left: solid $fin-warning 2;
+  padding: 1;
+  margin: 1 0;
+}
+
+.clarification-heading {
+  width: 1fr;
+  height: 1;
+  color: $fin-warning;
+  text-style: bold;
+  margin-bottom: 1;
+}
+
+.clarification-body {
+  width: 1fr;
+  height: auto;
+  color: $fin-text;
+  margin-bottom: 1;
+}
+
+.clarification-hint {
+  width: 1fr;
+  height: 1;
+  color: $fin-muted;
+  text-style: dim;
+}
+
+/* Error: compact row + recovery affordance */
+.error-block {
+  width: 1fr;
+  height: auto;
+  background: $fin-surface;
+  border: solid $fin-error;
+  border-left: solid $fin-error 2;
+  padding: 1;
+  margin: 1 0;
+}
+
+.error-line {
+  width: 1fr;
+  height: auto;
+  color: $fin-error;
+  margin-bottom: 1;
+}
+
+.error-recovery {
+  width: 1fr;
+  height: 1;
+  color: $fin-muted;
+  text-style: dim;
+}
+
+/* Activity timeline: compact, one per run */
+.run-activity {
+  width: 1fr;
+  height: auto;
+  padding: 1 2;
+  margin: 1 0;
+  color: $fin-muted;
+}
+
+.activity-line {
+  width: 1fr;
+  height: 1;
+  color: $fin-muted;
+  margin: 0 0 0 2;
+}
+
+.activity-symbol {
+  width: auto;
+  height: 1;
+  color: $fin-muted;
+  margin-right: 1;
+}
+
+.activity-symbol.live {
+  color: $fin-accent;
+}
+
+.activity-symbol.success {
+  color: $fin-success;
+}
+
+.activity-symbol.error {
+  color: $fin-error;
+}
+
+/* Live activity: full rows */
+.activity-line.live {
+  color: $fin-text;
+}
+
+/* Completed: collapsed summary */
+.activity-summary {
+  width: 1fr;
+  height: 1;
+  color: $fin-muted;
+}
+
+.activity-summary::before {
+  content: "✓ ";
+  color: $fin-success;
+}
+
+/* Failed: expanded on error */
+.activity-error {
+  width: 1fr;
+  height: auto;
+  color: $fin-error;
+  margin-top: 1;
+}
+
+.activity-error::before {
+  content: "✗ ";
+  color: $fin-error;
+}
+
+.activity-error-recovery {
+  width: 1fr;
+  height: 1;
+  color: $fin-muted;
+  text-style: dim;
+  margin-top: 1;
+}
