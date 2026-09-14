@@ -1,0 +1,25 @@
+/* FIN-AI Theme Tokens - Charcoal + Teal Design System */
+
+/* Background & Surface Hierarchy */
+$fin-background: #0e1116;
+$fin-surface: #15191f;
+$fin-surface-raised: #1c2128;
+
+/* Borders & Structure */
+$fin-border: #2d333b;
+
+/* Text Colors */
+$fin-text: #e6edf3;
+$fin-muted: #8b949e;
+
+/* Accent & Status */
+$fin-accent: #3fb8c8;        /* desaturated teal, not neon #4cc9f0 */
+$fin-success: #3fb950;
+$fin-warning: #d29922;
+$fin-error: #f85149;
+
+/* Apply to Screen defaults */
+Screen {
+  background: $fin-background;
+  color: $fin-text;
+}
