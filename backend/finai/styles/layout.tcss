@@ -1,0 +1,196 @@
+/* FIN-AI Layout - Dense Terminal UI, Conversation-centric */
+
+Screen {
+  layout: vertical;
+  height: 1fr;
+}
+
+/* Header: compact, one row only */
+#header {
+  height: 1;
+  background: $fin-surface;
+  border-bottom: solid $fin-border;
+  padding: 0 1;
+  layout: horizontal;
+}
+
+#header-wordmark {
+  width: auto;
+  color: $fin-accent;
+  text-style: bold;
+}
+
+#header-mode {
+  width: auto;
+  margin-left: 2;
+  color: $fin-muted;
+}
+
+#header-phase {
+  width: 1fr;
+  text-align: right;
+  color: $fin-muted;
+}
+
+#header-session-id {
+  width: auto;
+  margin-left: 1;
+  color: $fin-muted;
+  text-style: dim;
+}
+
+/* Main conversation area: scrollable, 1fr height */
+#conversation {
+  height: 1fr;
+  border: none;
+  background: $fin-background;
+  overflow: auto;
+}
+
+/* Composer: full width at bottom */
+#composer-container {
+  height: auto;
+  background: $fin-surface;
+  border-top: solid $fin-border;
+  padding: 1;
+  layout: vertical;
+}
+
+#composer {
+  width: 1fr;
+  height: auto;
+  background: $fin-background;
+  border: solid $fin-border;
+  border-focus: solid $fin-accent;
+  padding: 1;
+  color: $fin-text;
+}
+
+#composer:focus {
+  border: solid $fin-accent;
+}
+
+#composer-hints {
+  height: 1;
+  color: $fin-muted;
+  margin-top: 1;
+  text-style: dim;
+}
+
+/* Slash menu: raised, above composer */
+#slash-menu {
+  width: 1fr;
+  height: auto;
+  background: $fin-surface-raised;
+  border: solid $fin-border;
+  margin-bottom: 1;
+  display: none;
+}
+
+#slash-menu-item {
+  width: 1fr;
+  height: 1;
+  padding: 0 1;
+  color: $fin-muted;
+}
+
+#slash-menu-item.selected {
+  background: $fin-border;
+  color: $fin-accent;
+}
+
+#slash-menu-item.selected::before {
+  content: "› ";
+  color: $fin-accent;
+}
+
+/* Modals: centered, raised surface */
+Modal {
+  background: $fin-background;
+}
+
+#modal-overlay {
+  background: $fin-background 40%;
+}
+
+.modal-container {
+  background: $fin-surface-raised;
+  border: solid $fin-border;
+  width: 80;
+  height: auto;
+}
+
+.modal-title {
+  width: 1fr;
+  height: auto;
+  padding: 1;
+  color: $fin-text;
+  text-style: bold;
+}
+
+.modal-body {
+  width: 1fr;
+  height: auto;
+  padding: 0 1 1 1;
+  color: $fin-text;
+}
+
+.modal-list {
+  width: 1fr;
+  height: auto;
+}
+
+.modal-item {
+  width: 1fr;
+  height: 1;
+  padding: 0 1;
+  color: $fin-muted;
+}
+
+.modal-item.selected {
+  background: $fin-border;
+  color: $fin-accent;
+}
+
+.modal-item.selected::before {
+  content: "› ";
+  color: $fin-accent;
+}
+
+/* Responsive: narrow padding only, no hiding */
+@media (max-width: 120) {
+  #header {
+    padding: 0 1;
+  }
+  
+  #composer-container {
+    padding: 0 1 1 1;
+  }
+}
+
+@media (max-width: 80) {
+  #header-session-id {
+    display: none;
+  }
+  
+  .modal-container {
+    width: 1fr;
+  }
+}
+
+/* Hide deleted chrome */
+#navigation {
+  display: none;
+}
+
+#context-rail {
+  display: none;
+}
+
+#send {
+  display: none;
+}
+
+#status {
+  display: none;
+}
