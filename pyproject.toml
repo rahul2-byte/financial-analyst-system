@@ -1,0 +1,48 @@
+[project]
+name = "financial-analyst-system"
+version = "0.1.0"
+description = "Evidence-grounded financial research system"
+requires-python = ">=3.11,<3.15"
+dependencies = [
+    "fastapi",
+    "httpx",
+    "json-repair>=0.58.0",
+    "numpy",
+    "pandas",
+    "pydantic>=2.0.0",
+    "pydantic-settings",
+    "pymupdf",
+    "pyyaml",
+    "rich",
+    "trafilatura",
+    "textual>=0.70.0",
+    "uvicorn",
+    "yfinance",
+]
+
+[dependency-groups]
+dev = [
+    "mypy",
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+]
+
+[tool.pytest.ini_options]
+pythonpath = [".", "backend"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+target-version = "py311"
+
+[tool.mypy]
+python_version = "3.12"
+ignore_missing_imports = true
+explicit_package_bases = true
+
+[tool.mypy-evals.run]
+allow_redefinition = true
+disable_error_code = ["no-redef"]
+
+[tool.uv]
+package = false

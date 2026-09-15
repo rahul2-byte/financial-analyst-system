@@ -1,7 +1,6 @@
-from pydantic import ValidationError
 import pytest
-
 from app.core.research_schemas import EvidenceRecord, ResearchAgentResult
+from pydantic import ValidationError
 
 
 def test_research_agent_result_requires_explicit_status_and_findings():

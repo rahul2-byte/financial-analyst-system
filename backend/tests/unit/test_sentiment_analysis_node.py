@@ -1,5 +1,5 @@
-from app.core.tools.tool_system import tool_registry
 from app.core.prompts import prompt_manager
+from app.core.tools.tool_system import tool_registry
 
 
 def test_sentiment_prompt_and_runtime_use_registered_tool_names_only():

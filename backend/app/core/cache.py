@@ -20,10 +20,11 @@ import hashlib
 import inspect
 import json
 import logging
-import time
 import threading
-from typing import Any, Optional, Callable, Dict, Tuple
+import time
+from collections.abc import Callable
 from functools import wraps
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,7 @@ class Cache:
         Args:
             default_ttl: Default time-to-live in seconds (default: 5 minutes)
         """
-        self._cache: Dict[str, Tuple[Any, float]] = {}
+        self._cache: dict[str, tuple[Any, float]] = {}
         self._default_ttl = default_ttl
         self._lock = threading.RLock()
 
@@ -61,7 +62,7 @@ class Cache:
         )
         return hashlib.sha256(key_data.encode()).hexdigest()
 
-    def get(self, key: str) -> Optional[Any]:
+    def get(self, key: str) -> Any | None:
         """Get value from cache if not expired."""
         with self._lock:
             if key in self._cache:
@@ -72,7 +73,7 @@ class Cache:
                     del self._cache[key]
             return None
 
-    def set(self, key: str, value: Any, ttl: Optional[float] = None) -> None:
+    def set(self, key: str, value: Any, ttl: float | None = None) -> None:
         """Set value in cache with TTL."""
         with self._lock:
             ttl = ttl or self._default_ttl
@@ -173,7 +174,7 @@ def clear_all_caches() -> None:
     logger.info("All caches cleared")
 
 
-def get_cache_stats() -> Dict[str, int]:
+def get_cache_stats() -> dict[str, int]:
     """Get statistics about cache usage."""
     return {
         "llm_response_cache_size": len(_llm_response_cache),

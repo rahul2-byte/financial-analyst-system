@@ -19,7 +19,7 @@ SentimentAgent
 
 RetrievalAgent
 
-- Uses embedding model + pgvector
+- Uses current-run extracted source evidence; no embedding index is required
 - Only retrieves context
 
 ResearchAgent

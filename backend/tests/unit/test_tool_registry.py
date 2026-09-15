@@ -1,6 +1,8 @@
+from collections.abc import Callable
+from typing import Any
+
 import pytest
-from typing import Any, Dict, Callable
-from app.core.tools.tool_system import ToolRegistry, ToolDefinition, ToolNamespace
+from app.core.tools.tool_system import ToolDefinition, ToolNamespace, ToolRegistry
 
 
 @pytest.fixture
@@ -22,7 +24,7 @@ def create_mock_handler(name: str) -> Callable:
 
 def test_tool_definition_dataclass():
     """Test ToolDefinition dataclass creation."""
-    params: Dict[str, Any] = {
+    params: dict[str, Any] = {
         "type": "object",
         "properties": {"query": {"type": "string"}},
     }
@@ -69,13 +71,13 @@ def test_tool_definition_default_namespace():
 
 def test_register_tool(tool_registry):
     """Test tool registration."""
-    params: Dict[str, Any] = {"type": "object", "properties": {}}
-    handler = create_mock_handler("market_check")
+    params: dict[str, Any] = {"type": "object", "properties": {}}
+    handler = create_mock_handler("market_health")
 
     tool_registry.register(
         ToolDefinition(
-            name="check_db_status",
-            description="Check database status",
+            name="market_health",
+            description="Check market-data provider status",
             parameters=params,
             handler=handler,
             namespace=ToolNamespace.MARKET,
@@ -84,25 +86,25 @@ def test_register_tool(tool_registry):
 
     tools = tool_registry.list_tools()
     assert len(tools) == 1
-    assert tools[0].name == "check_db_status"
+    assert tools[0].name == "market_health"
 
 
 def test_register_multiple_tools_same_namespace(tool_registry):
     """Test registering multiple tools in the same namespace."""
-    params: Dict[str, Any] = {"type": "object", "properties": {}}
+    params: dict[str, Any] = {"type": "object", "properties": {}}
 
     tool_registry.register(
         ToolDefinition(
-            name="check_db_status",
-            description="Check database status",
+            name="market_health",
+            description="Check market-data provider status",
             parameters=params,
             namespace=ToolNamespace.MARKET,
         ),
     )
     tool_registry.register(
         ToolDefinition(
-            name="get_table_names",
-            description="Get table names",
+            name="list_market_fields",
+            description="List available market fields",
             parameters=params,
             namespace=ToolNamespace.MARKET,
         ),
@@ -114,12 +116,12 @@ def test_register_multiple_tools_same_namespace(tool_registry):
 
 def test_register_different_namespaces(tool_registry):
     """Test registering tools in different namespaces."""
-    params: Dict[str, Any] = {"type": "object", "properties": {}}
+    params: dict[str, Any] = {"type": "object", "properties": {}}
 
     tool_registry.register(
         ToolDefinition(
-            name="check_db_status",
-            description="Check database status",
+            name="market_health",
+            description="Check market-data provider status",
             parameters=params,
             namespace=ToolNamespace.MARKET,
         ),
@@ -147,23 +149,23 @@ def test_register_different_namespaces(tool_registry):
 
 def test_get_tool_by_name(tool_registry):
     """Test retrieving a tool by its full name with namespace."""
-    params: Dict[str, Any] = {"type": "object", "properties": {}}
-    handler = create_mock_handler("check_db")
+    params: dict[str, Any] = {"type": "object", "properties": {}}
+    handler = create_mock_handler("market_health")
 
     tool_registry.register(
         ToolDefinition(
-            name="check_db_status",
-            description="Check database status",
+            name="market_health",
+            description="Check market-data provider status",
             parameters=params,
             handler=handler,
             namespace=ToolNamespace.MARKET,
         ),
     )
 
-    tool = tool_registry.get_tool("market:check_db_status")
+    tool = tool_registry.get_tool("market:market_health")
     assert tool is not None
-    assert tool.name == "check_db_status"
-    assert tool.description == "Check database status"
+    assert tool.name == "market_health"
+    assert tool.description == "Check market-data provider status"
 
 
 def test_get_tool_not_found(tool_registry):
@@ -174,12 +176,12 @@ def test_get_tool_not_found(tool_registry):
 
 def test_list_tools_returns_all_tools(tool_registry):
     """Test list_tools returns all registered tools."""
-    params: Dict[str, Any] = {"type": "object", "properties": {}}
+    params: dict[str, Any] = {"type": "object", "properties": {}}
 
     tool_registry.register(
         ToolDefinition(
-            name="check_db_status",
-            description="Check DB",
+            name="market_health",
+            description="Check market-data provider",
             parameters=params,
             namespace=ToolNamespace.MARKET,
         ),
@@ -196,18 +198,18 @@ def test_list_tools_returns_all_tools(tool_registry):
     tools = tool_registry.list_tools()
     assert len(tools) == 2
     names = [t.name for t in tools]
-    assert "check_db_status" in names
+    assert "market_health" in names
     assert "fetch_stock_price" in names
 
 
 def test_clear_removes_all_tools(tool_registry):
     """Test that clear() removes all registered tools."""
-    params: Dict[str, Any] = {"type": "object", "properties": {}}
+    params: dict[str, Any] = {"type": "object", "properties": {}}
 
     tool_registry.register(
         ToolDefinition(
-            name="check_db_status",
-            description="Check DB",
+            name="market_health",
+            description="Check market-data provider",
             parameters=params,
             namespace=ToolNamespace.MARKET,
         ),
@@ -263,10 +265,6 @@ def test_predefined_tools_registered():
     registry.initialize()
 
     expected_tools = [
-        "market:check_db_status",
-        "market:get_table_names",
-        "market:get_column_names",
-        "market:get_ticker_info",
         "market:submit_offline_status",
         "data:fetch_stock_data",
         "data:fetch_fundamentals",
@@ -275,6 +273,7 @@ def test_predefined_tools_registered():
         "analysis:run_fundamental_scan",
         "analysis:submit_thesis",
         "analysis:run_technical_scan",
+        "interaction:ask_user",
     ]
 
     for tool_name in expected_tools:

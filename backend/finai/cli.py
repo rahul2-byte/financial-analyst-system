@@ -1,0 +1,109 @@
+"""Parse CLI arguments and launch FIN-AI."""
+
+from __future__ import annotations
+
+import argparse
+import asyncio
+import logging
+import os
+import sys
+from collections.abc import Sequence
+from pathlib import Path
+
+from app.core.tools.tool_system import initialize_tool_system
+
+from .app import FinAIApp
+from .plain import render_json, render_plain
+from .session import FinAIRepl
+
+
+def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
+    """Parse CLI options without starting providers or touching the store."""
+    parser = argparse.ArgumentParser(description="Interactive FIN-AI research terminal")
+    parser.add_argument("--data-dir", type=Path, default=Path(".finai"))
+    parser.add_argument("--session", default=None)
+    parser.add_argument("--plain", action="store_true", help="Print a readable one-shot response")
+    parser.add_argument("--json", action="store_true", help="Print one-shot events as JSON")
+    parser.add_argument("--debug", action="store_true", help="Write verbose diagnostics to .finai/logs/finai.log")
+    parser.add_argument("--debug-payloads", action="store_true", help="Include bounded redacted payloads in diagnostics")
+    parser.add_argument("--mode", choices=("guided", "review", "autonomous"), default="guided")
+    parser.add_argument("query", nargs="*", help="One-shot research query")
+    return parser.parse_args(argv)
+
+
+async def run_one_shot(repl: FinAIRepl, query: str, *, as_json: bool) -> None:
+    """Stream one query and render it without starting the TUI."""
+    try:
+        events = [event async for event in repl.typed_stream(query)]
+        output = render_json(events) if as_json else render_plain(events)
+        sys.stdout.write(output)
+    finally:
+        await repl.hive_service.aclose()
+
+
+async def run_legacy(repl: FinAIRepl) -> None:
+    """Run the compatibility console loop for non-interactive terminals."""
+    try:
+        await repl.run()
+    finally:
+        await repl.hive_service.aclose()
+
+
+async def run_interactive(repl: FinAIRepl) -> None:
+    """Start the Textual shell and connect it to the session stream."""
+    app = FinAIApp(
+        session_store=repl.store,
+        compact_callback=repl.compact_context,
+        mode=repl.mode,
+    )
+
+    def resume_session(session_id: str) -> None:
+        repl.resume_session(session_id)
+        app.session_store = repl.store
+
+    def new_session() -> None:
+        repl.new_session()
+        app.session_store = repl.store
+
+    app.session_callback = resume_session
+    app.new_session_callback = new_session
+    app.clear_pending_callback = repl.store.clear_pending
+
+    async def stream(query: str):
+        repl.mode = app.mode
+        async for event in repl.typed_stream(query):
+            yield event
+
+    app.event_stream = stream
+    try:
+        await app.run_async()
+    finally:
+        await repl.hive_service.aclose()
+
+
+def main() -> None:
+    args = parse_arguments()
+    try:
+        if args.debug_payloads:
+            os.environ["FINAI_DIAGNOSTICS"] = "payloads"
+        elif args.debug:
+            os.environ["FINAI_DIAGNOSTICS"] = "trace"
+        initialize_tool_system()
+        log_dir = args.data_dir / "logs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        logging.basicConfig(
+            level=logging.DEBUG if args.debug else logging.WARNING,
+            filename=log_dir / "finai.log",
+            format="%(asctime)s %(levelname)s %(name)s %(message)s",
+        )
+        repl = FinAIRepl(args.data_dir, args.session)
+        repl.mode = args.mode
+        if args.query:
+            asyncio.run(run_one_shot(repl, " ".join(args.query), as_json=args.json))
+            return
+        if sys.stdin.isatty() and sys.stdout.isatty():
+            asyncio.run(run_interactive(repl))
+        else:
+            asyncio.run(run_legacy(repl))
+    except KeyboardInterrupt:
+        sys.exit(130)

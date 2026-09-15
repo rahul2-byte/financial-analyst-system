@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from enum import Enum
-from typing import Any, Protocol
+from typing import Any, ClassVar, Protocol
 
 
 class IntelligenceAction(str, Enum):
@@ -63,7 +63,7 @@ class MemoryStore(Protocol):
 
 
 class SystemIntelligenceLayer:
-    _PROMPT_MAP = {
+    _PROMPT_MAP: ClassVar[dict[str, str]] = {
         "hallucination": "Do not guess. Use only verifiable facts from the data context.",
         "incomplete_response": "Provide a complete and detailed answer addressing all parts of the user query.",
         "factual_error": "Correct factual mismatches and use only grounded values from deterministic sources.",

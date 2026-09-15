@@ -1,4 +1,4 @@
-"""Provides a singleton container for all node resources (services, clients)."""
+"""Small shared container for the two external services used by the graph."""
 
 
 class NodeResources:
@@ -8,41 +8,23 @@ class NodeResources:
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(NodeResources, cls).__new__(cls)
+            cls._instance = super().__new__(cls)
             cls._instance._initialized = False
         return cls._instance
 
     def __init__(self):
         if not self._initialized:
             self._llm_service = None
-            self._sql_db = None
-            self._vector_db = None
             self._yf_fetcher = None
             self._initialized = True
 
     @property
     def llm_service(self):
         if self._llm_service is None:
-            from app.services.llama_cpp_service import LlamaCppService
+            from app.services.hive_service import HiveService
 
-            self._llm_service = LlamaCppService()
+            self._llm_service = HiveService()
         return self._llm_service
-
-    @property
-    def sql_db(self):
-        if self._sql_db is None:
-            from storage.sql.client import PostgresClient
-
-            self._sql_db = PostgresClient()
-        return self._sql_db
-
-    @property
-    def vector_db(self):
-        if self._vector_db is None:
-            from storage.vector.client import PgVectorStorage
-
-            self._vector_db = PgVectorStorage()
-        return self._vector_db
 
     @property
     def yf_fetcher(self):

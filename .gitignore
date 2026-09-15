@@ -48,7 +48,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-.eslintcache
 tsconfig.tsbuildinfo
 
 # OS
@@ -60,11 +59,11 @@ Thumbs.db
 .idea/
 
 # Project Specific
+.finai/
 backend/logs/*.log
 backend/uvicorn.log
 logs/
 backend/ai-lab/*
-backend/llama.cpp/*
 storage/sql/*.db
 storage/vector/data/
 

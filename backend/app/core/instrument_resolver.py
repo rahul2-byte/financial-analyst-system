@@ -3,9 +3,8 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.core.ticker import parse_ticker
 from pydantic import BaseModel, Field
-
-from storage.sql.client import PostgresClient
 
 
 class ResolvedInstrument(BaseModel):
@@ -25,7 +24,7 @@ class ResolutionResult(BaseModel):
     primary_instrument: ResolvedInstrument | None = None
     ambiguous_candidates: list[str] = Field(default_factory=list)
     unresolved_entities: list[str] = Field(default_factory=list)
-    resolver_source: str = "db_lookup"
+    resolver_source: str = "deterministic_candidate"
 
 
 _EXCHANGE_HINTS = {"NSE", "BSE", "NSE_EQ", "BSE_EQ", "NSE_FO", "MCX_FO", "MCX"}
@@ -119,7 +118,6 @@ def resolve_instruments(
     segment_hint: str | None = None,
     instrument_type_hint: str | None = None,
 ) -> ResolutionResult:
-    client = PostgresClient()
     effective_exchange = (exchange_hint or "NSE").strip().upper()
     effective_segment = (segment_hint or "EQ").strip().upper()
     effective_instrument_type = (
@@ -138,66 +136,46 @@ def resolve_instruments(
     unresolved: list[str] = []
 
     for raw_candidate in candidates:
+        # A prose company name is not enough evidence to invent a ticker. Keep
+        # resolution conservative unless the caller supplied an explicit
+        # uppercase symbol-like token.
+        words = str(raw_candidate).split()
+        if len(words) > 1 and not any(word.isupper() for word in words):
+            unresolved.append(raw_candidate)
+            continue
         variants = _expand_candidate_variants(raw_candidate)
         if not variants:
             unresolved.append(raw_candidate)
             continue
-
-        matched = False
-        ranked_ambiguous = False
-
-        for variant in variants:
-            resolve_alias = getattr(client, "resolve_alias", None)
-            if callable(resolve_alias):
-                alias_match = resolve_alias(variant)
-                if isinstance(alias_match, dict):
-                    _append_resolved(resolved, seen_keys, alias_match)
-                    matched = True
-                    break
-
-            exact = client.resolve_exact_symbol(variant)
-            if exact:
-                _append_resolved(resolved, seen_keys, exact)
-                matched = True
-                break
-
-            ranked_search = getattr(client, "search_instruments_ranked", None)
-            if callable(ranked_search):
-                ranked_raw = ranked_search(
-                    query=variant,
-                    limit=limit_per_candidate,
-                    exchange=effective_exchange,
-                    segment=effective_segment,
-                    instrument_type=effective_instrument_type,
-                )
-                ranked = ranked_raw if isinstance(ranked_raw, list) else []
-                accepted, row = _should_accept_ranked_match(ranked)
-                if accepted and row is not None:
-                    _append_resolved(resolved, seen_keys, row)
-                    matched = True
-                    break
-                if ranked:
-                    ranked_ambiguous = True
-
-        if matched:
-            continue
-
-        if ranked_ambiguous:
-            ambiguous.append(raw_candidate)
-            continue
-
-        likely = client.resolve_underlying(
-            variants[0],
-            limit=limit_per_candidate,
-            exchange=effective_exchange,
-            segment=effective_segment,
-        )
-        if len(likely) == 1:
-            _append_resolved(resolved, seen_keys, likely[0])
-        elif len(likely) > 1:
-            ambiguous.append(raw_candidate)
-        else:
+        try:
+            parsed_ticker = parse_ticker(variants[0].replace(" ", ""))
+        except ValueError:
             unresolved.append(raw_candidate)
+            continue
+        normalized = parsed_ticker.canonical
+        suffix_exchange = {
+            ".NS": "NSE",
+            ".BO": "BSE",
+        }.get(parsed_ticker.exchange_suffix or "")
+        if not re.fullmatch(r"[A-Z0-9^=\-]{1,24}", normalized):
+            unresolved.append(raw_candidate)
+            continue
+        exchange = suffix_exchange or effective_exchange
+        if exchange not in {"NSE", "BSE"}:
+            unresolved.append(raw_candidate)
+            continue
+        _append_resolved(
+            resolved,
+            seen_keys,
+            {
+                "instrument_key": f"{exchange}_{effective_segment}:{normalized}",
+                "trading_symbol": normalized,
+                "exchange": exchange,
+                "segment": effective_segment,
+                "instrument_type": effective_instrument_type or "equity",
+                "underlying_symbol": normalized,
+            },
+        )
 
     primary = resolved[0] if resolved else None
     return ResolutionResult(
@@ -205,5 +183,5 @@ def resolve_instruments(
         primary_instrument=primary,
         ambiguous_candidates=ambiguous,
         unresolved_entities=unresolved,
-        resolver_source="db_lookup",
+        resolver_source="deterministic_candidate",
     )

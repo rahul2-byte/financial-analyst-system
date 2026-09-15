@@ -13,16 +13,17 @@ Usage:
     logger.info("Message")
 """
 
-import os
-import sys
 import json
 import logging
+import os
+import sys
 import threading
 import time
-from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 from functools import wraps
+from pathlib import Path
+from typing import Any
 
 # ============================================================================
 # Logging Configuration
@@ -120,7 +121,7 @@ class SessionLogger:
 
     RETENTION_DAYS = 7
 
-    def __init__(self, query: str, trace_id: Optional[str] = None):
+    def __init__(self, query: str, trace_id: str | None = None):
         """
         Initialize a session logger.
 
@@ -130,7 +131,7 @@ class SessionLogger:
         """
         self.query = query
         self.trace_id = trace_id or self._generate_trace_id()
-        self.timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+        self.timestamp = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
 
         # Resolve path relative to backend directory
         backend_root = Path(__file__).parent.parent.parent.resolve()
@@ -162,7 +163,7 @@ FINAI RESEARCH SESSION AUDIT TRAIL
 ================================================================================
 QUERY: {self.query}
 TRACE_ID: {self.trace_id}
-START_TIME: {datetime.now(timezone.utc).isoformat()}
+START_TIME: {datetime.now(UTC).isoformat()}
 ================================================================================
 """
         with open(self.log_file, "w", encoding="utf-8") as f:
@@ -174,7 +175,7 @@ START_TIME: {datetime.now(timezone.utc).isoformat()}
             self._event_sequence += 1
             record = {
                 "seq": self._event_sequence,
-                "ts": datetime.now(timezone.utc).isoformat(),
+                "ts": datetime.now(UTC).isoformat(),
                 "trace_id": self.trace_id,
                 "query": self.query,
                 "event_name": event_name,
@@ -188,7 +189,7 @@ START_TIME: {datetime.now(timezone.utc).isoformat()}
         self,
         step_name: str,
         explanation: str,
-        parameters: Optional[dict] = None,
+        parameters: dict | None = None,
         data: Any = None,
     ):
         """
@@ -202,7 +203,7 @@ START_TIME: {datetime.now(timezone.utc).isoformat()}
         """
         entry = f"""
 [STEP: {step_name.upper()}]
-TIMESTAMP: {datetime.now(timezone.utc).isoformat()}
+TIMESTAMP: {datetime.now(UTC).isoformat()}
 EXPLANATION: {explanation}
 """
         if parameters:
@@ -223,7 +224,7 @@ EXPLANATION: {explanation}
                     entry += json.dumps(data.model_dump(), indent=2) + "\n"
                 else:
                     entry += str(data) + "\n"
-            except Exception:
+            except Exception:  # noqa: BLE001 - logging must never interrupt callers
                 entry += str(data) + "\n"
 
         entry += "================================================================================\n"
@@ -264,7 +265,7 @@ EXPLANATION: {explanation}
     def _cleanup_old_logs(self):
         """Delete session logs older than the retention policy."""
         try:
-            now = datetime.now()
+            now = datetime.now(UTC)
             cutoff = now - timedelta(days=self.RETENTION_DAYS)
 
             for pattern in ("*.log", "*.jsonl"):
@@ -274,7 +275,7 @@ EXPLANATION: {explanation}
                         get_logger(__name__).info(
                             f"Deleted old session log: {log_file.name}"
                         )
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - cleanup is best effort
             get_logger(__name__).error(f"Failed to cleanup old logs: {e}")
 
     @staticmethod

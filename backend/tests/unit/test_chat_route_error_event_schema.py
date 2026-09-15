@@ -1,7 +1,6 @@
 import json
 
 import pytest
-
 from app.models.request_models import ChatRequest, Message
 from app.routes import chat
 
@@ -24,7 +23,7 @@ async def test_chat_endpoint_streams_error_event_with_type_field(monkeypatch) ->
             break
 
     error_chunk = chunks[1]
-    payload = error_chunk.removeprefix("data: ").strip()
+    payload = str(error_chunk).removeprefix("data: ").strip()
     event = json.loads(payload)
 
     assert event["type"] == "error"

@@ -23,16 +23,16 @@ We decided to stick strictly to the original constraints defined in `ORCHESTRATI
 To support this high-speed, memory-optimized, open-source architecture, we selected the following stack:
 
 1.  **Agent Execution & Validation: `Instructor` + `LiteLLM`**
-    *   **Why:** `Instructor` wraps LLM clients and forces them to return data that perfectly validates against Pydantic schemas (zero-overhead compliance with the "Structured JSON" rule). `LiteLLM` standardizes API calls across 100+ models, handles rate limiting, and supports local models like `llama.cpp`.
+    *   **Why:** `Instructor` wraps LLM clients and forces them to return data that perfectly validates against Pydantic schemas (zero-overhead compliance with the "Structured JSON" rule). The active runtime uses Hive's OpenAI-compatible GLM-5.3-Flash API.
 
 2.  **Orchestration: `LangGraph` deterministic state graph**
     *   **Why:** The runtime uses explicit graph nodes and dependency-aware execution with deterministic routing and retries. This keeps execution auditable and prevents autonomous agent drift.
 
-3.  **Observability & Tracing: OpenTelemetry + Phoenix**
+3.  **Observability & tracing: local run metrics**
     *   **Why:** The backend emits structured tracing spans via OTLP to Phoenix, enabling request-level execution auditability for node transitions, LLM calls, and tool execution events.
 
-4.  **Vector Storage: `pgvector`**
-    *   **Why:** Consolidates infrastructure. Blazing fast and memory-efficient, perfect for storing and retrieving chunked financial reports with complex payload filtering directly in PostgreSQL.
+4.  **Evidence storage: current-run state and `.finai/` artifacts**
+    *   **Why:** Keeps the CLI reproducible and avoids infrastructure that is not required for the bounded research workflow.
 
 ### Benefits of this Approach
 - **Auditability:** Every step, tool call, and mathematical calculation can be traced and audited.

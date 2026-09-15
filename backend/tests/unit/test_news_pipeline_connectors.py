@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
 import logging
-import pytest
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
+import pytest
 from data.news_pipeline.connectors import (
-    ExaSearchConnector,
+    TinyFishSearchConnector,
     _matches_company_terms,
 )
 from data.news_pipeline.models import CompanyContext
 
 
 @dataclass(slots=True)
-class _ExaResult:
+class _TinyFishResult:
     url: str
     id: str
     title: str
@@ -32,14 +32,14 @@ def test_matches_company_terms_requires_alias_boundaries():
 
 
 @pytest.mark.asyncio
-async def test_exa_search_connector_builds_detailed_queries_and_maps_results():
+async def test_tinyfish_search_connector_builds_detailed_queries_and_maps_results():
     company = CompanyContext(
         ticker="HDFCBANK",
         company_name="HDFC BANK LTD",
         nse_symbol="HDFCBANK",
     )
 
-    published = datetime.now(timezone.utc) - timedelta(days=1)
+    published = datetime.now(UTC) - timedelta(days=1)
 
     class _Client:
         def __init__(self):
@@ -54,7 +54,7 @@ async def test_exa_search_connector_builds_detailed_queries_and_maps_results():
                 }
             )
             return [
-                _ExaResult(
+                _TinyFishResult(
                     title="HDFC Bank raises deposit rates",
                     text="HDFC Bank updated rates for retail deposits.",
                     url="https://example.com/hdfc-rates",
@@ -64,31 +64,31 @@ async def test_exa_search_connector_builds_detailed_queries_and_maps_results():
             ]
 
     client = _Client()
-    connector = ExaSearchConnector(client=client, max_results_per_query=20)
+    connector = TinyFishSearchConnector(client=client, max_results_per_query=20)
 
     results = await connector.fetch(company, time_window_days=30)
 
     assert results
     assert results[0].title == "HDFC Bank raises deposit rates"
-    assert results[0].search_provider == "exa"
+    assert results[0].search_provider == "tinyfish"
     assert client.calls[0]["num_results"] == 20
     assert any("HDFC BANK" in call["query"] for call in client.calls)
 
 
 @pytest.mark.asyncio
-async def test_exa_search_connector_maps_exa_result_object_fields():
+async def test_tinyfish_search_connector_maps_tinyfish_result_object_fields():
     company = CompanyContext(
         ticker="HDFCBANK",
         company_name="HDFC BANK LTD",
         nse_symbol="HDFCBANK",
     )
 
-    published = datetime.now(timezone.utc) - timedelta(days=1)
+    published = datetime.now(UTC) - timedelta(days=1)
 
     class _Client:
         async def search(self, *, query, num_results, start_published_date):
             return [
-                _ExaResult(
+                _TinyFishResult(
                     title="HDFC Bank raises deposit rates",
                     text="HDFC Bank updated retail deposit rates across products.",
                     url="https://example.com/hdfc-rates",
@@ -98,7 +98,7 @@ async def test_exa_search_connector_maps_exa_result_object_fields():
                 )
             ]
 
-    connector = ExaSearchConnector(client=_Client(), max_results_per_query=20)
+    connector = TinyFishSearchConnector(client=_Client(), max_results_per_query=20)
 
     results = await connector.fetch(company, time_window_days=30)
 
@@ -112,18 +112,18 @@ async def test_exa_search_connector_maps_exa_result_object_fields():
 
 
 @pytest.mark.asyncio
-async def test_exa_search_connector_skips_stale_results_outside_time_window():
+async def test_tinyfish_search_connector_skips_stale_results_outside_time_window():
     company = CompanyContext(
         ticker="HDFCBANK",
         company_name="HDFC BANK LTD",
         nse_symbol="HDFCBANK",
     )
-    stale_published = datetime.now(timezone.utc) - timedelta(days=10)
+    stale_published = datetime.now(UTC) - timedelta(days=10)
 
     class _Client:
         async def search(self, *, query, num_results, start_published_date):
             return [
-                _ExaResult(
+                _TinyFishResult(
                     title="HDFC Bank raises deposit rates",
                     text="HDFC Bank updated retail deposit rates across products.",
                     url="https://example.com/hdfc-rates",
@@ -132,7 +132,7 @@ async def test_exa_search_connector_skips_stale_results_outside_time_window():
                 )
             ]
 
-    connector = ExaSearchConnector(client=_Client(), max_results_per_query=20)
+    connector = TinyFishSearchConnector(client=_Client(), max_results_per_query=20)
 
     results = await connector.fetch(company, time_window_days=7)
 
@@ -140,14 +140,14 @@ async def test_exa_search_connector_skips_stale_results_outside_time_window():
 
 
 @pytest.mark.asyncio
-async def test_exa_search_connector_explodes_portal_payload_into_headlines():
+async def test_tinyfish_search_connector_explodes_portal_payload_into_headlines():
     company = CompanyContext(
         ticker="HDB",
         company_name="HDFC Bank Limited",
         nse_symbol="HDFCBANK",
     )
 
-    published = datetime.now(timezone.utc) - timedelta(days=1)
+    published = datetime.now(UTC) - timedelta(days=1)
 
     portal_text = """HDFC Bank Limited (HDB) Latest Stock News & Headlines - Yahoo Finance
 
@@ -172,7 +172,7 @@ Reuters 12d ago
     class _Client:
         async def search(self, *, query, num_results, start_published_date):
             return [
-                _ExaResult(
+                _TinyFishResult(
                     title="HDFC Bank Limited (HDB) Latest Stock News & Headlines",
                     url="https://finance.yahoo.com/quote/HDB/news/",
                     id="https://finance.yahoo.com/quote/HDB/news/",
@@ -181,7 +181,7 @@ Reuters 12d ago
                 )
             ]
 
-    connector = ExaSearchConnector(client=_Client(), max_results_per_query=20)
+    connector = TinyFishSearchConnector(client=_Client(), max_results_per_query=20)
 
     results = await connector.fetch(company, time_window_days=30)
 
@@ -194,18 +194,18 @@ Reuters 12d ago
     assert all(
         item.url == "https://finance.yahoo.com/quote/HDB/news/" for item in results
     )
-    assert all(item.search_provider == "exa" for item in results)
+    assert all(item.search_provider == "tinyfish" for item in results)
 
 
 @pytest.mark.asyncio
-async def test_exa_search_connector_filters_stale_portal_headlines_using_child_recency():
+async def test_tinyfish_search_connector_filters_stale_portal_headlines_using_child_recency():
     company = CompanyContext(
         ticker="HDB",
         company_name="HDFC Bank Limited",
         nse_symbol="HDFCBANK",
     )
 
-    published = datetime.now(timezone.utc) - timedelta(hours=2)
+    published = datetime.now(UTC) - timedelta(hours=2)
 
     portal_text = """HDFC Bank Limited (HDB) Latest Stock News & Headlines - Yahoo Finance
 
@@ -225,7 +225,7 @@ Reuters 12d ago
     class _Client:
         async def search(self, *, query, num_results, start_published_date):
             return [
-                _ExaResult(
+                _TinyFishResult(
                     title="HDFC Bank Limited (HDB) Latest Stock News & Headlines",
                     url="https://finance.yahoo.com/quote/HDB/news/",
                     id="https://finance.yahoo.com/quote/HDB/news/",
@@ -234,7 +234,7 @@ Reuters 12d ago
                 )
             ]
 
-    connector = ExaSearchConnector(client=_Client(), max_results_per_query=20)
+    connector = TinyFishSearchConnector(client=_Client(), max_results_per_query=20)
 
     results = await connector.fetch(company, time_window_days=7)
 
@@ -243,14 +243,14 @@ Reuters 12d ago
 
 
 @pytest.mark.asyncio
-async def test_exa_search_connector_keeps_fresh_portal_child_when_wrapper_is_stale():
+async def test_tinyfish_search_connector_keeps_fresh_portal_child_when_wrapper_is_stale():
     company = CompanyContext(
         ticker="HDB",
         company_name="HDFC Bank Limited",
         nse_symbol="HDFCBANK",
     )
 
-    stale_published = datetime.now(timezone.utc) - timedelta(days=5)
+    stale_published = datetime.now(UTC) - timedelta(days=5)
 
     portal_text = """HDFC Bank Limited (HDB) Latest Stock News & Headlines - Yahoo Finance
 
@@ -270,7 +270,7 @@ Reuters 12d ago
     class _Client:
         async def search(self, *, query, num_results, start_published_date):
             return [
-                _ExaResult(
+                _TinyFishResult(
                     title="HDFC Bank Limited (HDB) Latest Stock News & Headlines",
                     url="https://finance.yahoo.com/quote/HDB/news/",
                     id="https://finance.yahoo.com/quote/HDB/news/",
@@ -279,7 +279,7 @@ Reuters 12d ago
                 )
             ]
 
-    connector = ExaSearchConnector(client=_Client(), max_results_per_query=20)
+    connector = TinyFishSearchConnector(client=_Client(), max_results_per_query=20)
 
     results = await connector.fetch(company, time_window_days=1)
 
@@ -290,7 +290,7 @@ Reuters 12d ago
 
 
 @pytest.mark.asyncio
-async def test_exa_search_connector_filters_irrelevant_portal_headlines():
+async def test_tinyfish_search_connector_filters_irrelevant_portal_headlines():
     company = CompanyContext(
         ticker="HDB",
         company_name="HDFC Bank Limited",
@@ -315,7 +315,7 @@ The consultation paper covers governance expectations for lenders.
     class _Client:
         async def search(self, *, query, num_results, start_published_date):
             return [
-                _ExaResult(
+                _TinyFishResult(
                     title="HDFC Bank Limited (HDB) Latest Stock News & Headlines",
                     url="https://finance.yahoo.com/quote/HDB/news/",
                     id="https://finance.yahoo.com/quote/HDB/news/",
@@ -323,7 +323,7 @@ The consultation paper covers governance expectations for lenders.
                 )
             ]
 
-    connector = ExaSearchConnector(client=_Client(), max_results_per_query=20)
+    connector = TinyFishSearchConnector(client=_Client(), max_results_per_query=20)
 
     results = await connector.fetch(company, time_window_days=30)
 
@@ -332,7 +332,7 @@ The consultation paper covers governance expectations for lenders.
 
 
 @pytest.mark.asyncio
-async def test_exa_search_connector_drops_malformed_portal_pages_without_headlines():
+async def test_tinyfish_search_connector_drops_malformed_portal_pages_without_headlines():
     company = CompanyContext(
         ticker="HDB",
         company_name="HDFC Bank Limited",
@@ -353,18 +353,18 @@ Reuters 1d ago
     class _Client:
         async def search(self, *, query, num_results, start_published_date):
             return [
-                _ExaResult(
+                _TinyFishResult(
                     title="HDFC Bank Limited (HDB) Latest Stock News & Headlines",
                     url="https://finance.yahoo.com/quote/HDB/news/",
                     id="https://finance.yahoo.com/quote/HDB/news/",
                     text=portal_text,
                     published_date=(
-                        datetime.now(timezone.utc) - timedelta(days=1)
+                        datetime.now(UTC) - timedelta(days=1)
                     ).isoformat(),
                 )
             ]
 
-    connector = ExaSearchConnector(client=_Client(), max_results_per_query=20)
+    connector = TinyFishSearchConnector(client=_Client(), max_results_per_query=20)
 
     results = await connector.fetch(company, time_window_days=30)
 
@@ -372,7 +372,7 @@ Reuters 1d ago
 
 
 @pytest.mark.asyncio
-async def test_exa_search_connector_deduplicates_exploded_headlines():
+async def test_tinyfish_search_connector_deduplicates_exploded_headlines():
     company = CompanyContext(ticker="HDB", company_name="HDFC Bank Limited")
 
     portal_text = """HDFC Bank Limited (HDB) Latest Stock News & Headlines - Yahoo Finance
@@ -389,18 +389,18 @@ Reuters 12d ago
     class _Client:
         async def search(self, *, query, num_results, start_published_date):
             return [
-                _ExaResult(
+                _TinyFishResult(
                     title="HDFC Bank Limited (HDB) Latest Stock News & Headlines",
                     url="https://finance.yahoo.com/quote/HDB/news/",
                     id="https://finance.yahoo.com/quote/HDB/news/",
                     text=portal_text,
                     published_date=(
-                        datetime.now(timezone.utc) - timedelta(days=1)
+                        datetime.now(UTC) - timedelta(days=1)
                     ).isoformat(),
                 )
             ]
 
-    connector = ExaSearchConnector(client=_Client(), max_results_per_query=20)
+    connector = TinyFishSearchConnector(client=_Client(), max_results_per_query=20)
 
     results = await connector.fetch(company, time_window_days=30)
 
@@ -412,14 +412,14 @@ Reuters 12d ago
 
 
 @pytest.mark.asyncio
-async def test_exa_search_connector_does_not_explode_article_page_with_subheadings():
+async def test_tinyfish_search_connector_does_not_explode_article_page_with_subheadings():
     company = CompanyContext(
         ticker="HDB",
         company_name="HDFC Bank Limited",
         nse_symbol="HDFCBANK",
     )
 
-    published = datetime.now(timezone.utc) - timedelta(days=1)
+    published = datetime.now(UTC) - timedelta(days=1)
 
     article_text = """HDFC Bank expands branch network in semi-urban markets.
 
@@ -435,7 +435,7 @@ Executives expect additional branch openings over the next two quarters.
     class _Client:
         async def search(self, *, query, num_results, start_published_date):
             return [
-                _ExaResult(
+                _TinyFishResult(
                     title="HDFC Bank expands branch network in semi-urban markets",
                     url="https://example.com/news/hdfc-bank-branch-expansion",
                     id="https://example.com/news/hdfc-bank-branch-expansion",
@@ -444,7 +444,7 @@ Executives expect additional branch openings over the next two quarters.
                 )
             ]
 
-    connector = ExaSearchConnector(client=_Client(), max_results_per_query=20)
+    connector = TinyFishSearchConnector(client=_Client(), max_results_per_query=20)
 
     results = await connector.fetch(company, time_window_days=30)
 
@@ -455,15 +455,15 @@ Executives expect additional branch openings over the next two quarters.
 
 
 @pytest.mark.asyncio
-async def test_exa_search_connector_uses_summary_when_text_missing():
+async def test_tinyfish_search_connector_uses_summary_when_text_missing():
     company = CompanyContext(ticker="HDB", company_name="HDFC Bank Limited")
 
-    published = datetime.now(timezone.utc) - timedelta(days=1)
+    published = datetime.now(UTC) - timedelta(days=1)
 
     class _Client:
         async def search(self, *, query, num_results, start_published_date):
             return [
-                _ExaResult(
+                _TinyFishResult(
                     title="HDFC Bank appoints new executive",
                     url="https://example.com/hdfc-management",
                     id="https://example.com/hdfc-management",
@@ -472,7 +472,7 @@ async def test_exa_search_connector_uses_summary_when_text_missing():
                 )
             ]
 
-    connector = ExaSearchConnector(client=_Client(), max_results_per_query=20)
+    connector = TinyFishSearchConnector(client=_Client(), max_results_per_query=20)
 
     results = await connector.fetch(company, time_window_days=30)
 
@@ -482,7 +482,7 @@ async def test_exa_search_connector_uses_summary_when_text_missing():
 
 
 @pytest.mark.asyncio
-async def test_exa_search_connector_logs_normalization_summary(caplog):
+async def test_tinyfish_search_connector_logs_normalization_summary(caplog):
     company = CompanyContext(ticker="HDB", company_name="HDFC Bank Limited")
 
     portal_text = """HDFC Bank Limited (HDB) Latest Stock News & Headlines
@@ -495,27 +495,27 @@ Reuters 12d ago
     class _Client:
         async def search(self, *, query, num_results, start_published_date):
             return [
-                _ExaResult(
+                _TinyFishResult(
                     title="HDFC Bank Limited (HDB) Latest Stock News & Headlines",
                     url="https://finance.yahoo.com/quote/HDB/news/",
                     id="https://finance.yahoo.com/quote/HDB/news/",
                     text=portal_text,
                     published_date=(
-                        datetime.now(timezone.utc) - timedelta(days=1)
+                        datetime.now(UTC) - timedelta(days=1)
                     ).isoformat(),
                 ),
-                _ExaResult(
+                _TinyFishResult(
                     title="HDFC Bank opens rural branches",
                     url="https://example.com/hdfc-rural-branches",
                     id="https://example.com/hdfc-rural-branches",
                     text="HDFC Bank expands its rural branch footprint.",
                     published_date=(
-                        datetime.now(timezone.utc) - timedelta(days=1)
+                        datetime.now(UTC) - timedelta(days=1)
                     ).isoformat(),
                 ),
             ]
 
-    connector = ExaSearchConnector(client=_Client(), max_results_per_query=20)
+    connector = TinyFishSearchConnector(client=_Client(), max_results_per_query=20)
 
     with caplog.at_level(logging.INFO, logger="data.news_pipeline.connectors"):
         results = await connector.fetch(company, time_window_days=30)
@@ -523,7 +523,7 @@ Reuters 12d ago
     assert len(results) == 2
     assert len(caplog.records) == 1
     record = caplog.records[0]
-    assert record.message == "Exa connector normalized results"
+    assert record.message == "TinyFish connector normalized results"
     assert record.ticker == "HDB"
     assert record.raw_items_seen > 0
     assert record.portal_pages_detected > 0

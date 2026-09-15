@@ -3,13 +3,13 @@
 import pytest
 from app.core.tools.tool_system import (
     ToolDefinition,
-    ToolNamespace,
-    ToolResult,
-    ToolRegistry,
     ToolExecutor,
-    tool_registry,
-    tool_executor,
+    ToolNamespace,
+    ToolRegistry,
+    ToolResult,
     initialize_tool_system,
+    tool_executor,
+    tool_registry,
 )
 
 
@@ -147,10 +147,56 @@ class TestToolExecutor:
     def test_registration_of_handler(self):
         """Handlers should be registerable."""
         executor = ToolExecutor(ToolRegistry())
+        executor.registry.register(
+            ToolDefinition(name="tool", description="Test", parameters={})
+        )
 
-        executor.register_handler("test:tool", lambda args: {"result": "success"})
+        executor.register_handler("data:tool", lambda args: {"result": "success"})
 
-        assert "test:tool" in executor._handlers
+        result = executor.execute_sync("data:tool", {})
+
+        assert result.success is True
+        assert result.data == {"result": "success"}
+
+    @pytest.mark.asyncio
+    async def test_error_payload_is_not_reported_as_success(self):
+        executor = ToolExecutor(ToolRegistry())
+        executor.register_handler(
+            "analysis:broken", lambda args: {"error": "missing evidence"}
+        )
+
+        result = await executor.execute_handler("analysis:broken", {})
+
+        assert result.success is False
+        assert result.error == "missing evidence"
+
+    @pytest.mark.asyncio
+    async def test_nested_failed_specialist_is_not_reported_as_success(self):
+        executor = ToolExecutor(ToolRegistry())
+        executor.register_handler(
+            "analysis:broken",
+            lambda args: {
+                "specialist": "technical_analysis",
+                "result": {"status": "failed", "error": "no OHLCV"},
+            },
+        )
+
+        result = await executor.execute_handler("analysis:broken", {})
+
+        assert result.success is False
+        assert result.error == "no OHLCV"
+
+    @pytest.mark.asyncio
+    async def test_fundamental_scan_rejects_empty_evidence(self):
+        executor = ToolExecutor(ToolRegistry())
+        executor.initialize()
+
+        result = await executor.execute_handler(
+            "analysis:run_fundamental_scan", {"raw_data": "{}"}
+        )
+
+        assert result.success is False
+        assert "fundamental" in result.error.lower()
 
 
 class TestToolSystemIntegration:
@@ -167,9 +213,10 @@ class TestToolSystemIntegration:
         """Predefined tools should exist."""
         initialize_tool_system()
 
-        assert tool_registry.get_tool("market:check_db_status") is not None
+        assert tool_registry.get_tool("market:submit_offline_status") is not None
         assert tool_registry.get_tool("data:fetch_fundamentals") is not None
         assert tool_registry.get_tool("analysis:run_technical_scan") is not None
+        assert tool_registry.get_tool("interaction:ask_user") is not None
 
     def test_tools_by_namespace_coverage(self):
         """All namespaces should have tools."""
@@ -179,71 +226,3 @@ class TestToolSystemIntegration:
             tools = tool_registry.get_tools_by_namespace(ns)
             # Some namespaces may be empty, but the enum should work
             assert isinstance(tools, list)
-
-
-def test_get_news_info_uses_shared_vector_db_resource(monkeypatch):
-    from app.core.tools.tool_system import ToolExecutor
-    import app.core.tools.tool_system as tool_system_module
-
-    class _StubSQL:
-        def get_news_cache_info(self, ticker):
-            return {
-                "ticker": ticker,
-                "has_data": True,
-                "latest_date": "2026-04-12T18:39:07.970267",
-            }
-
-    class _FreshPgVectorShouldNotBeUsed:
-        def __init__(self, *args, **kwargs):
-            raise AssertionError("Fresh PgVectorStorage should not be instantiated")
-
-    class _SharedVector:
-        def get_news_info(self, ticker):
-            return {"ticker": ticker, "news_count": 3, "has_news": True}
-
-    class _Resources:
-        sql_db = _StubSQL()
-        vector_db = _SharedVector()
-
-    monkeypatch.setattr(tool_system_module, "resources", _Resources())
-    monkeypatch.setattr(
-        "storage.vector.client.PgVectorStorage", _FreshPgVectorShouldNotBeUsed
-    )
-
-    executor = ToolExecutor()
-    result = executor._handle_get_news_info({"ticker": "HDFCBANK"})
-
-    assert result["sql_cache"]["has_data"] is True
-    assert result["vector_db"]["has_news"] is True
-    assert result["has_data"] is True
-
-
-def test_get_news_info_requires_vector_presence_for_ground_truth(monkeypatch):
-    from app.core.tools.tool_system import ToolExecutor
-    import app.core.tools.tool_system as tool_system_module
-
-    class _StubSQL:
-        def get_news_cache_info(self, ticker):
-            return {
-                "ticker": ticker,
-                "has_data": True,
-                "latest_date": "2026-04-12T18:39:07.970267",
-                "vector_ready": False,
-            }
-
-    class _SharedVector:
-        def get_news_info(self, ticker):
-            return {"ticker": ticker, "news_count": 0, "has_news": False}
-
-    class _Resources:
-        sql_db = _StubSQL()
-        vector_db = _SharedVector()
-
-    monkeypatch.setattr(tool_system_module, "resources", _Resources())
-
-    executor = ToolExecutor()
-    result = executor._handle_get_news_info({"ticker": "HDFCBANK"})
-
-    assert result["sql_cache"]["has_data"] is True
-    assert result["vector_db"]["has_news"] is False
-    assert result["has_data"] is False

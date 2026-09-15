@@ -1,13 +1,12 @@
-from fastapi import FastAPI, Request
-from fastapi.responses import JSONResponse
-from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
 import logging
+from contextlib import asynccontextmanager
 
 from app.config import settings
 from app.core.logging import setup_logging
-from app.core.llama_manager import llama_manager
 from app.routes import chat, health
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 
 # Setup logging first
 setup_logging(log_level="INFO" if not settings.DEBUG else "DEBUG")
@@ -16,20 +15,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup logic can go here if needed
-    from app.services.mcp_service import mcp_manager
-
-    await mcp_manager.start()
-
     yield
-    # Shutdown logic
-    from app.core.observability import get_langfuse
-
-    lf = get_langfuse()
-    if lf:
-        lf.flush()
-    llama_manager.cleanup()
-    await mcp_manager.close()
 
 
 app = FastAPI(
@@ -41,7 +27,7 @@ app = FastAPI(
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.error(f"Global Exception Caught: {exc}", exc_info=True)
+    logger.error("Global Exception Caught: %s", exc)
     return JSONResponse(
         status_code=500,
         content={"detail": "Internal Server Error", "message": str(exc)},
@@ -49,7 +35,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 
 
 # CORS Configuration
-# Allow frontend to connect
+# Allow local API clients to connect
 origins = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",

@@ -1,0 +1,20 @@
+/* Components: one selector block per reusable widget/state. */
+#welcome { margin: 1 0 1 0; color: $fin-text; max-width: 100; }
+.rail-title { color: $fin-muted; text-style: bold; margin: 1 0; }
+#navigation .nav-item { width: 1fr; min-width: 0; height: 3; padding: 0 1; border: none; background: transparent; color: $fin-secondary; content-align: left middle; text-align: left; text-style: none; }
+#navigation .nav-item:hover, #navigation .nav-item:focus { background: $fin-active; color: $fin-accent; border-left: thick $fin-border-active; }
+#navigation .nav-item.-active { background: $fin-active; color: $fin-text; border-left: thick $fin-accent; text-style: bold; }
+.message { margin: 1 0 2 0; padding: 1 1; }
+.user-message { border-left: thick $fin-accent; background: $fin-user-surface; }
+.assistant-message { border-left: solid $fin-border; color: $fin-text; padding-left: 1; background: $fin-background; }
+.run-activity { margin: 0 0 1 0; padding: 1 1; border-left: thick $fin-warning; background: $fin-warning-surface; color: $fin-text; }
+.run-activity.tool-event { background: $fin-tool-surface; border-left: thick $fin-accent; }
+.run-activity.result-event { background: $fin-result-surface; border-left: thick $fin-success; }
+.command-message { margin: 1 0; border-left: solid $fin-accent; color: $fin-muted; padding: 1 1; background: $fin-command-surface; }
+.trace-panel { margin: 1 0; padding: 1 2; border-left: solid $fin-border; color: $fin-muted; background: $fin-surface-raised; }
+.sources-message { margin: 1 0; padding: 1 1; border-left: solid $fin-success; background: $fin-source-surface; }
+.error { border-left: thick $fin-error; color: $fin-error; padding: 1 1; background: $fin-error-surface; }
+
+ApprovalScreen, SessionScreen { align: center middle; background: $fin-background 80%; }
+#approval-modal { width: 70; max-width: 90%; padding: 2 3; border: round $fin-accent; background: $fin-surface-raised; }
+#session-modal { width: 90; max-width: 95%; padding: 2 3; border: round $fin-accent; background: $fin-surface-raised; }

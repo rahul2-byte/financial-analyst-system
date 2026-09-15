@@ -16,9 +16,10 @@ Usage:
 
 import asyncio
 import logging
-from typing import List, Optional, Any
 from dataclasses import dataclass
 from enum import Enum
+from typing import Any
+
 from app.core.policies.retry_policy import (
     MAX_RETRIES,
     exponential_backoff_seconds,
@@ -103,10 +104,10 @@ async def apply_backoff(retry_count: int) -> None:
 class ErrorContext:
     """Context information for an error."""
 
-    errors: List[str]
+    errors: list[str]
     retry_count: int
-    failed_node: Optional[str] = None
-    failed_step_number: Optional[int] = None
+    failed_node: str | None = None
+    failed_step_number: int | None = None
 
 
 @dataclass
@@ -116,7 +117,7 @@ class ErrorAction:
     should_retry: bool = False
     should_escalate: bool = False
     new_retry_count: int = 0
-    cleanup_steps: Optional[List[int]] = None
+    cleanup_steps: list[int] | None = None
 
 
 class ErrorHandler:
@@ -134,7 +135,7 @@ class ErrorHandler:
     def __init__(self, max_retries: int = MAX_RETRIES):
         self.max_retries = max_retries
 
-    def should_continue(self, errors: List[str], retry_count: int) -> bool:
+    def should_continue(self, errors: list[str], retry_count: int) -> bool:
         """
         Determine if execution should continue.
 
@@ -182,8 +183,8 @@ class ErrorHandler:
     @staticmethod
     def create_cleanup_updates(
         retry_count: int,
-        failed_step_number: Optional[int],
-        executed_steps: List[dict],
+        failed_step_number: int | None,
+        executed_steps: list[dict],
         agent_outputs: dict,
     ) -> dict:
         """

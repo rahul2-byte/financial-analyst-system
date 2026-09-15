@@ -1,4 +1,4 @@
-from data.processors.text import is_article_relevant
+from data.news_pipeline.relevance import is_article_relevant
 
 
 def test_relevance_guard_matches_ticker_in_title():

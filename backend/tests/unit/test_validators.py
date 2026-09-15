@@ -1,11 +1,11 @@
 """Tests for input validation utilities."""
 
 from app.core.validators import (
+    MAX_QUERY_LENGTH,
     sanitize_user_query,
+    validate_date_range,
     validate_query_not_malicious,
     validate_ticker,
-    validate_date_range,
-    MAX_QUERY_LENGTH,
 )
 
 
@@ -55,12 +55,12 @@ class TestValidateQueryNotMalicious:
 
     def test_whitespace_only_query_is_invalid(self):
         """Whitespace-only query should be invalid."""
-        is_safe, reason = validate_query_not_malicious("   ")
+        is_safe, _reason = validate_query_not_malicious("   ")
         assert not is_safe
 
     def test_none_query_is_invalid(self):
         """None query should be invalid."""
-        is_safe, reason = validate_query_not_malicious(None)
+        is_safe, _reason = validate_query_not_malicious(None)
         assert not is_safe
 
     def test_query_too_long_is_invalid(self):

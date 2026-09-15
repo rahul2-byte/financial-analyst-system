@@ -1,13 +1,12 @@
 import logging
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field, ValidationError
-
 from app.config import settings
 from app.core.node_resources import resources
 from app.core.policies.json_parse_policy import parse_json_from_llm_response
 from app.core.prompts import prompt_manager
 from app.models.request_models import Message
+from pydantic import BaseModel, Field, ValidationError
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +68,8 @@ async def classify_query_intent(
             model=settings.DEFAULT_LLM_MODEL,
             response_format={"type": "json_object"},
         )
-    except Exception as exc:  # noqa: BLE001
-        logger.error("Intent classifier request failed: %s", exc, exc_info=True)
+    except Exception:
+        logger.exception("Intent classifier request failed")
         return _build_fail_closed_result()
 
     parsed = parse_json_from_llm_response(response.content)

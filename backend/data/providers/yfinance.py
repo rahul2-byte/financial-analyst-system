@@ -15,11 +15,12 @@ Usage:
     ohlcv_data = fetcher.fetch_ohlcv("RELIANCE.NS", start_date, end_date)
 """
 
-import yfinance as yf
-import pandas as pd
+from datetime import UTC, datetime
+from typing import Any
+
 import numpy as np
-from typing import List, Dict, Any, Optional
-from datetime import datetime
+import pandas as pd
+import yfinance as yf
 from app.core.observability import observe
 from app.core.ticker import Ticker, parse_ticker
 from data.interfaces.fetcher import IDataFetcher
@@ -93,7 +94,7 @@ class YFinanceFetcher(IDataFetcher):
 
         if isinstance(val, (pd.Series, np.ndarray)):
             if len(val) > 0:
-                val = val.iloc[0]
+                val = getattr(val, "iloc", val)[0]
             else:
                 return default
 
@@ -102,7 +103,7 @@ class YFinanceFetcher(IDataFetcher):
 
         return float(val)
 
-    def _safe_get_date(self, row: pd.Series) -> Optional[datetime]:
+    def _safe_get_date(self, row: pd.Series) -> datetime | None:
         """
         Safely extract date from a DataFrame row.
 
@@ -138,7 +139,7 @@ class YFinanceFetcher(IDataFetcher):
     @observe(name="Tool:YFinance:FetchOHLCV")
     def fetch_ohlcv(
         self, ticker: str, start_date: datetime, end_date: datetime
-    ) -> List[OHLCVData]:
+    ) -> list[OHLCVData]:
         """
         Fetch historical OHLCV data.
 
@@ -161,7 +162,7 @@ class YFinanceFetcher(IDataFetcher):
 
         df = self._parse_dataframe(df)
 
-        results: List[OHLCVData] = []
+        results: list[OHLCVData] = []
 
         for _, row in df.iterrows():
             date_val = self._safe_get_date(row)
@@ -190,7 +191,7 @@ class YFinanceFetcher(IDataFetcher):
     @observe(name="Tool:YFinance:FetchPrice")
     def fetch_stock_price(
         self, ticker: str, period: str = "1mo", interval: str = "1d"
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """
         Fetch stock price by period and interval.
 
@@ -228,7 +229,7 @@ class YFinanceFetcher(IDataFetcher):
         }
 
     @observe(name="Tool:YFinance:FetchFundamentals")
-    def fetch_company_fundamentals(self, ticker: str) -> Dict[str, Any]:
+    def fetch_company_fundamentals(self, ticker: str) -> dict[str, Any]:
         """
         Fetch company fundamental data.
 
@@ -268,7 +269,7 @@ class YFinanceFetcher(IDataFetcher):
         }
 
     @observe(name="Tool:YFinance:FetchFinancials")
-    def fetch_financial_statements(self, ticker: str) -> Dict[str, Any]:
+    def fetch_financial_statements(self, ticker: str) -> dict[str, Any]:
         """
         Fetch financial statements.
 
@@ -285,7 +286,7 @@ class YFinanceFetcher(IDataFetcher):
         balance_sheet = ticker_obj.balance_sheet
         cash_flow = ticker_obj.cashflow
 
-        def format_df(df: Optional[pd.DataFrame]) -> Dict[str, Any]:
+        def format_df(df: pd.DataFrame | None) -> dict[str, Any]:
             if df is None or df.empty:
                 return {}
 
@@ -305,14 +306,14 @@ class YFinanceFetcher(IDataFetcher):
         }
 
     @observe(name="Tool:YFinance:FetchMacro")
-    def fetch_macro_indicators(self) -> Dict[str, Any]:
+    def fetch_macro_indicators(self) -> dict[str, Any]:
         """
         Fetch key macro indicators for Indian markets.
 
         Returns:
             Dictionary with macro indicator values
         """
-        macros: Dict[str, str] = {
+        macros: dict[str, str] = {
             "NIFTY_50": "^NSEI",
             "INDIA_VIX": "^INDIAVIX",
             "USD_INR": "INR=X",
@@ -320,7 +321,7 @@ class YFinanceFetcher(IDataFetcher):
             "GOLD": "GC=F",
         }
 
-        results: Dict[str, Optional[float]] = {}
+        results: dict[str, float | None] = {}
 
         for name, ticker in macros.items():
             try:
@@ -334,13 +335,13 @@ class YFinanceFetcher(IDataFetcher):
                     results[name] = float(close_price)
                 else:
                     results[name] = None
-            except Exception:
+            except Exception:  # noqa: BLE001 - one field must not fail the snapshot
                 results[name] = None
 
         return results
 
     @observe(name="Tool:YFinance:FetchNews")
-    def fetch_news(self, ticker: str, limit: int = 10) -> List[NewsArticle]:
+    def fetch_news(self, ticker: str, limit: int = 10) -> list[NewsArticle]:
         """
         Fetch latest news for a ticker.
 
@@ -355,18 +356,39 @@ class YFinanceFetcher(IDataFetcher):
         ticker_obj = yf.Ticker(formatted_ticker)
         news_items = ticker_obj.news
 
-        results: List[NewsArticle] = []
+        results: list[NewsArticle] = []
 
         for item in news_items[:limit]:
-            pub_date = datetime.fromtimestamp(item.get("providerPublishTime", 0))
+            content = item.get("content") if isinstance(item.get("content"), dict) else item
+            title = str(content.get("title") or "").strip()
+            canonical_url = content.get("canonicalUrl", {})
+            url = str(
+                canonical_url.get("url") or content.get("link", "")
+                if isinstance(canonical_url, dict)
+                else content.get("link", "")
+            ).strip()
+            if not title or not url:
+                continue
+            published = content.get("pubDate")
+            pub_date = (
+                datetime.fromisoformat(str(published))
+                if published
+                else datetime.fromtimestamp(content.get("providerPublishTime", 0), tz=UTC)
+            )
+            provider = content.get("provider", {})
 
             article = NewsArticle(
                 ticker=formatted_ticker,
-                title=item.get("title", "No Title"),
-                url=item.get("link", ""),
-                source=item.get("publisher", "Unknown"),
+                title=title,
+                url=url,
+                source=str(
+                    provider.get("displayName", "Unknown")
+                    if isinstance(provider, dict)
+                    else content.get("publisher", "Unknown")
+                ),
                 published_date=pub_date,
-                content=str(item.get("relatedTickers", [])),
+                summary=content.get("summary"),
+                content=str(content.get("summary") or content.get("relatedTickers", [])),
             )
             results.append(article)
 

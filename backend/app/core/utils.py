@@ -1,5 +1,6 @@
 import json
-from typing import Any, Dict, Optional
+from typing import Any
+
 from app.core.policies.json_parse_policy import parse_json_from_llm_response
 
 
@@ -16,7 +17,7 @@ def clean_json_string(text: str) -> str:
     return text.strip()
 
 
-def safe_parse_json(text: str) -> Optional[Dict[str, Any]]:
+def safe_parse_json(text: str) -> dict[str, Any] | None:
     """
     Safely cleans and parses a JSON string.
     """

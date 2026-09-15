@@ -1,7 +1,6 @@
 import json
 
 import pytest
-
 from agents.financial.analysis.fundamental import fundamental_analysis_node
 from agents.financial.analysis.payload_sanitizer import (
     drop_findings_without_evidence_ids,

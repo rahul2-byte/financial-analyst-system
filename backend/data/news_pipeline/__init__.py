@@ -8,9 +8,9 @@ from data.news_pipeline.query_templates import (
 )
 
 __all__ = [
+    "QUERY_INTENT_PRIORITY",
     "CompanyContext",
     "ExtractionResult",
-    "QUERY_INTENT_PRIORITY",
     "QueryTemplateLibrary",
     "RawSearchResult",
     "build_queries_for_company",

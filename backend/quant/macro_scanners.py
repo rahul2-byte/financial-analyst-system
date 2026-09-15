@@ -1,4 +1,4 @@
-from typing import Dict, Any
+from typing import Any
 
 """
 Placeholder deterministic macro-economic scanners.
@@ -7,7 +7,7 @@ For now, they return mock data to facilitate agent development.
 """
 
 
-def interest_rate_scanner(country: str = "USA") -> Dict[str, Any]:
+def interest_rate_scanner(country: str = "USA") -> dict[str, Any]:
     """
     Scans for current interest rates and central bank stance.
     """
@@ -22,7 +22,7 @@ def interest_rate_scanner(country: str = "USA") -> Dict[str, Any]:
     }
 
 
-def economic_indicator_scanner(indicator: str) -> Dict[str, Any]:
+def economic_indicator_scanner(indicator: str) -> dict[str, Any]:
     """
     Scans for a specific key economic indicator.
     """
@@ -46,7 +46,7 @@ def economic_indicator_scanner(indicator: str) -> Dict[str, Any]:
     return {"indicator": indicator, "error": "Indicator not found or not supported."}
 
 
-def commodity_price_scanner(commodity: str) -> Dict[str, Any]:
+def commodity_price_scanner(commodity: str) -> dict[str, Any]:
     """
     Scans for the price of a key commodity.
     """

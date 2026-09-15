@@ -7,7 +7,6 @@ from difflib import SequenceMatcher
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
-
 from data.news_pipeline.models import NewsPipelineRecord
 
 TRACKING_PARAMS = {
@@ -51,7 +50,7 @@ class URLNormalizer:
             response = httpx.head(normalized, timeout=5.0, follow_redirects=True)
             response.raise_for_status()
             return self.normalize(str(response.url))
-        except Exception:
+        except Exception:  # noqa: BLE001 - URL normalization fallback
             return normalized
 
 
@@ -110,17 +109,9 @@ class DuplicateDetector:
         return None
 
     def _title_similarity(self, first: str, second: str) -> float:
-        try:
-            from rapidfuzz.fuzz import token_sort_ratio
-
-            return float(token_sort_ratio(first, second))
-        except Exception:
-            normalized_first = " ".join(sorted(first.lower().split()))
-            normalized_second = " ".join(sorted(second.lower().split()))
-            return (
-                SequenceMatcher(None, normalized_first, normalized_second).ratio()
-                * 100.0
-            )
+        normalized_first = " ".join(sorted(first.lower().split()))
+        normalized_second = " ".join(sorted(second.lower().split()))
+        return SequenceMatcher(None, normalized_first, normalized_second).ratio() * 100.0
 
     def _prefer_more_complete(
         self,

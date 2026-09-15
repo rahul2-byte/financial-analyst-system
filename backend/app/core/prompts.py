@@ -1,15 +1,16 @@
-import yaml
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
+
+import yaml
 
 
 class PromptManager:
     _instance = None
-    prompts: Dict[str, Any]
+    prompts: dict[str, Any]
 
     def __new__(cls):
         if cls._instance is None:
-            cls._instance = super(PromptManager, cls).__new__(cls)
+            cls._instance = super().__new__(cls)
             cls._instance._load_prompts()
         return cls._instance
 
@@ -38,7 +39,7 @@ class PromptManager:
             current = current[k]
 
         if not isinstance(current, str):
-            raise ValueError(f"Prompt key '{key}' does not point to a string.")
+            raise TypeError(f"Prompt key '{key}' does not point to a string.")
 
         return current.format(**kwargs)
 

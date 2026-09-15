@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import pytest
-
 from app.routes import health
 from app.services.llm_interface import LLMServiceInterface
 
@@ -23,14 +22,13 @@ class _HealthyLLM(LLMServiceInterface):
 
 @pytest.mark.asyncio
 async def test_health_route_reports_components_and_both_canaries(monkeypatch) -> None:
-    monkeypatch.setattr("app.routes.health._check_database_readiness", lambda: True)
-    monkeypatch.setattr("app.routes.health._check_embedding_readiness", lambda: True)
+    monkeypatch.setattr("app.routes.health._check_market_data_readiness", lambda: True)
 
     async def _internal_canary():
         return {"status": "ok", "details": {"query_normalization": "ok"}}
 
     async def _external_canary():
-        return {"status": "ok", "details": {"exa_search": "ok"}}
+        return {"status": "ok", "details": {"tinyfish_search": "ok"}}
 
     monkeypatch.setattr("app.routes.health._run_internal_canary", _internal_canary)
     monkeypatch.setattr("app.routes.health._run_external_canary", _external_canary)
@@ -39,8 +37,7 @@ async def test_health_route_reports_components_and_both_canaries(monkeypatch) ->
 
     assert payload["status"] == "healthy"
     assert payload["components"]["llm_service"] == "up"
-    assert payload["components"]["database"] == "up"
-    assert payload["components"]["embedding_service"] == "up"
+    assert payload["components"]["market_data"] == "up"
     assert payload["canaries"]["internal"]["status"] == "ok"
     assert payload["canaries"]["external"]["status"] == "ok"
 
@@ -49,14 +46,13 @@ async def test_health_route_reports_components_and_both_canaries(monkeypatch) ->
 async def test_health_route_keeps_core_health_green_when_external_canary_degrades(
     monkeypatch,
 ) -> None:
-    monkeypatch.setattr("app.routes.health._check_database_readiness", lambda: True)
-    monkeypatch.setattr("app.routes.health._check_embedding_readiness", lambda: True)
+    monkeypatch.setattr("app.routes.health._check_market_data_readiness", lambda: True)
 
     async def _internal_canary():
         return {"status": "ok", "details": {"query_normalization": "ok"}}
 
     async def _external_canary():
-        return {"status": "degraded", "details": {"exa_search": "timeout"}}
+        return {"status": "degraded", "details": {"tinyfish_search": "timeout"}}
 
     monkeypatch.setattr("app.routes.health._run_internal_canary", _internal_canary)
     monkeypatch.setattr("app.routes.health._run_external_canary", _external_canary)
@@ -65,14 +61,3 @@ async def test_health_route_keeps_core_health_green_when_external_canary_degrade
 
     assert payload["status"] == "healthy"
     assert payload["canaries"]["external"]["status"] == "degraded"
-
-
-def test_embedding_readiness_is_false_when_sentence_transformers_is_unavailable(
-    monkeypatch,
-) -> None:
-    monkeypatch.setattr(
-        "app.routes.health.embedding_service_module.SentenceTransformer", None
-    )
-    monkeypatch.setattr("app.routes.health.EmbeddingService._instance", None)
-
-    assert health._check_embedding_readiness() is False

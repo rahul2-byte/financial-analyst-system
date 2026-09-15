@@ -1,5 +1,4 @@
 import pytest
-
 from app.core.ticker import Ticker, parse_ticker
 
 
@@ -76,7 +75,7 @@ def test_ticker_is_immutable() -> None:
     ticker = Ticker(canonical="AAPL")
 
     with pytest.raises(AttributeError):
-        ticker.canonical = "MSFT"
+        ticker.canonical = "MSFT"  # type: ignore[misc]
 
 
 def test_empty_ticker_raises_value_error() -> None:

@@ -34,6 +34,9 @@ user: |
   TERMINAL REASON:
   {terminal_reason}
 
+  EVIDENCE STATUS:
+  {evidence_status}
+
   STRUCTURED SYNTHESIS:
   {structured_synthesis}
 

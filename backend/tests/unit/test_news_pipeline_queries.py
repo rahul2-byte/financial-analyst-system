@@ -2,8 +2,8 @@ from data.news_pipeline.models import CompanyContext
 from data.news_pipeline.query_templates import (
     QUERY_INTENT_PRIORITY,
     QueryTemplateLibrary,
-    derive_company_aliases,
     build_queries_for_company,
+    derive_company_aliases,
 )
 
 

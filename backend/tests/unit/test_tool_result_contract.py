@@ -1,9 +1,4 @@
 from app.core.contracts.tool_result import ToolResult as CanonicalToolResult
-from common.state import ToolResult as LegacyImportToolResult
-
-
-def test_common_state_tool_result_resolves_to_canonical_contract():
-    assert LegacyImportToolResult is CanonicalToolResult
 
 
 def test_canonical_tool_result_extracts_metrics_from_nested_data():

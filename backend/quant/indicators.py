@@ -1,6 +1,7 @@
-import pandas as pd
+from typing import Any
+
 import numpy as np
-from typing import Dict, Any
+import pandas as pd
 from app.core.observability import observe
 
 
@@ -30,7 +31,7 @@ class TechnicalScanner:
     @staticmethod
     def calculate_macd(
         series: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9
-    ) -> Dict[str, pd.Series]:
+    ) -> dict[str, pd.Series]:
         """Calculates MACD, Signal Line, and Histogram."""
         ema_fast = series.ewm(span=fast, adjust=False).mean()
         ema_slow = series.ewm(span=slow, adjust=False).mean()
@@ -55,7 +56,7 @@ class TechnicalScanner:
     @staticmethod
     def calculate_bollinger_bands(
         series: pd.Series, period: int = 20, std_dev: int = 2
-    ) -> Dict[str, pd.Series]:
+    ) -> dict[str, pd.Series]:
         """Calculates Bollinger Bands."""
         sma = series.rolling(window=period).mean()
         std = series.rolling(window=period).std()
@@ -120,7 +121,7 @@ class TechnicalScanner:
         )
 
     @classmethod
-    def get_signal_summary(cls, df: pd.DataFrame) -> Dict[str, Any]:
+    def get_signal_summary(cls, df: pd.DataFrame) -> dict[str, Any]:
         """
         Computes all 30 indicators and returns a compact JSON summary.
         Optimized for token efficiency and LLM narration.
@@ -226,6 +227,6 @@ class TechnicalScanner:
 
     @classmethod
     @observe(name="Logic:TechnicalScanner:Scan")
-    def scan(cls, df: pd.DataFrame) -> Dict[str, Any]:
+    def scan(cls, df: pd.DataFrame) -> dict[str, Any]:
         """Legacy compatibility layer."""
         return cls.get_signal_summary(df)

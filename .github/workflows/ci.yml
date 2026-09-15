@@ -17,39 +17,14 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Install backend dependencies
-        run: pip install -r backend/requirements.txt
+      - name: Install project dependencies
+        run: pip install uv && uv sync --frozen --dev
 
       - name: Ruff lint
-        run: ruff check backend/
+        run: uv run ruff check backend/
 
       - name: Pytest backend
-        run: pytest backend/tests
-
-  frontend:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: frontend
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-          cache: "npm"
-          cache-dependency-path: frontend/package-lock.json
-
-      - name: Install frontend dependencies
-        run: npm ci
-
-      - name: ESLint
-        run: npm run lint
-
-      - name: Vitest
-        run: npm run test -- --run
+        run: uv run pytest backend/tests
 
   docs-sanity:
     runs-on: ubuntu-latest
@@ -59,4 +34,4 @@ jobs:
 
       - name: Verify stale script references are removed
         run: |
-          ! rg -n "verify_pipeline\.py|download_finbert\.py" README.md backend/data/README.md backend/README_API.md .vscode/launch.json
+          ! rg -n "verify_pipeline\.py|download_finbert\.py" README.md backend/data/README.md .vscode/launch.json

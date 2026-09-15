@@ -15,8 +15,9 @@ Usage:
     results = scanner.scan({"peRatio": 15.5, "priceToBook": 2.3, ...})
 """
 
-from typing import Dict, Any, Optional
 from dataclasses import dataclass
+from typing import Any
+
 from app.core.observability import observe
 
 
@@ -24,8 +25,8 @@ from app.core.observability import observe
 class ValuationResult:
     """Result of valuation analysis."""
 
-    pe_ratio: Optional[float]
-    pb_ratio: Optional[float]
+    pe_ratio: float | None
+    pb_ratio: float | None
     analysis: str
 
 
@@ -33,7 +34,7 @@ class ValuationResult:
 class HealthResult:
     """Result of financial health analysis."""
 
-    debt_to_equity: Optional[float]
+    debt_to_equity: float | None
     analysis: str
 
 
@@ -41,13 +42,13 @@ class HealthResult:
 class ProfitabilityResult:
     """Result of profitability analysis."""
 
-    profit_margin: Optional[float]
-    roe: Optional[float]
+    profit_margin: float | None
+    roe: float | None
     analysis: str
 
 
 def _evaluate_ratio(
-    value: Optional[float],
+    value: float | None,
     none_message: str,
     thresholds: list[tuple[float, str]],
     final_message: str = "",
@@ -76,7 +77,7 @@ class FundamentalScanner:
     """
 
     @staticmethod
-    def evaluate_valuation(pe_ratio: Optional[float], pb_ratio: Optional[float]) -> str:
+    def evaluate_valuation(pe_ratio: float | None, pb_ratio: float | None) -> str:
         """
         Evaluates Price/Earnings and Price/Book ratios.
 
@@ -125,7 +126,7 @@ class FundamentalScanner:
         return " ".join(eval_text)
 
     @staticmethod
-    def evaluate_health(debt_to_equity: Optional[float]) -> str:
+    def evaluate_health(debt_to_equity: float | None) -> str:
         """
         Evaluates financial risk and debt levels.
 
@@ -160,7 +161,7 @@ class FundamentalScanner:
 
     @staticmethod
     def evaluate_profitability(
-        profit_margin: Optional[float], roe: Optional[float]
+        profit_margin: float | None, roe: float | None
     ) -> str:
         """
         Evaluates margins and Return on Equity.
@@ -208,7 +209,7 @@ class FundamentalScanner:
 
     @classmethod
     @observe(name="Logic:FundamentalScanner:Scan")
-    def scan(cls, data: Dict[str, Any]) -> Dict[str, str]:
+    def scan(cls, data: dict[str, Any]) -> dict[str, str]:
         """
         Runs the full suite of fundamental evaluations on raw data.
 

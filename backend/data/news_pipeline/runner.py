@@ -3,10 +3,11 @@ from __future__ import annotations
 import asyncio
 from dataclasses import replace
 from datetime import UTC, datetime
+from typing import Protocol
 
-from data.news_pipeline.connectors import ExaSearchConnector
+from app.core.observability import observe, run_context
+from data.news_pipeline.connectors import TinyFishSearchConnector
 from data.news_pipeline.extractor import ArticleExtractor
-from app.core.observability import observe, opik_context
 from data.news_pipeline.models import (
     CompanyContext,
     NewsPipelineRecord,
@@ -21,18 +22,22 @@ from data.news_pipeline.query_templates import (
 )
 
 
+class NewsConnector(Protocol):
+    async def fetch(self, company: CompanyContext, *, time_window_days: int) -> list[RawSearchResult]: ...
+
+
 class NewsPipelineRunner:
     def __init__(
         self,
         *,
-        connectors: list[object] | None = None,
+        connectors: list[NewsConnector] | None = None,
         extractor: ArticleExtractor | None = None,
         max_articles_per_company: int = 50,
         min_quality_score: float = 40.0,
         pipeline_version: str = "1.0.0",
     ) -> None:
         self.connectors = connectors or [
-            ExaSearchConnector(),
+            TinyFishSearchConnector(),
         ]
         self.extractor = extractor or ArticleExtractor()
         self.max_articles_per_company = max_articles_per_company
@@ -70,8 +75,10 @@ class NewsPipelineRunner:
                 if source_tier == 4:
                     return None
                 canonical_url = self.url_normalizer.resolve_canonical(raw.url)
-                extraction = await asyncio.to_thread(
-                    self.extractor.extract,
+                # Extractors are synchronous and bounded; running them directly
+                # avoids leaking a default executor thread after short-lived CLI
+                # and test event loops.
+                extraction = self.extractor.extract(
                     url=raw.url,
                     source_domain=raw.source_domain,
                     company_name=company.company_name,
@@ -132,7 +139,7 @@ class NewsPipelineRunner:
         scored.sort(key=lambda item: item.quality_score, reverse=True)
         final_list = scored[: self.max_articles_per_company]
         
-        opik_context.update_current_span(
+        run_context.update_current_span(
             metadata={
                 "raw_results": len(raw_results),
                 "deduped": len(deduped),

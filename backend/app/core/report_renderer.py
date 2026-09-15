@@ -4,6 +4,7 @@ import json
 from typing import Any
 
 from app.config.constants import MODEL_REASONING
+from app.core.model_stream import get_captured_token_sink, publish_public_tokens
 from app.core.prompts import prompt_manager
 from app.models.request_models import Message
 
@@ -46,6 +47,29 @@ def _low_confidence_disclaimer(reason: str | None) -> str:
     )
 
 
+def _evidence_disclaimer(data_status: Any) -> str:
+    if not isinstance(data_status, dict):
+        return ""
+    incomplete = [
+        (str(dataset), status)
+        for dataset, status in data_status.items()
+        if isinstance(status, dict) and status.get("status") != "available"
+    ]
+    if not incomplete:
+        return ""
+
+    lines = [
+        "> [!WARNING]",
+        "> Partial evidence coverage.",
+        "> This report uses the data that was available and excludes unsupported calculations.",
+    ]
+    for dataset, status in incomplete:
+        state = str(status.get("status") or "unavailable")
+        detail = status.get("error_code") or status.get("error") or "coverage incomplete"
+        lines.append(f"> - {dataset}: {state} ({detail})")
+    return "\n".join(lines) + "\n\n"
+
+
 async def generate_narrative_report(
     state: dict[str, Any],
     resources: Any,
@@ -70,6 +94,7 @@ async def generate_narrative_report(
     validated_agent_outputs = _selected_validated_agent_outputs(
         results if isinstance(results, dict) else {}
     )
+    evidence_status = _stringify(state.get("data_status", {}))
 
     system_prompt = prompt_manager.get_prompt("report.system")
     user_prompt = prompt_manager.get_prompt(
@@ -79,19 +104,30 @@ async def generate_narrative_report(
         terminal_reason=str(terminal_reason),
         structured_synthesis=_stringify(synthesis),
         validated_agent_outputs=_stringify(validated_agent_outputs),
+        evidence_status=evidence_status,
     )
 
-    response = await resources.llm_service.generate_message(
-        messages=[
-            Message(role="system", content=system_prompt),
-            Message(role="user", content=user_prompt),
-        ],
-        model=MODEL_REASONING,
-    )
+    messages = [
+        Message(role="system", content=system_prompt),
+        Message(role="user", content=user_prompt),
+    ]
+    sink = get_captured_token_sink()
+    if sink:
+        with publish_public_tokens():
+            response = await resources.llm_service.generate_message(
+                messages=messages,
+                model=MODEL_REASONING,
+            )
+    else:
+        response = await resources.llm_service.generate_message(
+            messages=messages,
+            model=MODEL_REASONING,
+        )
     report_text = (getattr(response, "content", "") or "").strip()
     if not report_text:
         report_text = "# Executive Summary\n\nValidated research was available, but the final narrative report could not be rendered. Refer to the structured output panel for the verified result."
 
+    disclaimer = _evidence_disclaimer(state.get("data_status"))
     if is_low_confidence or terminal_status == "low_confidence":
-        return _low_confidence_disclaimer(str(terminal_reason)) + report_text
-    return report_text
+        disclaimer = _low_confidence_disclaimer(str(terminal_reason)) + disclaimer
+    return disclaimer + report_text

@@ -2,14 +2,14 @@
 
 import pytest
 from app.core.error_handling import (
-    ErrorSeverity,
-    should_retry,
-    get_error_severity,
-    apply_backoff,
-    ErrorContext,
-    ErrorAction,
-    ErrorHandler,
     MAX_RETRIES,
+    ErrorAction,
+    ErrorContext,
+    ErrorHandler,
+    ErrorSeverity,
+    apply_backoff,
+    get_error_severity,
+    should_retry,
 )
 
 

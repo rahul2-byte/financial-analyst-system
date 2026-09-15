@@ -3,7 +3,6 @@ from __future__ import annotations
 from datetime import UTC, datetime
 
 import pytest
-
 from data.news_pipeline.models import CompanyContext, RawSearchResult
 from data.news_pipeline.runner import NewsPipelineRunner
 
@@ -99,7 +98,7 @@ async def test_runner_filters_blocked_domains():
 
 
 @pytest.mark.asyncio
-async def test_runner_keeps_exa_records_for_alias_based_queries():
+async def test_runner_keeps_tinyfish_records_for_alias_based_queries():
     company = CompanyContext(ticker="HDFCBANK", company_name="HDFC BANK LTD")
     publish_time = datetime(2026, 4, 12, tzinfo=UTC)
     raw = RawSearchResult(
@@ -111,7 +110,7 @@ async def test_runner_keeps_exa_records_for_alias_based_queries():
         source_domain="example.com",
         source_type="search",
         query_intent="strategic",
-        search_provider="exa",
+        search_provider="tinyfish",
         snippet="HDFC Bank will expand its branch network.",
         publish_time=publish_time,
     )
@@ -128,10 +127,10 @@ async def test_runner_keeps_exa_records_for_alias_based_queries():
 
     assert len(results) == 1
     assert results[0].query_intent == "strategic"
-    assert results[0].search_provider == "exa"
+    assert results[0].search_provider == "tinyfish"
 
 
-def test_runner_uses_exa_connector_as_primary_default_source():
+def test_runner_uses_tinyfish_connector_as_primary_default_source():
     runner = NewsPipelineRunner()
 
-    assert runner.connectors[0].__class__.__name__ == "ExaSearchConnector"
+    assert runner.connectors[0].__class__.__name__ == "TinyFishSearchConnector"

@@ -1,17 +1,18 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import ClassVar
 
 
 class SourceClassifier:
-    TIER_ONE = {
+    TIER_ONE: ClassVar[set[str]] = {
         "bseindia.com",
         "nseindia.com",
         "sebi.gov.in",
         "rbi.org.in",
         "pib.gov.in",
     }
-    TIER_TWO = {
+    TIER_TWO: ClassVar[set[str]] = {
         "thehindubusinessline.com",
         "finshots.in",
         "economictimes.indiatimes.com",
@@ -19,13 +20,12 @@ class SourceClassifier:
         "business-standard.com",
         "moneycontrol.com",
     }
-    BLOCKED = {"zacks.com", "pocketsense.com", "wisesheets.io"}
+    BLOCKED: ClassVar[set[str]] = {"zacks.com", "pocketsense.com", "wisesheets.io"}
 
     @classmethod
     def classify(cls, domain: str) -> int:
         domain = domain.lower().strip()
-        if domain.startswith("www."):
-            domain = domain[4:]
+        domain = domain.removeprefix("www.")
         if domain in cls.BLOCKED:
             return 4
         if domain in cls.TIER_ONE or any(
@@ -40,13 +40,13 @@ class SourceClassifier:
 
 
 class QualityScorer:
-    EXTRACTION_POINTS = {
+    EXTRACTION_POINTS: ClassVar[dict[str, int]] = {
         "full": 25,
         "partial": 12,
         "snippet_only": 3,
         "failed": 0,
     }
-    SOURCE_POINTS = {1: 30, 2: 20, 3: 10, 4: 0}
+    SOURCE_POINTS: ClassVar[dict[int, int]] = {1: 30, 2: 20, 3: 10, 4: 0}
 
     @classmethod
     def score(

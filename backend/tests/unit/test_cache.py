@@ -1,7 +1,8 @@
 """Tests for caching functionality."""
 
-import pytest
 import time
+
+import pytest
 from app.core.cache import Cache, cached_llm_response, cached_tool_result
 
 

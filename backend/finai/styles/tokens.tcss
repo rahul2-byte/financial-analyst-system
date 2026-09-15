@@ -1,0 +1,19 @@
+/*
+   Design tokens are registered in theme.py and exposed by the app.
+   This file is the only place for global defaults and composable utilities.
+*/
+Screen { background: $fin-background; color: $fin-text; }
+
+/* Tailwind-like semantic utilities. Compose these with a component class. */
+.text-primary { color: $fin-text; }
+.text-secondary { color: $fin-secondary; }
+.text-muted { color: $fin-muted; }
+.text-accent { color: $fin-accent; }
+.text-success { color: $fin-success; }
+.text-warning { color: $fin-warning; }
+.text-error { color: $fin-error; }
+.surface-base { background: $fin-background; }
+.surface-primary { background: $fin-surface; }
+.surface-elevated { background: $fin-surface-raised; }
+.surface-active { background: $fin-active; }
+.border-subtle { border: solid $fin-border; }

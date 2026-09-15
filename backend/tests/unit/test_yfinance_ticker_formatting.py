@@ -1,10 +1,12 @@
 import sys
 import types
+from typing import Any, cast
 
 from app.core.ticker import parse_ticker
 
-sys.modules.setdefault("yfinance", types.SimpleNamespace())
-sys.modules.setdefault(
+module_cache = cast(dict[str, Any], sys.modules)
+module_cache.setdefault("yfinance", types.SimpleNamespace())
+module_cache.setdefault(
     "pandas",
     types.SimpleNamespace(
         DataFrame=object,
@@ -14,25 +16,32 @@ sys.modules.setdefault(
         to_datetime=lambda value: value,
     ),
 )
-sys.modules.setdefault("numpy", types.SimpleNamespace(ndarray=object))
-sys.modules.setdefault(
+module_cache.setdefault("numpy", types.SimpleNamespace(ndarray=object))
+module_cache.setdefault(
     "app.core.observability",
     types.SimpleNamespace(observe=lambda **_: lambda function: function),
 )
-sys.modules.setdefault(
+module_cache.setdefault(
     "data.interfaces.fetcher",
     types.SimpleNamespace(IDataFetcher=object),
 )
-sys.modules.setdefault(
+module_cache.setdefault(
     "data.schemas.market",
     types.SimpleNamespace(OHLCVData=object),
 )
-sys.modules.setdefault(
+module_cache.setdefault(
     "data.schemas.text",
-    types.SimpleNamespace(NewsArticle=object),
+    types.SimpleNamespace(
+        NewsArticle=type(
+            "NewsArticle",
+            (),
+            {"__init__": lambda self, **values: self.__dict__.update(values)},
+        )
+    ),
 )
 
-from data.providers.yfinance import YFinanceFetcher  # noqa: E402
+from data.providers import yfinance as yfinance_provider
+from data.providers.yfinance import YFinanceFetcher
 
 
 def test_format_ticker_normalizes_explicit_nse_suffix() -> None:
@@ -75,3 +84,38 @@ def test_format_ticker_appends_nse_suffix_to_hyphenated_equity() -> None:
     fetcher = YFinanceFetcher()
 
     assert fetcher._format_ticker("BAJAJ-AUTO") == "BAJAJ-AUTO.NS"
+
+
+def test_fetch_news_reads_current_yfinance_content_shape(monkeypatch) -> None:
+    item = {
+        "content": {
+            "title": "HDFC Bank quarterly update",
+            "summary": "Earnings coverage",
+            "pubDate": "2026-09-15T10:00:00Z",
+            "provider": {"displayName": "Reuters"},
+            "canonicalUrl": {"url": "https://example.test/hdfc"},
+        }
+    }
+    monkeypatch.setattr(
+        yfinance_provider.yf,
+        "Ticker",
+        lambda ticker: types.SimpleNamespace(news=[item]),
+        raising=False,
+    )
+
+    articles = YFinanceFetcher().fetch_news("HDFCBANK", limit=10)
+
+    assert len(articles) == 1
+    assert articles[0].title == "HDFC Bank quarterly update"
+    assert articles[0].url == "https://example.test/hdfc"
+
+
+def test_fetch_news_drops_placeholder_items(monkeypatch) -> None:
+    monkeypatch.setattr(
+        yfinance_provider.yf,
+        "Ticker",
+        lambda ticker: types.SimpleNamespace(news=[{"content": {}}]),
+        raising=False,
+    )
+
+    assert YFinanceFetcher().fetch_news("HDFCBANK", limit=10) == []

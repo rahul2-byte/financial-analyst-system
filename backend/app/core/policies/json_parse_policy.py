@@ -1,19 +1,17 @@
 """Shared policy for parsing JSON payloads from LLM responses."""
 
 import json
+import logging
 import re
 from typing import Any
-import logging
 
+_json_repair: Any
 try:
-    import json_repair
+    import json_repair as _json_repair
 except ImportError:
-    json_repair = None
+    _json_repair = None
 
-try:
-    import pyjson5
-except ImportError:
-    pyjson5 = None
+json_repair: Any = _json_repair
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +19,6 @@ logger = logging.getLogger(__name__)
 class JSONParsingError(Exception):
     """Exception raised when all JSON parsing attempts fail."""
 
-    pass
 
 
 def _extract_json_substring(text: str) -> str:
@@ -53,7 +50,6 @@ def parse_json_from_llm_response(
     1. Pre-processor (strip markdown fences)
     2. stdlib json.loads (fast path)
     3. json_repair (primary repair layer)
-    4. pyjson5 (fallback for comments/hjson)
     """
     if not content:
         return None
@@ -93,15 +89,8 @@ def parse_json_from_llm_response(
             elif isinstance(repaired, str) and repaired:
                 # If it returned a string representation of JSON, load it
                 return json.loads(repaired)
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - parser fallback boundary
             logger.debug(f"json_repair failed: {e}")
-
-    # Step 4: pyjson5 (Attempt #3)
-    if pyjson5 is not None:
-        try:
-            return pyjson5.loads(cleaned_text)
-        except Exception as e:
-            logger.debug(f"pyjson5 failed: {e}")
 
     # If all local parsing attempts fail, return None.
     # Upstream orchestrator handles:

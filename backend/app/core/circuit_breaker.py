@@ -1,9 +1,9 @@
 """Circuit Breaker implementation for external service protection."""
 
-import time
 import logging
+import time
+from collections.abc import Callable
 from enum import Enum
-from typing import Callable, Optional
 from functools import wraps
 
 logger = logging.getLogger(__name__)
@@ -18,7 +18,6 @@ class CircuitState(str, Enum):
 class CircuitBreakerOpen(Exception):
     """Raised when circuit is open and call is rejected."""
 
-    pass
 
 
 class CircuitBreaker:
@@ -45,13 +44,12 @@ class CircuitBreaker:
 
         self._state = CircuitState.CLOSED
         self._failure_count = 0
-        self._last_failure_time: Optional[float] = None
+        self._last_failure_time: float | None = None
         self._half_open_calls = 0
 
     @property
     def state(self) -> CircuitState:
-        if self._state == CircuitState.OPEN:
-            if self._last_failure_time:
+        if self._state == CircuitState.OPEN and self._last_failure_time:
                 elapsed = time.time() - self._last_failure_time
                 if elapsed >= self.recovery_timeout:
                     logger.info(

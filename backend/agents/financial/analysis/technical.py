@@ -1,26 +1,26 @@
 """Technical analysis graph node handler."""
 
 import json
-from typing import Any, Dict
+from typing import Any
 
-from app.core.graph.graph_state import ResearchGraphState
-from app.core.graph.node_helpers import build_node_error, build_node_success
-from app.core.node_resources import NodeResources
-from app.core.observability import observe, opik_context
-from app.models.request_models import Message
-from app.core.research_plan_schemas import AgentExecutionInput
-from app.core.prompts import prompt_manager
-from app.config.constants import MODEL_REASONING
-from app.core.research_schemas import ResearchAgentResult
 from agents.financial.analysis.payload_sanitizer import (
     drop_findings_without_evidence_ids,
 )
+from agents.shared.contracts import ResearchState
+from agents.shared.node_helpers import build_node_error, build_node_success
+from app.config.constants import MODEL_REASONING
+from app.core.node_resources import NodeResources
+from app.core.observability import observe, run_context
+from app.core.prompts import prompt_manager
+from app.core.research_plan_schemas import AgentExecutionInput
+from app.core.research_schemas import ResearchAgentResult
+from app.models.request_models import Message
 
 
 @observe(name="Agent:Technical", as_type="span")
 async def technical_analysis_node(
-    state: ResearchGraphState, resources: NodeResources
-) -> Dict[str, Any]:
+    state: ResearchState, resources: NodeResources
+) -> dict[str, Any]:
     """Uses LLM to analyze pre-fetched technical data."""
     current_step = state.get("current_step") or {}
     params = current_step.get("parameters", {})
@@ -54,7 +54,7 @@ async def technical_analysis_node(
         # We NO LONGER pass raw_data to the LLM.
 
         # Robust record extraction: raw_data is often {"ticker": "...", "data": [...]}
-        records = []
+        records: list[object] = []
         if isinstance(raw_data, dict):
             records = raw_data.get("data", []) if "data" in raw_data else [raw_data]
         elif isinstance(raw_data, list):
@@ -103,7 +103,7 @@ async def technical_analysis_node(
             agent_result = ResearchAgentResult.model_validate(
                 {"agent": "technical_analysis", **raw_payload}
             )
-        except Exception:
+        except Exception:  # noqa: BLE001 - malformed model output uses fallback
             # Fallback for parsing errors
             agent_result = ResearchAgentResult(
                 agent="technical_analysis",
@@ -126,7 +126,7 @@ async def technical_analysis_node(
             "missing_evidence_count": len(agent_result.missing_evidence),
         }
 
-        opik_context.update_current_span(
+        run_context.update_current_span(
             metadata={
                 "claims_generated": len(agent_result.claims),
                 "findings_generated": len(agent_result.findings),
@@ -140,5 +140,5 @@ async def technical_analysis_node(
             input_parameters=params,
             tool_output=agent_result.model_dump(mode="json"),
         )
-    except Exception as error:
+    except Exception as error:  # noqa: BLE001 - fail closed at agent boundary
         return build_node_error(error)

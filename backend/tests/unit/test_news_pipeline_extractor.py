@@ -7,7 +7,6 @@ def test_extractor_marks_snippet_only_when_all_extractors_fail(monkeypatch):
     extractor = ArticleExtractor()
 
     monkeypatch.setattr(extractor, "_extract_with_trafilatura", lambda url: None)
-    monkeypatch.setattr(extractor, "_extract_with_newspaper", lambda url: None)
     monkeypatch.setattr(extractor, "_extract_pdf_text", lambda url, max_pages=15: None)
 
     result = extractor.extract(

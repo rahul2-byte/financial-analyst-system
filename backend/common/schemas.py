@@ -1,6 +1,6 @@
-from pydantic import BaseModel, Field, field_validator
-from typing import List, Optional
 from enum import Enum
+
+from pydantic import BaseModel, Field, field_validator
 
 
 class RiskLevel(str, Enum):
@@ -28,7 +28,7 @@ class RiskScore(BaseModel):
     sector_name: str
     risk_score: float = Field(..., ge=0, le=100, description="Risk score from 0 to 100")
     risk_level: RiskLevel
-    contributing_factors: List[str] = Field(default_factory=list)
+    contributing_factors: list[str] = Field(default_factory=list)
 
 
 class VerificationResponse(BaseModel):
@@ -36,6 +36,6 @@ class VerificationResponse(BaseModel):
     is_valid: bool = Field(
         ..., description="Whether the numeric consistency check passed"
     )
-    feedback: Optional[str] = Field(
+    feedback: str | None = Field(
         None, description="Detailed explanation of hallucinations or errors"
     )

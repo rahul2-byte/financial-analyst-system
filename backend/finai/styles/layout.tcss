@@ -1,0 +1,22 @@
+#topbar { height: 2; padding: 0 2; border-bottom: solid $fin-border; background: $fin-background; }
+#workspace { height: 1fr; }
+#navigation { display: none; }
+#conversation { width: 1fr; padding: 1 3; scrollbar-size: 1 1; scrollbar-color: $fin-border-active; }
+#context-rail { width: 17%; min-width: 24; padding: 2 1; border-left: solid $fin-border; background: $fin-surface; color: $fin-secondary; overflow-y: auto; }
+#status { height: 1; padding: 0 2; color: $fin-muted; }
+#composer-row { height: 5; margin: 0 2; }
+#composer { width: 1fr; height: 4; border: none; border-left: thick $fin-accent; background: $fin-composer-surface; color: $fin-text; padding: 1 2; }
+#composer:focus { border: none; border-left: thick $fin-accent; }
+#composer .text-area--cursor-line { background: #222222; }
+#composer .text-area--selection { background: #2b4160; }
+#send { display: none; }
+#composer-tools { height: 1; padding: 0 2; color: $fin-muted; background: $fin-composer-surface; }
+#command-menu { display: none; height: auto; max-height: 9; padding: 1 2; color: $fin-muted; background: $fin-surface-raised; border-top: solid $fin-border; }
+#command-menu.visible { display: block; }
+#hints { height: 1; padding: 0 2; color: $fin-muted; }
+
+Screen.layout-medium #context-rail, Screen.layout-compact #context-rail { display: none; }
+Screen.layout-narrow #navigation, Screen.layout-narrow #context-rail, Screen.layout-narrow #send { display: none; }
+Screen.layout-narrow #conversation { padding: 1; }
+Screen.layout-narrow #composer-row { margin: 0 1; }
+/* Layout primitives: shell geometry only. Component appearance lives in components.tcss. */

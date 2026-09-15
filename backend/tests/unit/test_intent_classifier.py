@@ -1,5 +1,4 @@
 import pytest
-
 from app.core.intent_classifier import classify_query_intent
 from app.core.node_resources import resources
 
@@ -24,7 +23,7 @@ class _FailingLLMService:
 
 def _set_llm_service(value):
     previous = resources._llm_service
-    setattr(resources, "_llm_service", value)
+    resources._llm_service = value
     return previous
 
 
@@ -38,7 +37,7 @@ async def test_classify_query_intent_financial() -> None:
     try:
         result = await classify_query_intent("Analyze AAPL", [])
     finally:
-        setattr(resources, "_llm_service", previous)
+        resources._llm_service = previous
 
     assert result.label == "financial"
     assert result.is_financial_request is True
@@ -54,7 +53,7 @@ async def test_classify_query_intent_non_financial() -> None:
     try:
         result = await classify_query_intent("Write me a poem", [])
     finally:
-        setattr(resources, "_llm_service", previous)
+        resources._llm_service = previous
 
     assert result.is_financial_request is False
     assert "finance" in result.assistant_response.lower()
@@ -66,7 +65,7 @@ async def test_classify_query_intent_fails_closed_on_invalid_json() -> None:
     try:
         result = await classify_query_intent("Analyze AAPL", [])
     finally:
-        setattr(resources, "_llm_service", previous)
+        resources._llm_service = previous
 
     assert result.label == "non_financial"
     assert result.is_financial_request is False
@@ -78,7 +77,7 @@ async def test_classify_query_intent_fails_closed_on_exception() -> None:
     try:
         result = await classify_query_intent("Analyze AAPL", [])
     finally:
-        setattr(resources, "_llm_service", previous)
+        resources._llm_service = previous
 
     assert result.label == "non_financial"
     assert result.is_financial_request is False

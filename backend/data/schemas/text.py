@@ -1,5 +1,5 @@
 from datetime import datetime
-from typing import Dict, List, Optional, TypeAlias
+from typing import TypeAlias
 
 from pydantic import BaseModel
 
@@ -12,34 +12,33 @@ class NewsArticle(BaseModel):
     url: str
     source: str
     published_date: datetime
-    summary: Optional[str] = None
+    summary: str | None = None
     content: str
-    company_name: Optional[str] = None
-    query_objective: Optional[str] = None
-    query_variant: Optional[str] = None
-    intent_type: Optional[str] = None
-    search_rank: Optional[int] = None
-    search_provider: Optional[str] = None
-    source_domain: Optional[str] = None
-    source_type: Optional[str] = None
-    source_priority: Optional[int] = None
-    original_url: Optional[str] = None
-    canonical_url: Optional[str] = None
-    resolved_url: Optional[str] = None
-    fetched_at: Optional[datetime] = None
-    language: Optional[str] = None
-    content_hash: Optional[str] = None
-    title_hash: Optional[str] = None
-    article_hash: Optional[str] = None
-    is_trusted_domain: Optional[bool] = None
-    dedupe_key: Optional[str] = None
-    timeframe: Optional[str] = None
-    run_id: Optional[str] = None
+    company_name: str | None = None
+    query_objective: str | None = None
+    query_variant: str | None = None
+    intent_type: str | None = None
+    search_rank: int | None = None
+    search_provider: str | None = None
+    source_domain: str | None = None
+    source_type: str | None = None
+    source_priority: int | None = None
+    original_url: str | None = None
+    canonical_url: str | None = None
+    resolved_url: str | None = None
+    fetched_at: datetime | None = None
+    language: str | None = None
+    content_hash: str | None = None
+    title_hash: str | None = None
+    article_hash: str | None = None
+    is_trusted_domain: bool | None = None
+    dedupe_key: str | None = None
+    timeframe: str | None = None
+    run_id: str | None = None
 
 
 class ProcessedChunk(BaseModel):
     chunk_id: str
     ticker: str
     text: str
-    metadata: Dict[str, MetadataValue]
-    embedding: Optional[List[float]] = None
+    metadata: dict[str, MetadataValue]

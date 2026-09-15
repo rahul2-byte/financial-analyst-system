@@ -25,6 +25,6 @@ from quant.validators import ReportValidator
 
 __all__ = [
     "FundamentalScanner",
-    "TechnicalScanner",
     "ReportValidator",
+    "TechnicalScanner",
 ]

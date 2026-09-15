@@ -2,22 +2,21 @@ from __future__ import annotations
 
 import logging
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from time import struct_time
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
-
 from app.config import settings
-from data.news_pipeline.exa_client import ExaSearchClient
 from data.news_pipeline.models import CompanyContext, RawSearchResult
 from data.news_pipeline.query_templates import (
     QueryTemplateLibrary,
     build_queries_for_company,
     derive_company_aliases,
 )
+from data.news_pipeline.tinyfish_client import TinyFishSearchClient
 
 logger = logging.getLogger(__name__)
 
@@ -33,9 +32,9 @@ def _parse_datetime(value: Any) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+        return value if value.tzinfo else value.replace(tzinfo=UTC)
     if isinstance(value, struct_time):
-        return datetime(*value[:6], tzinfo=timezone.utc)
+        return datetime(*value[:6], tzinfo=UTC)
     if isinstance(value, str):
         stripped = value.strip()
         if not stripped:
@@ -43,7 +42,7 @@ def _parse_datetime(value: Any) -> datetime | None:
         for parser in (datetime.fromisoformat, parsedate_to_datetime):
             try:
                 parsed = parser(stripped)
-                return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+                return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
             except (TypeError, ValueError):
                 continue
     return None
@@ -52,7 +51,7 @@ def _parse_datetime(value: Any) -> datetime | None:
 def _within_window(published_at: datetime | None, time_window_days: int) -> bool:
     if published_at is None:
         return True
-    threshold = datetime.now(timezone.utc) - timedelta(days=time_window_days)
+    threshold = datetime.now(UTC) - timedelta(days=time_window_days)
     return published_at >= threshold
 
 
@@ -74,12 +73,12 @@ def _effective_child_publish_time(
         "d": timedelta(days=amount),
         "w": timedelta(weeks=amount),
     }
-    return datetime.now(timezone.utc) - unit_to_delta[unit]
+    return datetime.now(UTC) - unit_to_delta[unit]
 
 
 def _source_domain(url: str) -> str:
     domain = urlparse(url).netloc.lower()
-    return domain[4:] if domain.startswith("www.") else domain
+    return domain.removeprefix("www.")
 
 
 def _looks_like_portal_page(*, title: str, text: str) -> bool:
@@ -143,28 +142,35 @@ def _matches_company_terms(text: str, company: CompanyContext) -> bool:
     return False
 
 
-class ExaSearchConnector:
+def _item_value(item: Any, key: str, default: Any = None) -> Any:
+    if isinstance(item, dict):
+        return item.get(key, default)
+    return getattr(item, key, default)
+
+
+class TinyFishSearchConnector:
     def __init__(
         self,
         *,
-        client: ExaSearchClient | Any | None = None,
+        client: TinyFishSearchClient | Any | None = None,
         max_results_per_query: int | None = None,
     ) -> None:
-        self.client = client or ExaSearchClient(
-            api_key=str(settings.EXA_API_KEY or ""),
-            use_text_content=bool(settings.EXA_USE_TEXT_CONTENT),
+        self.client = client or TinyFishSearchClient(
+            api_key=str(settings.TINYFISH_API_KEY or ""),
+            base_url=settings.TINYFISH_SEARCH_URL,
+            timeout=float(settings.TINYFISH_SEARCH_TIMEOUT),
         )
         self.max_results_per_query = max_results_per_query or int(
-            settings.EXA_MAX_RESULTS_PER_QUERY
+            settings.TINYFISH_MAX_RESULTS_PER_QUERY
         )
 
     async def fetch(
         self, company: CompanyContext, *, time_window_days: int
     ) -> list[RawSearchResult]:
-        if isinstance(self.client, ExaSearchClient) and not self.client.api_key:
-            logger.warning("EXA_API_KEY is not configured; skipping Exa news search")
+        if isinstance(self.client, TinyFishSearchClient) and not self.client.api_key:
+            logger.warning("TINYFISH_API_KEY is not configured; skipping news search")
             logger.info(
-                "Exa connector normalized results",
+                "TinyFish connector normalized results",
                 extra={
                     "ticker": company.ticker,
                     "raw_items_seen": 0,
@@ -180,7 +186,7 @@ class ExaSearchConnector:
             intents=list(QueryTemplateLibrary.keys()),
             time_window_days=time_window_days,
         )
-        start_published_date = datetime.now(timezone.utc) - timedelta(
+        start_published_date = datetime.now(UTC) - timedelta(
             days=time_window_days
         )
         results: list[RawSearchResult] = []
@@ -191,20 +197,23 @@ class ExaSearchConnector:
         candidates_emitted = 0
 
         for query_spec in queries:
-            exa_results = await self.client.search(
+            search_results = await self.client.search(
                 query=str(query_spec["query"]),
                 num_results=self.max_results_per_query,
                 start_published_date=start_published_date,
             )
-            for item in exa_results:
+            for item in search_results:
                 raw_items_seen += 1
-                title = str(getattr(item, "title", None) or "").strip()
-                article_url = str(getattr(item, "url", None) or "").strip()
+                title = str(_item_value(item, "title") or "").strip()
+                article_url = str(_item_value(item, "url") or "").strip()
                 if not title or not article_url:
                     malformed_items_dropped += 1
                     continue
                 snippet = str(
-                    getattr(item, "text", None) or getattr(item, "summary", None) or ""
+                    _item_value(item, "snippet")
+                    or _item_value(item, "text")
+                    or _item_value(item, "summary")
+                    or ""
                 ).strip()
                 candidate_entries = [(title, snippet)]
                 if _looks_like_portal_page(title=title, text=snippet):
@@ -218,12 +227,15 @@ class ExaSearchConnector:
                 elif not _matches_company_terms(f"{title} {snippet}", company):
                     continue
 
-                publish_time = _parse_datetime(getattr(item, "published_date", None))
+                publish_time = _parse_datetime(
+                    _item_value(item, "published_date")
+                    or _item_value(item, "publishedDate")
+                )
                 if candidate_entries == [(title, snippet)] and not _within_window(
                     publish_time, time_window_days
                 ):
                     continue
-                author = str(getattr(item, "author", None) or "").strip() or None
+                author = str(_item_value(item, "author") or "").strip() or None
                 for candidate_title, candidate_snippet in candidate_entries:
                     candidate_publish_time = publish_time
                     if candidate_title != title:
@@ -256,14 +268,14 @@ class ExaSearchConnector:
                             source_domain=_source_domain(article_url),
                             source_type="search",
                             query_intent=str(query_spec["intent"]),
-                            search_provider="exa",
+                            search_provider="tinyfish",
                             snippet=candidate_snippet,
                             author=author,
                             publish_time=candidate_publish_time,
                         )
                     )
         logger.info(
-            "Exa connector normalized results",
+            "TinyFish connector normalized results",
             extra={
                 "ticker": company.ticker,
                 "raw_items_seen": raw_items_seen,

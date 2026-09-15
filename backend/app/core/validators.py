@@ -15,7 +15,6 @@ Usage:
 
 import html
 import re
-from typing import Tuple, Optional
 
 from app.core.ticker import parse_ticker
 
@@ -54,7 +53,7 @@ def sanitize_user_query(query: str, max_length: int = MAX_QUERY_LENGTH) -> str:
     return sanitized
 
 
-def validate_query_not_malicious(query: str) -> Tuple[bool, str]:
+def validate_query_not_malicious(query: str) -> tuple[bool, str]:
     """
     Check if query appears malicious.
 
@@ -75,7 +74,7 @@ def validate_query_not_malicious(query: str) -> Tuple[bool, str]:
     return True, ""
 
 
-def validate_ticker(ticker: Optional[str]) -> Tuple[bool, str]:
+def validate_ticker(ticker: str | None) -> tuple[bool, str]:
     """
     Validate a stock ticker symbol.
 
@@ -100,8 +99,8 @@ def validate_ticker(ticker: Optional[str]) -> Tuple[bool, str]:
 
 
 def validate_date_range(
-    start_date: Optional[str], end_date: Optional[str]
-) -> Tuple[bool, str]:
+    start_date: str | None, end_date: str | None
+) -> tuple[bool, str]:
     """
     Validate date range parameters.
 
@@ -129,4 +128,4 @@ def validate_date_range(
 
         return True, ""
     except ValueError as e:
-        return False, f"Invalid date format: {str(e)}"
+        return False, f"Invalid date format: {e!s}"

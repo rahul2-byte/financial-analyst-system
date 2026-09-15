@@ -1,6 +1,6 @@
 """Canonical ToolResult contract for active orchestration runtime."""
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 
 class ToolResult(BaseModel):
     tool_name: str
-    timestamp: datetime = Field(default_factory=lambda: datetime.now(timezone.utc))
+    timestamp: datetime = Field(default_factory=lambda: datetime.now(UTC))
     input_parameters: dict[str, Any] = Field(default_factory=dict)
     output_data: Any
     extracted_metrics: dict[str, float] = Field(default_factory=dict)

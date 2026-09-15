@@ -1,11 +1,9 @@
 from __future__ import annotations
 
-import io
 import logging
 import re
 
 import httpx
-
 from data.news_pipeline.models import ExtractionResult
 
 logger = logging.getLogger(__name__)
@@ -35,9 +33,6 @@ class ArticleExtractor:
 
         if not article_text:
             article_text = self._extract_with_trafilatura(url)
-
-        if not article_text:
-            article_text = self._extract_with_newspaper(url)
 
         extraction_status = "full"
         if not article_text:
@@ -84,21 +79,6 @@ class ArticleExtractor:
             logger.warning("Trafilatura extraction failed for %s: %s", url, exc)
             return None
 
-    def _extract_with_newspaper(self, url: str) -> str | None:
-        try:
-            from newspaper import Article
-        except ImportError:
-            return None
-
-        try:
-            article = Article(url=url)
-            article.download()
-            article.parse()
-            return article.text or None
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("newspaper3k extraction failed for %s: %s", url, exc)
-            return None
-
     def _extract_pdf_text(self, url: str, *, max_pages: int = 15) -> str | None:
         try:
             response = httpx.get(url, timeout=20.0, follow_redirects=True)
@@ -108,30 +88,7 @@ class ArticleExtractor:
             return None
 
         pdf_bytes = response.content
-        text = self._extract_with_pdfplumber(pdf_bytes, max_pages=max_pages)
-        if text:
-            return text
         return self._extract_with_pymupdf(pdf_bytes, max_pages=max_pages)
-
-    def _extract_with_pdfplumber(
-        self, pdf_bytes: bytes, *, max_pages: int
-    ) -> str | None:
-        try:
-            import pdfplumber
-        except ImportError:
-            return None
-
-        try:
-            with pdfplumber.open(io.BytesIO(pdf_bytes)) as pdf:
-                pages = []
-                for page in pdf.pages[:max_pages]:
-                    page_text = page.extract_text() or ""
-                    if page_text.strip():
-                        pages.append(page_text)
-            return "\n".join(pages).strip() or None
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("pdfplumber extraction failed: %s", exc)
-            return None
 
     def _extract_with_pymupdf(self, pdf_bytes: bytes, *, max_pages: int) -> str | None:
         try:

@@ -1,6 +1,6 @@
-from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
-from typing import Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class OHLCVData(BaseModel):
@@ -11,6 +11,6 @@ class OHLCVData(BaseModel):
     low: float
     close: float
     volume: int
-    adjusted_close: Optional[float] = None
+    adjusted_close: float | None = None
 
     model_config = ConfigDict(from_attributes=True)

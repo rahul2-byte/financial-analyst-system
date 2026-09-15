@@ -3,14 +3,12 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-
 BACKEND_ROOT = Path(__file__).resolve().parents[2]
 
 ALLOWLIST = {
     Path("app/core/ticker.py"),
     Path("agents/financial/data/symbol_resolution.py"),
     Path("agents/financial/data/datasets/news.py"),
-    Path("storage/sql/client.py"),
 }
 
 SUSPICIOUS_PATTERNS = (
@@ -24,7 +22,7 @@ def test_ticker_normalization_stays_centralized() -> None:
     offenders: set[Path] = set()
     for path in BACKEND_ROOT.rglob("*.py"):
         relative = path.relative_to(BACKEND_ROOT)
-        if relative.parts[0] in {"tests", "llama.cpp"}:
+        if relative.parts[0] in {"tests"}:
             continue
 
         text = path.read_text(encoding="utf-8")

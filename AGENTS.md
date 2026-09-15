@@ -10,14 +10,11 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
 ---
 
 ## 2. Repository Architecture
-- **`backend/`**: FastAPI (3.11+), Quant Engine, Multi-agent Orchestration.
+- **`backend/`**: FastAPI (3.11+), Quant Engine, Multi-agent Orchestration, and CLI runtime.
   - `agents/`: Single-responsibility agents (Fundamental, Technical, Risk, etc.).
   - `quant/`: Deterministic logic for financial indicators and scanners.
   - `app/`: Core services, routes (`/api/chat`, `/api/health`), and Pydantic config.
-  - `storage/`: PostgreSQL (TimescaleDB for market data and pgvector for vector storage).
-- **`frontend/`**: Next.js 16 (App Router), React 19, Tailwind CSS 4.
-  - `components/`: UI blocks (Charts via Recharts, Virtual lists via TanStack).
-  - `app/`: Server-side components and routing.
+  - `.finai/`: Local run artifacts; provider results remain in current graph state.
 - **`ai_engineering/`**: Governance layer containing `PROJECT_CONSTITUTION.md` and `CODING_STANDARDS.md`.
 
 ---
@@ -25,22 +22,17 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
 ## 3. Operational Commands
 
 ### Environment & Dependencies
-- **Backend:** `pip install -r backend/requirements.txt`
-- **Frontend:** `cd frontend && npm install`
+- **Backend:** `uv sync`
 
 ### Running Tests
 - **Backend (Pytest):**
-  - Full suite: `pytest backend/tests`
-  - Single File: `pytest backend/tests/quant/test_sector_risk.py`
-  - Single Test: `pytest backend/tests/quant/test_sector_risk.py::test_calculation`
-- **Frontend (Vitest):**
-  - Run once: `npm run test` (from `frontend/`)
-- **E2E (Playwright):** `npm run test:e2e` (from `frontend/`)
+  - Full suite: `uv run pytest backend/tests`
+  - Single File: `uv run pytest backend/tests/quant/test_sector_risk.py`
+  - Single Test: `uv run pytest backend/tests/quant/test_sector_risk.py::test_calculation`
 
 ### Linting & Formatting
-- **Backend (Ruff):** `ruff check backend/` and `ruff format backend/`
-- **Backend (Types):** `mypy backend/`
-- **Frontend (ESLint):** `npm run lint` (from `frontend/`)
+- **Backend (Ruff):** `uv run ruff check backend/` and `uv run ruff format backend/`
+- **Backend (Types):** `uv run mypy backend/`
 
 ---
 
@@ -62,11 +54,8 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
   3. **Real-time Feedback:** Use `await self.emit_status(...)` for progress updates.
 
 ### C. Data Pipeline (The Source)
-- **Interfaces:** (`backend/data/interfaces/`)
-  - `IDataFetcher`: `fetch_ohlcv`, `fetch_news`.
-  - `IStructuredStorage`: `save_ohlcv`, `get_ohlcv`, `get_latest_date`.
-  - `IVectorStorage`: `upsert_chunks`, `search` (Hybrid/Temporal).
-- **Flow:** Fetch -> Validate -> Normalize -> Store.
+- **Interfaces:** Providers expose fetch methods; graph state is the run boundary.
+- **Flow:** Fetch -> Validate -> Normalize -> Pass to graph state -> Write local artifact.
 - **Normalization:** SI Units, ISO Currencies (no local currency scaling in logic).
 - **Integrity:** No sentiment analysis or LLM logic inside the raw data pipeline.
 
@@ -83,13 +72,6 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
 - **Architecture:** Dependency Injection and interface-based design. Configuration via environment.
 - **Logging:** Structured logging with execution time tracking and error categorization.
 - **Testing:** Unit tests required for all new logic. Edge case handling is mandatory.
-
-### TypeScript/React (Frontend)
-- **Frameworks:** Next.js 16+, React 19 (Server Components preferred).
-- **Styling:** Tailwind CSS 4. Use `clsx` and `tailwind-merge` for class utility management.
-- **Components:** Modular, functional components with explicit TypeScript prop interfaces.
-- **State Management:** Prioritize React Hooks (`useState`, `useMemo`, `useCallback`) and local state.
-- **Typing:** Strict TypeScript typing for all props, states, and API responses.
 
 ---
 
@@ -110,8 +92,8 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
 - **Sources:** Explicitly defined modules for News, Market Data, and Filings.
 - **Flow:** Every data point must be Validated and Normalized before Storage.
 - **Logs:** All pipeline steps must log execution time and source attribution for audit trails.
-- **Inference:** Uses `llama.cpp` for local inference and OpenTelemetry for observability.
-- **Storage:** PostgreSQL (TimescaleDB) for time-series and pgvector for vector embeddings.
+- **Inference:** Uses Hive's OpenAI-compatible GLM-5.3-Flash API.
+- **Observability:** Uses local run metrics and artifact metadata without a telemetry SDK.
 
 ---
 
@@ -121,7 +103,7 @@ Before submitting any code changes, agents must:
 2. **Verify Patterns**: Use `glob`/`grep` to find existing implementations of similar logic.
 3. **Plan & Summarize**: Summarize current task and identify impacted modules before writing code.
 4. **TDD**: Write unit tests for new quant logic or tools BEFORE implementation.
-5. **Self-Verify**: Ensure `pytest`, `ruff check`, and frontend `npm run lint` pass.
+5. **Self-Verify**: Ensure the backend test and lint checks pass.
 6. **Commit Message**: Use semantic prefixes (e.g., `feat(quant):`, `fix(agent):`).
 7. **Compliance Check**: Confirm changes align with system boundaries and LLM limitations.
 
@@ -164,12 +146,3 @@ These rules represent the core interaction principles for all agents and MUST be
 - Strong success criteria enable independent looping.
 
 **End of Protocol.**
-
-## graphify
-
-This project has a graphify knowledge graph at graphify-out/.
-
-Rules:
-- Before answering architecture or codebase questions, read graphify-out/GRAPH_REPORT.md for god nodes and community structure
-- If graphify-out/wiki/index.md exists, navigate it instead of reading raw files
-- After modifying code files in this session, run `graphify update .` to keep the graph current (AST-only, no API cost)

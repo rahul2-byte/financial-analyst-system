@@ -22,12 +22,12 @@ class QualitativeEvidenceRequirements(BaseModel):
     recency_window_days: int = Field(default=90, ge=1, le=3650)
 
 
-class RetrievalReport(BaseModel):
+class EvidenceSelectionReport(BaseModel):
     query_text: str = ""
     limit: int = Field(default=0, ge=0, le=25)
     returned_count: int = Field(default=0, ge=0)
     corpus_types: list[str] = Field(default_factory=list)
-    retrieval_source: str = "none"
+    evidence_source: str = "none"
     failure_reason: str | None = None
 
 
@@ -51,7 +51,9 @@ class AgentEvidenceBundle(BaseModel):
     qualitative_inputs: list[QualitativeEvidenceItem] = Field(default_factory=list)
     dependency_results: dict[str, Any] = Field(default_factory=dict)
     coverage: CoverageSnapshot = Field(default_factory=CoverageSnapshot)
-    retrieval: RetrievalReport = Field(default_factory=RetrievalReport)
+    evidence_selection: EvidenceSelectionReport = Field(
+        default_factory=EvidenceSelectionReport
+    )
     warnings: list[str] = Field(default_factory=list)
 
 
