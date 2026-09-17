@@ -1,5 +1,6 @@
 import logging
 from contextlib import asynccontextmanager
+from uuid import uuid4
 
 from app.config import settings
 from app.core.logging import setup_logging
@@ -28,10 +29,16 @@ app = FastAPI(
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
-    logger.error("Global Exception Caught: %s", exc)
+    request_id = uuid4().hex
+    logger.exception(
+        "Global exception caught request_id=%s path=%s", request_id, request.url.path
+    )
     return JSONResponse(
         status_code=500,
-        content={"detail": "Internal Server Error", "message": str(exc)},
+        content={
+            "detail": "Internal Server Error",
+            "message": f"The request failed. Reference: {request_id}",
+        },
     )
 
 

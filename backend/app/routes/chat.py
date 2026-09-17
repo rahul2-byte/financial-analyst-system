@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import AsyncIterator
 from uuid import uuid4
 
@@ -17,6 +18,7 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def _runtime(request: ChatRequest) -> AgentLoop:
@@ -28,6 +30,7 @@ def _runtime(request: ChatRequest) -> AgentLoop:
             model=request.model or settings.HIVE_MODEL,
             max_tokens=request.max_tokens or settings.HIVE_MAX_OUTPUT_TOKENS,
             mode="autonomous",
+            publish_reports=request.publish_report,
         ),
         skill_registry=SkillRegistry.bundled(),
     )
@@ -48,6 +51,7 @@ async def chat_endpoint(request: ChatRequest) -> StreamingResponse:
 
     async def event_generator() -> AsyncIterator[str]:
         yield ": " + (" " * 1024) + "\n\n"
+        request_id = uuid4().hex
         try:
             events = _runtime(request).run(
                 request.messages,
@@ -55,8 +59,18 @@ async def chat_endpoint(request: ChatRequest) -> StreamingResponse:
             )
             async for event in events:
                 yield f"data: {json.dumps(event.model_dump())}\n\n"
-        except Exception as exc:  # noqa: BLE001 - HTTP stream boundary
-            yield f"data: {json.dumps(StreamEvent(type='error', message=str(exc)).model_dump())}\n\n"
+        except Exception:
+            logger.exception("chat stream failed request_id=%s", request_id)
+            yield (
+                "data: "
+                + json.dumps(
+                    StreamEvent(
+                        type="error",
+                        message=f"The research request failed. Reference: {request_id}",
+                    ).model_dump()
+                )
+                + "\n\n"
+            )
         finally:
             yield "data: [DONE]\n\n"
 

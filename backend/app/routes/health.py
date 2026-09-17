@@ -1,3 +1,4 @@
+import logging
 from datetime import UTC, datetime, timedelta
 
 from app.config import settings
@@ -8,6 +9,7 @@ from data.news_pipeline.tinyfish_client import TinyFishSearchClient
 from fastapi import APIRouter, Depends
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def get_llm_service() -> LLMServiceInterface:
@@ -37,8 +39,9 @@ async def _run_internal_canary() -> dict[str, object]:
                 "runtime": "ok",
             },
         }
-    except Exception as exc:  # noqa: BLE001 - canary must not break health route
-        return {"status": "degraded", "details": {"error": str(exc)}}
+    except Exception:
+        logger.exception("internal health canary failed")
+        return {"status": "degraded", "details": {"query_normalization": "error"}}
 
 
 async def _run_external_canary() -> dict[str, object]:
@@ -59,8 +62,9 @@ async def _run_external_canary() -> dict[str, object]:
             "status": "ok" if results else "degraded",
             "details": {"tinyfish_search": "ok" if results else "empty_results"},
         }
-    except Exception as exc:  # noqa: BLE001 - canary must not break health route
-        return {"status": "degraded", "details": {"error": str(exc)}}
+    except Exception:
+        logger.exception("external health canary failed")
+        return {"status": "degraded", "details": {"tinyfish_search": "error"}}
 
 
 @router.get("/health")

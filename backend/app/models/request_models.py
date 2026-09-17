@@ -18,6 +18,7 @@ class ChatRequest(BaseModel):
     max_tokens: int | None = None
     temperature: float = Field(default=0.7, ge=0.0, le=1.0)
     tools: list[dict[str, Any]] | None = None
+    publish_report: bool = False
 
     @field_validator("messages")
     @classmethod

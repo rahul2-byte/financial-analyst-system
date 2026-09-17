@@ -25,8 +25,8 @@ To support this high-speed, memory-optimized, open-source architecture, we selec
 1.  **Agent Execution & Validation: `Instructor` + `LiteLLM`**
     *   **Why:** `Instructor` wraps LLM clients and forces them to return data that perfectly validates against Pydantic schemas (zero-overhead compliance with the "Structured JSON" rule). The active runtime uses Hive's OpenAI-compatible GLM-5.3-Flash API.
 
-2.  **Orchestration: `LangGraph` deterministic state graph**
-    *   **Why:** The runtime uses explicit graph nodes and dependency-aware execution with deterministic routing and retries. This keeps execution auditable and prevents autonomous agent drift.
+2.  **Orchestration: bounded `AgentLoop`**
+    *   **Why:** The runtime uses explicit model rounds, finite tools, deterministic retries, and a publication gate. This keeps execution auditable and prevents autonomous agent drift without a second orchestration platform.
 
 3.  **Observability & tracing: local run metrics**
     *   **Why:** The backend emits structured tracing spans via OTLP to Phoenix, enabling request-level execution auditability for node transitions, LLM calls, and tool execution events.

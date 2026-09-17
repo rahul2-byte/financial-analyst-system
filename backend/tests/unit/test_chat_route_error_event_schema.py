@@ -36,4 +36,5 @@ async def test_chat_endpoint_streams_error_event_with_type_field(monkeypatch) ->
     event = json.loads(payload)
 
     assert event["type"] == "error"
-    assert "boom" in event["message"]
+    assert event["message"].startswith("The research request failed. Reference: ")
+    assert "boom" not in event["message"]

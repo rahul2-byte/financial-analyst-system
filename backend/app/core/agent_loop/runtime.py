@@ -5,10 +5,12 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import os
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
@@ -16,6 +18,12 @@ from app.core.agent_loop.model_events import (
     merge_chunk_tool_calls,
     result_payload,
     sanitize_tool_calls,
+)
+from app.core.agent_loop.publication import (
+    EvidenceFact,
+    PublicationError,
+    parse_report_draft,
+    publish_report,
 )
 from app.core.diagnostics import diagnostic_payload, diagnostics_enabled
 from app.core.research_schemas import EvidenceProvenance
@@ -94,6 +102,7 @@ class AgentLoopConfig:
     model: str = "reasoning"
     mode: str = "guided"
     max_tokens: int = 2048
+    publish_reports: bool = False
 
 
 class AgentLoop:
@@ -128,6 +137,18 @@ class AgentLoop:
         history = list(messages)
         selected_skills = self._select_skills(history)
         history = _add_skill_context(history, selected_skills)
+        if self.config.publish_reports:
+            history.append(
+                Message(
+                    role="system",
+                    content=(
+                        "Report mode: return only a JSON object matching the structured report schema. "
+                        "Use citations that name source_id values from successful evidence tools. "
+                        "For every numeric statement, use a marker exactly like [[fact:DATASET:data.path]] "
+                        "and list that fact ID in numeric_refs. Do not write any other digits."
+                    ),
+                )
+            )
         tool_calls_seen = 0
         failed_tools = 0
         successful_tools = 0
@@ -135,6 +156,7 @@ class AgentLoop:
         successful_evidence_tools = 0
         invalid_evidence = False
         evidence_warning_added = False
+        evidence_facts: dict[str, EvidenceFact] = {}
         completed_tool_ids = {
             message.tool_call_id
             for message in history
@@ -193,7 +215,8 @@ class AgentLoop:
                         ):
                             if isinstance(item, TextDelta):
                                 streamed_text.append(item.text)
-                                yield item
+                                if not self.config.publish_reports:
+                                    yield item
                             elif isinstance(
                                 item,
                                 (
@@ -229,7 +252,9 @@ class AgentLoop:
                     if assistant is None:
                         raise AgentLoopError("model stream ended without a response")
                     history.append(assistant)
-                    if message_writer:
+                    if message_writer and (
+                        not self.config.publish_reports or assistant.tool_calls
+                    ):
                         message_writer(assistant)
                     yield factory.make(
                         ModelResponseCompleted,
@@ -253,6 +278,26 @@ class AgentLoop:
                         if failed_tools or assistant.name == "partial_provider_response"
                         else "success"
                     )
+                    if self.config.publish_reports and terminal_status == "success":
+                        try:
+                            published = publish_report(
+                                parse_report_draft(assistant.content), evidence_facts
+                            )
+                        except PublicationError:
+                            published = (
+                                "The report was held for review because its structured "
+                                "claims or evidence could not be verified."
+                            )
+                            terminal_status = "needs_review"
+                        else:
+                            if message_writer:
+                                message_writer(
+                                    Message(role="assistant", content=published)
+                                )
+                        for offset in range(0, len(published), 64):
+                            yield factory.make(
+                                TextDelta, text=published[offset : offset + 64]
+                            )
                     yield factory.make(
                         RunCompleted,
                         terminal_status=terminal_status,
@@ -433,6 +478,7 @@ class AgentLoop:
                         successful_tools += 1
                         if name in _EVIDENCE_TOOLS:
                             successful_evidence_tools += 1
+                            evidence_facts.update(_extract_evidence_facts(payload))
                             if (
                                 name in _PROVENANCE_REQUIRED_TOOLS
                                 and not _valid_provenance(payload)
@@ -586,7 +632,8 @@ class AgentLoop:
                     for offset in range(0, len(chunk), 64):
                         part = chunk[offset : offset + 64]
                         text.append(part)
-                        yield factory.make(TextDelta, text=part)
+                        if not self.config.publish_reports:
+                            yield factory.make(TextDelta, text=part)
                         # Give the TUI a scheduling point between coalesced
                         # provider frames without inventing progress.
                         await asyncio.sleep(0)
@@ -602,7 +649,8 @@ class AgentLoop:
                         for offset in range(0, len(str(content)), 64):
                             part = str(content)[offset : offset + 64]
                             text.append(part)
-                            yield factory.make(TextDelta, text=part)
+                            if not self.config.publish_reports:
+                                yield factory.make(TextDelta, text=part)
                             await asyncio.sleep(0)
                 merge_chunk_tool_calls(calls, chunk_payload)
         tool_calls = (
@@ -657,6 +705,55 @@ def _summary(payload: dict[str, Any]) -> str:
     if "data" in payload and isinstance(payload["data"], dict):
         return f"received {len(payload['data'])} fields"
     return "completed"
+
+
+def _extract_evidence_facts(payload: dict[str, Any]) -> dict[str, EvidenceFact]:
+    """Index finite provider numbers by stable payload path for this run."""
+    provenance = payload.get("provenance")
+    if not isinstance(provenance, dict):
+        return {}
+    source_id = str(provenance.get("dataset") or provenance.get("source") or "")
+    instrument = str(provenance.get("instrument") or "")
+    observed_at = provenance.get("observed_at")
+    ingested_at = provenance.get("ingested_at")
+    quality_status = provenance.get("quality_status")
+    if not source_id or not instrument or quality_status != "verified":
+        return {}
+    try:
+        observed = datetime.fromisoformat(str(observed_at))
+        datetime.fromisoformat(str(ingested_at))
+    except (TypeError, ValueError):
+        return {}
+    facts: dict[str, EvidenceFact] = {}
+
+    def visit(value: Any, path: str) -> None:
+        if isinstance(value, bool):
+            return
+        if isinstance(value, (int, float)):
+            if isinstance(value, float) and not math.isfinite(value):
+                return
+            fact_id = f"{source_id}:{path}"
+            try:
+                facts[fact_id] = EvidenceFact(
+                    fact_id=fact_id,
+                    value=value,
+                    unit="provider_value",
+                    source_id=source_id,
+                    instrument=instrument,
+                    observed_at=observed,
+                    quality_status="verified",
+                )
+            except ValueError:
+                return
+        elif isinstance(value, dict):
+            for key, item in value.items():
+                visit(item, f"{path}.{key}" if path else str(key))
+        elif isinstance(value, list):
+            for index, item in enumerate(value):
+                visit(item, f"{path}.{index}")
+
+    visit(payload.get("data"), "data")
+    return facts
 
 
 def _extract_sources(payload: dict[str, Any]) -> list[dict[str, str]]:

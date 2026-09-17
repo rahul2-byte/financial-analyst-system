@@ -40,6 +40,7 @@ class ResearchRunner:
                 mode=self.mode,
                 model=settings.HIVE_MODEL,
                 max_tokens=settings.HIVE_MAX_OUTPUT_TOKENS,
+                publish_reports=True,
             ),
         )
         async for event in runtime.run(

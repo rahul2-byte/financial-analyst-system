@@ -17,6 +17,11 @@ CLI or HTTP adapter -> AgentLoop -> HiveService
 `finai/session.py` owns terminal session state. Persistence is delegated to
 `SessionPersistence` and execution to `ResearchRunner`.
 
+Research mode buffers the model's final response, validates its structured
+claims and current-run evidence in `AgentLoop`, then renders and persists it.
+Rejected drafts are neither streamed nor persisted. Conversational mode keeps
+ordinary token streaming.
+
 ## Safe change locations
 
 - Terminal presentation: `backend/finai/app.py`, `render.py`, and `styles/`.

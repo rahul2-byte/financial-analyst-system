@@ -162,7 +162,9 @@ class FinancialToolRunner:
             key = (ticker, period, interval)
             rows = self._ohlcv_by_request.get(key)
             if rows is None:
-                fetched = self.resources.yf_fetcher.fetch_stock_price(ticker, period, interval)
+                fetched = self.resources.yf_fetcher.fetch_stock_price(
+                    ticker, period, interval
+                )
                 rows = fetched.get("data") if isinstance(fetched, dict) else None
                 if not rows:
                     return {
@@ -223,7 +225,9 @@ class FinancialToolRunner:
                 self._fundamentals_by_ticker[str(value.get("ticker") or ticker)] = value
         elif name == "news:fetch_news":
             ticker = str(arguments.get("ticker", "")).strip()
-            articles = self.resources.yf_fetcher.fetch_news(ticker, int(arguments.get("limit", 10)))
+            articles = self.resources.yf_fetcher.fetch_news(
+                ticker, int(arguments.get("limit", 10))
+            )
             value = [
                 article.model_dump(mode="json")
                 if hasattr(article, "model_dump")

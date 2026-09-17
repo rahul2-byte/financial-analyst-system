@@ -21,7 +21,16 @@ jobs:
         run: pip install uv && uv sync --frozen --dev
 
       - name: Ruff lint
-        run: uv run ruff check backend/
+        run: uv run ruff check backend/ evals/
+
+      - name: Mypy
+        run: uv run mypy backend/
+
+      - name: Benchmark integrity
+        run: PYTHONPATH=. uv run python -m evals.validate
+
+      - name: CLI smoke
+        run: PYTHONPATH=backend uv run python -m finai --help
 
       - name: Pytest backend
         run: uv run pytest backend/tests

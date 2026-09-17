@@ -41,6 +41,7 @@ def render_event(event: ResearchEvent) -> str:
         label = {
             "partial": "Partial response",
             "insufficient_data": "Insufficient evidence",
+            "needs_review": "Held for review",
         }.get(event.terminal_status, "Completed")
         return f"\n✓ {label}{duration}\n"
     return ""

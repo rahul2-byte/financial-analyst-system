@@ -58,6 +58,27 @@ class InterruptedModel:
         return stream()
 
 
+class ReportTools:
+    def definitions(self) -> list[dict]:
+        return [{"type": "function", "function": {"name": "data:fetch_stock_data"}}]
+
+    async def execute(self, name: str, arguments: dict) -> dict:
+        del name, arguments
+        return {
+            "success": True,
+            "data": {"latest": {"close": 123.4}},
+            "provenance": {
+                "source": "fixture",
+                "dataset": "prices",
+                "instrument": "ABC.NS",
+                "observed_at": "2026-09-18T00:00:00+00:00",
+                "ingested_at": "2026-09-18T00:01:00+00:00",
+                "version": "fixture-1",
+                "quality_status": "verified",
+            },
+        }
+
+
 def test_loop_streams_answer_without_reusing_previous_response() -> None:
     model = FakeModel([[{"event": "token", "data": "first"}]])
     loop = AgentLoop(model, FakeTools())
@@ -73,6 +94,83 @@ def test_loop_streams_answer_without_reusing_previous_response() -> None:
         "run.completed",
     ]
     assert events[3].text == "first"
+
+
+def test_report_mode_publishes_only_after_structured_evidence_validation() -> None:
+    tool_call = {
+        "index": 0,
+        "id": "call-report",
+        "type": "function",
+        "function": {"name": "data:fetch_stock_data", "arguments": "{}"},
+    }
+    report = (
+        '{"executive_summary":"Verified.","key_drivers":["Demand."],'
+        '"detailed_analysis":"Close [[fact:prices:data.latest.close]].",'
+        '"risks":["Execution."],"final_view":"Review.","claims":['
+        '{"claim_id":"c1","text":"Close [[fact:prices:data.latest.close]].",'
+        '"importance":"major","evidence_refs":["src"],'
+        '"numeric_refs":["prices:data.latest.close"]}],'
+        '"citations":[{"citation_id":"src","source_id":"prices"}]}'
+    )
+    model = FakeModel(
+        [
+            [
+                {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"tool_calls": [tool_call]}}]},
+                }
+            ],
+            [{"event": "token", "data": report}],
+        ]
+    )
+    persisted: list[Message] = []
+    loop = AgentLoop(
+        model,
+        ReportTools(),
+        config=AgentLoopConfig(mode="autonomous", publish_reports=True),
+    )
+
+    events = asyncio.run(
+        _collect(
+            loop,
+            [Message(role="user", content="publish a report")],
+            message_writer=persisted.append,
+        )
+    )
+
+    deltas = "".join(event.text for event in events if event.type == "response.delta")
+    assert "123.4 provider_value" in deltas
+    assert persisted[-1].content == deltas
+    assert (
+        next(event for event in events if event.type == "run.completed").terminal_status
+        == "success"
+    )
+
+
+def test_report_mode_holds_invalid_draft_without_leaking_text() -> None:
+    model = FakeModel([[{"event": "token", "data": "{not-json-secret-123}"}]])
+    persisted: list[Message] = []
+    loop = AgentLoop(
+        model,
+        ReportTools(),
+        config=AgentLoopConfig(mode="autonomous", publish_reports=True),
+    )
+
+    events = asyncio.run(
+        _collect(
+            loop,
+            [Message(role="user", content="publish a report")],
+            message_writer=persisted.append,
+        )
+    )
+
+    output = "".join(event.text for event in events if event.type == "response.delta")
+    assert "secret-123" not in output
+    assert "secret-123" not in "".join(message.content for message in persisted)
+    assert (
+        next(event for event in events if event.type == "run.completed").terminal_status
+        == "needs_review"
+    )
 
 
 def test_loop_renders_content_from_openai_chunk_frames() -> None:
