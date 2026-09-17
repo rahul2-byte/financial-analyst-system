@@ -25,6 +25,7 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     logger.error("Global Exception Caught: %s", exc)

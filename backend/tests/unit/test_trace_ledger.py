@@ -48,7 +48,9 @@ def test_ledger_spills_large_payload_to_hashed_artifact(tmp_path: Path) -> None:
     assert json.loads(artifact.read_text(encoding="utf-8"))["query"] == "x" * 100
 
 
-def test_ledger_assigns_monotonic_sequences_independent_of_source(tmp_path: Path) -> None:
+def test_ledger_assigns_monotonic_sequences_independent_of_source(
+    tmp_path: Path,
+) -> None:
     ledger = TraceLedger(tmp_path / "session")
     first = _event()
     ledger.append(first)

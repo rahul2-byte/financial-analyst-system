@@ -10,8 +10,6 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from app.core.tools.tool_system import initialize_tool_system
-
 from .app import FinAIApp
 from .plain import render_json, render_plain
 from .session import FinAIRepl
@@ -22,11 +20,25 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Interactive FIN-AI research terminal")
     parser.add_argument("--data-dir", type=Path, default=Path(".finai"))
     parser.add_argument("--session", default=None)
-    parser.add_argument("--plain", action="store_true", help="Print a readable one-shot response")
-    parser.add_argument("--json", action="store_true", help="Print one-shot events as JSON")
-    parser.add_argument("--debug", action="store_true", help="Write verbose diagnostics to .finai/logs/finai.log")
-    parser.add_argument("--debug-payloads", action="store_true", help="Include bounded redacted payloads in diagnostics")
-    parser.add_argument("--mode", choices=("guided", "review", "autonomous"), default="guided")
+    parser.add_argument(
+        "--plain", action="store_true", help="Print a readable one-shot response"
+    )
+    parser.add_argument(
+        "--json", action="store_true", help="Print one-shot events as JSON"
+    )
+    parser.add_argument(
+        "--debug",
+        action="store_true",
+        help="Write verbose diagnostics to .finai/logs/finai.log",
+    )
+    parser.add_argument(
+        "--debug-payloads",
+        action="store_true",
+        help="Include bounded redacted payloads in diagnostics",
+    )
+    parser.add_argument(
+        "--mode", choices=("guided", "review", "autonomous"), default="guided"
+    )
     parser.add_argument("query", nargs="*", help="One-shot research query")
     return parser.parse_args(argv)
 
@@ -41,8 +53,8 @@ async def run_one_shot(repl: FinAIRepl, query: str, *, as_json: bool) -> None:
         await repl.hive_service.aclose()
 
 
-async def run_legacy(repl: FinAIRepl) -> None:
-    """Run the compatibility console loop for non-interactive terminals."""
+async def run_plain_terminal(repl: FinAIRepl) -> None:
+    """Run the line-oriented terminal when a TTY is unavailable."""
     try:
         await repl.run()
     finally:
@@ -88,7 +100,6 @@ def main() -> None:
             os.environ["FINAI_DIAGNOSTICS"] = "payloads"
         elif args.debug:
             os.environ["FINAI_DIAGNOSTICS"] = "trace"
-        initialize_tool_system()
         log_dir = args.data_dir / "logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         logging.basicConfig(
@@ -104,6 +115,6 @@ def main() -> None:
         if sys.stdin.isatty() and sys.stdout.isatty():
             asyncio.run(run_interactive(repl))
         else:
-            asyncio.run(run_legacy(repl))
+            asyncio.run(run_plain_terminal(repl))
     except KeyboardInterrupt:
         sys.exit(130)

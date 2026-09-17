@@ -1,6 +1,7 @@
 from uuid import uuid4
 
 import pytest
+from app.core.resources import RuntimeResources
 from app.models.request_models import Message
 from finai.session_runtime import ResearchRunner
 
@@ -22,7 +23,9 @@ async def test_research_runner_keeps_tool_evidence_between_approval_resumes(
                 yield None
 
     monkeypatch.setattr("finai.session_runtime.AgentLoop", FakeLoop)
-    runner = ResearchRunner(object(), "guided", object(), object())
+    runner = ResearchRunner(
+        RuntimeResources(llm_service=object(), yf_fetcher=object()), "guided"
+    )
     history = [Message(role="user", content="Analyze HDFC Bank")]
 
     for _ in range(2):

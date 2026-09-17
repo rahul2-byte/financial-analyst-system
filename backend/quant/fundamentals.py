@@ -160,9 +160,7 @@ class FundamentalScanner:
         return " ".join(eval_text)
 
     @staticmethod
-    def evaluate_profitability(
-        profit_margin: float | None, roe: float | None
-    ) -> str:
+    def evaluate_profitability(profit_margin: float | None, roe: float | None) -> str:
         """
         Evaluates margins and Return on Equity.
 

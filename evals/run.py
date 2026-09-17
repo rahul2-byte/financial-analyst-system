@@ -27,7 +27,9 @@ def load_jsonl(path: Path) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     if not path.exists():
         return records
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), 1
+    ):
         if not line.strip():
             continue
         value = json.loads(line)
@@ -83,7 +85,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "metadata": {
             "git_commit": git_commit(),
             "gold_set_version": Path(args.tasks).parent.name,
-            "source_manifest_hash": sha256_file(manifest) if manifest.exists() else None,
+            "source_manifest_hash": sha256_file(manifest)
+            if manifest.exists()
+            else None,
             "prompt_version": args.prompt_version,
             "model_id": args.model_id,
             "configuration_hash": args.configuration_hash,
@@ -118,7 +122,9 @@ def main() -> None:
     output = run(args)
     target = Path(args.output)
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text(json.dumps(output, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    target.write_text(
+        json.dumps(output, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     print(json.dumps(output, indent=2, sort_keys=True))
 
 

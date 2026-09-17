@@ -18,7 +18,7 @@ CLI / FastAPI
   SessionStore ──► transcript, checkpoints, trace, run artifacts
 ```
 
-AgentLoop is the production runtime used by both CLI and HTTP. The graph/orchestrator modules remain a compatibility path for existing integrations. Provider results live in run state; the CLI additionally keeps a local append-only transcript, event audit, pending interaction, and run artifacts under `.finai/`. The interactive UI is Textual + Rich over asyncio; one-shot/plain output remains available for automation. There is no Docker, PostgreSQL, vector database, embedding model, local inference server, or third-party telemetry SDK.
+AgentLoop is the production runtime used by both CLI and HTTP. Provider results live in run state; the CLI additionally keeps a local append-only transcript, event audit, pending interaction, and run artifacts under `.finai/`. The interactive UI is Textual + Rich over asyncio; one-shot/plain output remains available for automation. There is no Docker, PostgreSQL, vector database, embedding model, local inference server, or third-party telemetry SDK.
 
 ## Setup
 
@@ -32,7 +32,7 @@ Set `HIVE_API_KEY` and `TINYFISH_API_KEY` in `.env`. The Hive adapter uses the O
 ## Run
 
 ```bash
-uv run python -m finai --help
+PYTHONPATH=backend uv run python -m finai --help
 uv run uvicorn app.main:app --reload
 ```
 

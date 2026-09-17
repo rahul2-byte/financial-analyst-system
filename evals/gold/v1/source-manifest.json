@@ -1,6 +1,13 @@
 {
   "version": "v1",
-  "status": "unpopulated",
-  "sources": [],
-  "note": "Populate only with frozen, permitted public source snapshots and human-authored labels."
+  "status": "seeded_fixture",
+  "sources": [
+    {
+      "id": "fixture:yfinance",
+      "kind": "synthetic_test_fixture",
+      "description": "Deterministic two-row market and fundamentals fixture used by backend tests",
+      "permitted": true
+    }
+  ],
+  "note": "This seed benchmark validates contracts and failure handling. Replace or supplement with frozen permitted public snapshots before making market-quality claims."
 }

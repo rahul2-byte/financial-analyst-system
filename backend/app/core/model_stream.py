@@ -7,7 +7,9 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 
 TokenSink = Callable[[str], Awaitable[None]]
-_token_sink: ContextVar[TokenSink | None] = ContextVar("public_token_sink", default=None)
+_token_sink: ContextVar[TokenSink | None] = ContextVar(
+    "public_token_sink", default=None
+)
 _publishing_public_tokens: ContextVar[bool] = ContextVar(
     "publishing_public_tokens", default=False
 )

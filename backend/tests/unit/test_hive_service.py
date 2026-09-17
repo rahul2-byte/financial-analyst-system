@@ -29,7 +29,9 @@ async def test_hive_request_budget_uses_configured_timeout(monkeypatch) -> None:
     monkeypatch.setattr(settings, "HIVE_TIMEOUT", 123.0)
 
     service = HiveService(
-        client=httpx.AsyncClient(transport=httpx.MockTransport(lambda request: httpx.Response(200)))
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(lambda request: httpx.Response(200))
+        )
     )
 
     assert service.retry_policy.total_budget_seconds == 123.0
@@ -51,8 +53,7 @@ async def test_hive_reuses_injected_client_and_retries_504_before_streaming(
             200,
             request=request,
             content=(
-                b'data: {"choices":[{"delta":{"content":"ready"}}]}\n\n'
-                b"data: [DONE]\n\n"
+                b'data: {"choices":[{"delta":{"content":"ready"}}]}\n\ndata: [DONE]\n\n'
             ),
         )
 
@@ -88,12 +89,18 @@ def test_hive_sse_parser_extracts_text_tool_calls_and_usage() -> None:
 
     token = parser("data: " + json.dumps({"choices": [{"delta": {"content": "Hi"}}]}))
     usage = parser(
-        'data: ' + json.dumps({"choices": [], "usage": {"prompt_tokens": 4, "completion_tokens": 2}})
+        "data: "
+        + json.dumps(
+            {"choices": [], "usage": {"prompt_tokens": 4, "completion_tokens": 2}}
+        )
     )
     done = parser("data: [DONE]")
 
     assert token == {"event": "token", "data": "Hi"}
-    assert usage == {"event": "usage", "data": {"prompt_tokens": 4, "completion_tokens": 2}}
+    assert usage == {
+        "event": "usage",
+        "data": {"prompt_tokens": 4, "completion_tokens": 2},
+    }
     assert done == {"event": "done", "data": "[DONE]"}
 
 

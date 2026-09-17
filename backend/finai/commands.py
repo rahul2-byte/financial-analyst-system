@@ -66,7 +66,6 @@ class CommandRegistry:
         )
 
 
-
 def parse_command(text: str) -> tuple[str | None, list[str]]:
     text = text.strip()
     if not text.startswith("/"):

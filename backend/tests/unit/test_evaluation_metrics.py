@@ -9,7 +9,9 @@ def test_retrieval_metrics_use_first_relevant_rank() -> None:
 
 def test_case_metrics_require_numeric_provenance_and_relevant_citations() -> None:
     task = {
-        "required_facts": [{"field": "debt_to_equity", "value": 0.12, "tolerance": 0.001}],
+        "required_facts": [
+            {"field": "debt_to_equity", "value": 0.12, "tolerance": 0.001}
+        ],
         "required_risks": ["valuation", "sector"],
         "required_citations": ["filing-001"],
         "forbidden_claim_types": ["personalized_recommendation"],

@@ -25,7 +25,10 @@ def is_article_relevant(
     if not valid_targets:
         return False
 
-    patterns = [re.compile(rf"\b{re.escape(target)}\b", re.IGNORECASE) for target in valid_targets]
+    patterns = [
+        re.compile(rf"\b{re.escape(target)}\b", re.IGNORECASE)
+        for target in valid_targets
+    ]
     if any(pattern.search(title) for pattern in patterns):
         return True
 
@@ -35,4 +38,7 @@ def is_article_relevant(
         return True
     if lenient:
         return False
-    return sum(len(pattern.findall(content)) for pattern in patterns) >= RELEVANCE_FREQUENCY_THRESHOLD
+    return (
+        sum(len(pattern.findall(content)) for pattern in patterns)
+        >= RELEVANCE_FREQUENCY_THRESHOLD
+    )

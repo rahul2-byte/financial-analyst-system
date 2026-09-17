@@ -4,9 +4,8 @@ import asyncio
 import json
 from uuid import uuid4
 
-from app.core.agent_loop import AgentLoop, AgentLoopConfig, RegistryToolRunner
+from app.core.agent_loop import AgentLoop, AgentLoopConfig
 from app.core.skills import SkillRegistry
-from app.core.tools.tool_system import tool_executor, tool_registry
 from app.models.request_models import Message
 
 
@@ -40,7 +39,9 @@ class FakeTools:
 
 class FailedTools:
     def definitions(self) -> list[dict]:
-        return [{"type": "function", "function": {"name": "analysis:run_technical_scan"}}]
+        return [
+            {"type": "function", "function": {"name": "analysis:run_technical_scan"}}
+        ]
 
     async def execute(self, name: str, arguments: dict) -> dict:
         return {"success": False, "error": "No OHLCV data provided"}
@@ -76,12 +77,14 @@ def test_loop_streams_answer_without_reusing_previous_response() -> None:
 
 def test_loop_renders_content_from_openai_chunk_frames() -> None:
     model = FakeModel(
-        [[
-            {
-                "event": "chunk",
-                "data": {"choices": [{"delta": {"content": "chunked answer"}}]},
-            }
-        ]]
+        [
+            [
+                {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"content": "chunked answer"}}]},
+                }
+            ]
+        ]
     )
     loop = AgentLoop(model, FakeTools())
 
@@ -94,12 +97,20 @@ def test_loop_renders_content_from_openai_chunk_frames() -> None:
 
 def test_loop_exposes_provider_attempt_events_to_the_ui() -> None:
     model = FakeModel(
-        [[
-            {"event": "provider_attempt_started", "data": {"attempt": 1}},
-            {"event": "provider_stream_started", "data": {"attempt": 1, "first_byte_ms": 12}},
-            {"event": "token", "data": "first"},
-            {"event": "provider_completed", "data": {"attempts": 1, "duration_ms": 25}},
-        ]]
+        [
+            [
+                {"event": "provider_attempt_started", "data": {"attempt": 1}},
+                {
+                    "event": "provider_stream_started",
+                    "data": {"attempt": 1, "first_byte_ms": 12},
+                },
+                {"event": "token", "data": "first"},
+                {
+                    "event": "provider_completed",
+                    "data": {"attempts": 1, "duration_ms": 25},
+                },
+            ]
+        ]
     )
     loop = AgentLoop(model, FakeTools())
 
@@ -132,7 +143,12 @@ def test_loop_records_tool_call_and_returns_to_model() -> None:
     }
     model = FakeModel(
         [
-            [{"event": "chunk", "data": {"choices": [{"delta": {"tool_calls": [tool_call]}}]}}],
+            [
+                {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"tool_calls": [tool_call]}}]},
+                }
+            ],
             [{"event": "token", "data": "evidence"}],
         ]
     )
@@ -156,7 +172,12 @@ def test_loop_marks_run_partial_when_evidence_tool_fails() -> None:
     }
     model = FakeModel(
         [
-            [{"event": "chunk", "data": {"choices": [{"delta": {"tool_calls": [tool_call]}}]}}],
+            [
+                {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"tool_calls": [tool_call]}}]},
+                }
+            ],
         ]
     )
     loop = AgentLoop(model, FailedTools(), config=AgentLoopConfig(mode="autonomous"))
@@ -184,7 +205,12 @@ def test_loop_recovers_from_malformed_tool_arguments() -> None:
     }
     model = FakeModel(
         [
-            [{"event": "chunk", "data": {"choices": [{"delta": {"tool_calls": [malformed_call]}}]}}],
+            [
+                {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"tool_calls": [malformed_call]}}]},
+                }
+            ],
             [{"event": "token", "data": "recovered"}],
         ]
     )
@@ -211,7 +237,14 @@ def test_loop_pauses_on_malformed_clarification_call() -> None:
         },
     }
     model = FakeModel(
-        [[{"event": "chunk", "data": {"choices": [{"delta": {"tool_calls": [malformed_call]}}]}}]]
+        [
+            [
+                {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"tool_calls": [malformed_call]}}]},
+                }
+            ]
+        ]
     )
     loop = AgentLoop(model, FakeTools())
 
@@ -242,7 +275,14 @@ def test_guided_loop_pauses_before_external_tool_and_writes_checkpoint() -> None
         "function": {"name": "data:lookup", "arguments": '{"ticker":"AAPL"}'},
     }
     model = FakeModel(
-        [[{"event": "chunk", "data": {"choices": [{"delta": {"tool_calls": [tool_call]}}]}}]]
+        [
+            [
+                {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"tool_calls": [tool_call]}}]},
+                }
+            ]
+        ]
     )
     checkpoints: list[dict] = []
     loop = AgentLoop(model, FakeTools())
@@ -340,27 +380,17 @@ def test_guided_loop_does_not_repeat_completed_checkpoint_tools() -> None:
         )
     )
 
-    completed_ids = [event.tool_id for event in events if event.type == "tool.completed"]
+    completed_ids = [
+        event.tool_id for event in events if event.type == "tool.completed"
+    ]
     assert completed_ids == ["call-approved"]
     assert events[-1].type == "approval.requested"
     assert checkpoints[-1]["tool_call_id"] == "call-next"
 
 
-def test_registry_tool_runner_advertises_only_executable_non_submission_tools() -> None:
-    runner = RegistryToolRunner(tool_registry, tool_executor)
-
-    names = {item["function"]["name"] for item in runner.definitions()}
-
-    assert names
-    assert all(not name.split(":", 1)[1].startswith("submit_") for name in names)
-    assert "data:fetch_stock_data" in names
-    assert "validation:validate_report" not in names
-
-
 def test_broad_finance_request_keeps_model_tool_catalog_bounded() -> None:
     model = FakeModel([[{"event": "token", "data": "answer"}]])
-    runner = RegistryToolRunner(tool_registry, tool_executor)
-    loop = AgentLoop(model, runner, skill_registry=SkillRegistry.bundled())
+    loop = AgentLoop(model, FakeTools(), skill_registry=SkillRegistry.bundled())
 
     asyncio.run(_collect(loop, [Message(role="user", content="Analyse HDFC stock")]))
 
@@ -370,8 +400,19 @@ def test_broad_finance_request_keeps_model_tool_catalog_bounded() -> None:
     assert model.request_kwargs[0]["temperature"] == 0.1
 
 
+def test_research_response_without_evidence_is_not_marked_success() -> None:
+    model = FakeModel([[{"event": "token", "data": "unsupported summary"}]])
+    loop = AgentLoop(model, FakeTools(), skill_registry=SkillRegistry.bundled())
+
+    events = asyncio.run(
+        _collect(loop, [Message(role="user", content="Analyse HDFC stock")])
+    )
+
+    assert events[-1].type == "run.completed"
+    assert events[-1].terminal_status == "insufficient_data"
+
+
 async def _collect(loop: AgentLoop, messages: list[Message], **kwargs):
     return [
-        event
-        async for event in loop.run(messages, conversation_id=uuid4(), **kwargs)
+        event async for event in loop.run(messages, conversation_id=uuid4(), **kwargs)
     ]

@@ -2,13 +2,28 @@
 
 from __future__ import annotations
 
-ACTIVITY_EVENTS = frozenset({
-    "skill.selected", "model.request.started", "provider.attempt.started",
-    "provider.retrying", "provider.stream.started", "provider.completed",
-    "provider.failed", "tool.progress", "context.compacted", "stage.started",
-    "stage.completed", "stage.failed", "tool.started", "tool.completed",
-    "tool.failed", "run.completed", "run.cancelled", "run.failed",
-})
+ACTIVITY_EVENTS = frozenset(
+    {
+        "skill.selected",
+        "model.request.started",
+        "provider.attempt.started",
+        "provider.retrying",
+        "provider.stream.started",
+        "provider.completed",
+        "provider.failed",
+        "tool.progress",
+        "context.compacted",
+        "stage.started",
+        "stage.completed",
+        "stage.failed",
+        "tool.started",
+        "tool.completed",
+        "tool.failed",
+        "run.completed",
+        "run.cancelled",
+        "run.failed",
+    }
+)
 TERMINAL_EVENTS = frozenset({"run.completed", "run.cancelled", "run.failed"})
 TOOL_EVENTS = frozenset({"tool.started", "tool.progress"})
 

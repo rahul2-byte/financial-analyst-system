@@ -24,6 +24,7 @@ import yfinance as yf
 from app.core.observability import observe
 from app.core.ticker import Ticker, parse_ticker
 from data.interfaces.fetcher import IDataFetcher
+from data.quality import utc_now, validate_market_records
 from data.schemas.market import OHLCVData
 from data.schemas.text import NewsArticle
 
@@ -217,15 +218,55 @@ class YFinanceFetcher(IDataFetcher):
         date_col = (
             "Date"
             if "Date" in df.columns
-            else "Datetime" if "Datetime" in df.columns else df.columns[0]
+            else "Datetime"
+            if "Datetime" in df.columns
+            else df.columns[0]
         )
         df[date_col] = df[date_col].astype(str)
+
+        records = df.to_dict(orient="records")
+        normalized_records = [
+            {
+                "ticker": formatted_ticker,
+                "open": row.get("Open", row.get("open")),
+                "high": row.get("High", row.get("high")),
+                "low": row.get("Low", row.get("low")),
+                "close": row.get("Close", row.get("close")),
+                "volume": row.get("Volume", row.get("volume")),
+                "Date": row.get(date_col),
+            }
+            for row in records
+        ]
+        ingested_at = utc_now()
+        observed_at = ingested_at
+        if normalized_records and isinstance(normalized_records[-1].get("Date"), str):
+            try:
+                observed_at = datetime.fromisoformat(
+                    normalized_records[-1]["Date"]
+                ).astimezone(UTC)
+            except ValueError:
+                pass
+        quality_issues = validate_market_records(
+            normalized_records, formatted_ticker, observed_at
+        )
 
         return {
             "ticker": formatted_ticker,
             "period": period,
             "interval": interval,
-            "data": df.to_dict(orient="records"),
+            "data": records,
+            "provenance": {
+                "source": "yfinance",
+                "dataset": "historical_prices",
+                "instrument": formatted_ticker,
+                "observed_at": observed_at.isoformat(),
+                "ingested_at": ingested_at.isoformat(),
+                "version": "yfinance-live-v1",
+                "quality_status": "verified" if not quality_issues else "rejected",
+            },
+            "quality_issues": [
+                issue.model_dump(mode="json") for issue in quality_issues
+            ],
         }
 
     @observe(name="Tool:YFinance:FetchFundamentals")
@@ -359,7 +400,9 @@ class YFinanceFetcher(IDataFetcher):
         results: list[NewsArticle] = []
 
         for item in news_items[:limit]:
-            content = item.get("content") if isinstance(item.get("content"), dict) else item
+            content = (
+                item.get("content") if isinstance(item.get("content"), dict) else item
+            )
             title = str(content.get("title") or "").strip()
             canonical_url = content.get("canonicalUrl", {})
             url = str(
@@ -373,7 +416,9 @@ class YFinanceFetcher(IDataFetcher):
             pub_date = (
                 datetime.fromisoformat(str(published))
                 if published
-                else datetime.fromtimestamp(content.get("providerPublishTime", 0), tz=UTC)
+                else datetime.fromtimestamp(
+                    content.get("providerPublishTime", 0), tz=UTC
+                )
             )
             provider = content.get("provider", {})
 
@@ -388,7 +433,9 @@ class YFinanceFetcher(IDataFetcher):
                 ),
                 published_date=pub_date,
                 summary=content.get("summary"),
-                content=str(content.get("summary") or content.get("relatedTickers", [])),
+                content=str(
+                    content.get("summary") or content.get("relatedTickers", [])
+                ),
             )
             results.append(article)
 

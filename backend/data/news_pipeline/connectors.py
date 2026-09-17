@@ -186,9 +186,7 @@ class TinyFishSearchConnector:
             intents=list(QueryTemplateLibrary.keys()),
             time_window_days=time_window_days,
         )
-        start_published_date = datetime.now(UTC) - timedelta(
-            days=time_window_days
-        )
+        start_published_date = datetime.now(UTC) - timedelta(days=time_window_days)
         results: list[RawSearchResult] = []
         seen_result_keys: set[str] = set()
         raw_items_seen = 0

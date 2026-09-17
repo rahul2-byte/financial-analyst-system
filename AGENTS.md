@@ -39,23 +39,19 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
 ## 4. Module-Centric Reference
 
 ### A. Orchestration (The Engine)
-- **Primary Class:** `PipelineOrchestrator` (`backend/app/core/orchestrator.py`)
-- **Planning Flow:** `PlannerAgent` (`backend/agents/orchestration/planner.py`) generates a `PlanData` DAG (list of `ExecutionStep`).
-- **Execution:** `PipelineOrchestrator` groups steps by dependencies for parallel execution and routes tasks to specialized agents.
-- **Synthesis Pattern:** Multi-stage: LLM Draft -> `VerificationAgent` (Numeric Consistency) -> `ValidationAgent` (Compliance/Safety).
+- **Primary Class:** `AgentLoop` (`backend/app/core/agent_loop/runtime.py`)
+- **Execution:** CLI and HTTP construct the same bounded model/tool loop through `ResearchRunner` or the HTTP route.
+- **Tool Boundary:** `FinancialToolRunner` fetches provider evidence and invokes deterministic fundamental and technical scanners.
+- **Output:** The loop emits typed `ResearchEvent` values for terminal rendering, SSE, and local session artifacts.
 
-### B. Agent Development Protocol
-- **Base Class:** `BaseAgent` (`backend/agents/base.py`). All agents MUST inherit this and implement `async def execute(self, user_query: str, step_number: int)`.
-- **Response Schema:** Use `AgentResponse` (`backend/agents/data_access/schemas.py`) for standard `{status, data, errors}` output.
-- **Synthesis Validation:** Use `ValidationResult` for compliance checkpoints.
-- **Rules:**
-  1. **Single Responsibility:** One agent = One task.
-  2. **Synthesis Grounding:** Every synthesis must be grounded in verified quantitative data.
-  3. **Real-time Feedback:** Use `await self.emit_status(...)` for progress updates.
+### B. Runtime Development Protocol
+- Keep provider access and deterministic calculation behind registered tools.
+- Ground synthesis in tool evidence; LLMs do not calculate ratios, indicators, or forecasts.
+- Emit `ResearchEvent` progress and terminal events instead of mutating presentation state.
 
 ### C. Data Pipeline (The Source)
-- **Interfaces:** Providers expose fetch methods; graph state is the run boundary.
-- **Flow:** Fetch -> Validate -> Normalize -> Pass to graph state -> Write local artifact.
+- **Interfaces:** Providers expose fetch methods; the AgentLoop run state is the boundary.
+- **Flow:** Fetch -> Validate -> Normalize -> Pass to the tool result -> Write local artifact.
 - **Normalization:** SI Units, ISO Currencies (no local currency scaling in logic).
 - **Integrity:** No sentiment analysis or LLM logic inside the raw data pipeline.
 

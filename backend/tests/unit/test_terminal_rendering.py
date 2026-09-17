@@ -49,13 +49,18 @@ def test_source_renderer_marks_files_and_links_urls() -> None:
 
     assert "[file] INFY Form 10-K" in rendered.plain
     assert "sec.gov" in rendered.plain
-    assert any(getattr(span.style, "link", None) == "https://sec.gov/filing/1" for span in rendered._spans)
+    assert any(
+        getattr(span.style, "link", None) == "https://sec.gov/filing/1"
+        for span in rendered._spans
+    )
 
 
 def test_activity_renderer_labels_streaming_as_response() -> None:
     factory = EventFactory(__import__("uuid").uuid4())
     state = PresentationState()
-    state = reduce_event(state, factory.make(StageStarted, stage="checking", label="Checking request"))
+    state = reduce_event(
+        state, factory.make(StageStarted, stage="checking", label="Checking request")
+    )
     state = reduce_event(state, factory.make(TextDelta, text="Hello"))
 
     assert render_activity(state).plain.startswith("Response · streaming")

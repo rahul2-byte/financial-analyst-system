@@ -137,9 +137,15 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         with Horizontal(id="composer-row"):
             yield Composer(placeholder="Ask FIN-AI...", id="composer")
             yield Button("Send", variant="primary", id="send")
-        yield Static("[Attach]  [Web Search]  [Deep Research]    /context  /sources  /trace", id="composer-tools")
+        yield Static(
+            "[Attach]  [Web Search]  [Deep Research]    /context  /sources  /trace",
+            id="composer-tools",
+        )
         yield Static("", id="command-menu")
-        yield Static("Enter send · Shift+Enter newline · / commands · Esc cancel · ? help", id="hints")
+        yield Static(
+            "Enter send · Shift+Enter newline · / commands · Esc cancel · ? help",
+            id="hints",
+        )
 
     def get_theme_variable_defaults(self) -> dict[str, str]:
         return CSS_VARIABLES
@@ -158,7 +164,9 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         await self._command("sessions", [])
 
     def action_toggle_sidebar(self) -> None:
-        self.query_one("#navigation").display = not self.query_one("#navigation").display
+        self.query_one("#navigation").display = not self.query_one(
+            "#navigation"
+        ).display
 
     async def action_export(self) -> None:
         await self._command("logs", [])
@@ -167,8 +175,18 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         self._apply_layout(event.size.width)
 
     def _apply_layout(self, width: int) -> None:
-        layout = "layout-wide" if width >= 140 else "layout-medium" if width >= 120 else "layout-compact" if width >= 90 else "layout-narrow"
-        self.screen.remove_class("layout-wide", "layout-medium", "layout-compact", "layout-narrow")
+        layout = (
+            "layout-wide"
+            if width >= 140
+            else "layout-medium"
+            if width >= 120
+            else "layout-compact"
+            if width >= 90
+            else "layout-narrow"
+        )
+        self.screen.remove_class(
+            "layout-wide", "layout-medium", "layout-compact", "layout-narrow"
+        )
         self.screen.add_class(layout)
 
     def _refresh_chrome(self) -> None:
@@ -228,7 +246,11 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         if self._run_task and not self._run_task.done():
             self._queued_prompts.append(query)
             self._mount_user(query)
-            await self._mount(Static("Queued · will run after the current request", classes="activity"))
+            await self._mount(
+                Static(
+                    "Queued · will run after the current request", classes="activity"
+                )
+            )
             return
         if self.state.phase is PresentationPhase.WAITING_FOR_APPROVAL:
             decision = query.casefold()
@@ -334,7 +356,10 @@ class FinAIApp(CommandDispatchMixin, App[None]):
                         elif event.type in {"tool.completed", "sources.updated"}:
                             self._activity_widget.remove_class("tool-event")
                             self._activity_widget.add_class("result-event")
-                    if is_terminal_event(event.type) and self._activity_widget is not None:
+                    if (
+                        is_terminal_event(event.type)
+                        and self._activity_widget is not None
+                    ):
                         self._activity_widget.display = False
                     if self._activity_widget is not None:
                         self._activity_widget.update(render_activity(self.state))
@@ -397,7 +422,10 @@ class FinAIApp(CommandDispatchMixin, App[None]):
                 )
                 self.query_one("#status", Static).update("FIN-AI · failed")
                 self._refresh_chrome()
-        if self._queued_prompts and self.state.phase is not PresentationPhase.CANCELLING:
+        if (
+            self._queued_prompts
+            and self.state.phase is not PresentationPhase.CANCELLING
+        ):
             next_query = self._queued_prompts.pop(0)
             self._start_run(next_query)
 

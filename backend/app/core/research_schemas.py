@@ -17,12 +17,25 @@ class CitationRecord(BaseModel):
     freshness_score: float = Field(ge=0.0, le=1.0)
 
 
+class EvidenceProvenance(BaseModel):
+    """Identity and timing metadata required to reproduce an observation."""
+
+    source: str = Field(min_length=1)
+    dataset: str = Field(min_length=1)
+    instrument: str = Field(min_length=1)
+    observed_at: datetime
+    ingested_at: datetime
+    version: str = Field(min_length=1)
+    quality_status: Literal["verified", "degraded", "rejected"]
+
+
 class EvidenceRecord(BaseModel):
     evidence_id: str
     citation: CitationRecord
     text: str = Field(min_length=1)
     coverage_tags: list[str] = Field(default_factory=list)
     parse_quality: float = Field(ge=0.0, le=1.0)
+    provenance: EvidenceProvenance | None = None
 
 
 class FindingRecord(BaseModel):

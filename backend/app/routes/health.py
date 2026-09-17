@@ -57,9 +57,7 @@ async def _run_external_canary() -> dict[str, object]:
         )
         return {
             "status": "ok" if results else "degraded",
-            "details": {
-                "tinyfish_search": "ok" if results else "empty_results"
-            },
+            "details": {"tinyfish_search": "ok" if results else "empty_results"},
         }
     except Exception as exc:  # noqa: BLE001 - canary must not break health route
         return {"status": "degraded", "details": {"error": str(exc)}}

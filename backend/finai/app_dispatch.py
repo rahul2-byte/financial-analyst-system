@@ -24,9 +24,12 @@ class CommandDispatchMixin:
     _response_widget: Any
     _activity_widget: Any
     exit: Any
+
     async def _command(self, name: str, args: list[str]) -> None:
         conversation = self.query_one("#conversation", VerticalScroll)
-        await conversation.mount(CommandMessage(render_command(name, args), classes="command-message"))
+        await conversation.mount(
+            CommandMessage(render_command(name, args), classes="command-message")
+        )
         if name == "help":
             await conversation.mount(Static("\n" + self.registry.help_text()))
         elif name in {"clear", "new"}:
@@ -41,13 +44,26 @@ class CommandDispatchMixin:
         elif name == "debug":
             await conversation.mount(Static(render_debug(self.state, self._event_log)))
         elif name == "sources":
-            await conversation.mount(Static(render_sources(self.state.sources), classes="sources-message"))
+            await conversation.mount(
+                Static(render_sources(self.state.sources), classes="sources-message")
+            )
         elif name == "trace":
             records = self.session_store.trace.read() if self.session_store else []
-            await conversation.mount(Static(trace_text(records, self.session_store.trace.path) if self.session_store else "\nTrace is unavailable.", classes="trace-panel"))
+            await conversation.mount(
+                Static(
+                    trace_text(records, self.session_store.trace.path)
+                    if self.session_store
+                    else "\nTrace is unavailable.",
+                    classes="trace-panel",
+                )
+            )
         elif name == "logs":
-            await conversation.mount(Static("\nRun artifacts: .finai/sessions/<session>/runs/"))
+            await conversation.mount(
+                Static("\nRun artifacts: .finai/sessions/<session>/runs/")
+            )
         elif name == "mode":
-            await conversation.mount(Static(f"\nMode · {args[0]}" if args else f"\nMode · {self.mode}"))
+            await conversation.mount(
+                Static(f"\nMode · {args[0]}" if args else f"\nMode · {self.mode}")
+            )
         elif name == "exit":
             self.exit()

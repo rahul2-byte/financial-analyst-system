@@ -41,11 +41,7 @@ class SessionStore:
                     messages.append(Message.model_validate(record["message"]))
             return messages
 
-        legacy = self.session_dir / "session.json"
-        if not legacy.exists():
-            return []
-        payload = json.loads(legacy.read_text(encoding="utf-8"))
-        return [Message.model_validate(item) for item in payload.get("history", [])]
+        return []
 
     def append_message(self, message: Message) -> None:
         self._append_jsonl(
@@ -147,7 +143,8 @@ class SessionStore:
             trace_records = self.trace.read()
             has_terminal = any(
                 record.get("run_id") == run_id
-                and record.get("event_type") in {
+                and record.get("event_type")
+                in {
                     "run.completed",
                     "run.failed",
                     "run.cancelled",
@@ -192,13 +189,20 @@ class SessionStore:
                     except json.JSONDecodeError:
                         continue
                     message = record.get("message", {})
-                    if record.get("kind") == "message" and message.get("role") == "user":
+                    if (
+                        record.get("kind") == "message"
+                        and message.get("role") == "user"
+                    ):
                         message_count += 1
                         title = str(message.get("content", title)).splitlines()[0][:72]
                     elif record.get("kind") == "message":
                         message_count += 1
                     last_activity = str(record.get("created_at", last_activity))
-            run_files = sorted((directory / "runs").glob("*.json")) if (directory / "runs").exists() else []
+            run_files = (
+                sorted((directory / "runs").glob("*.json"))
+                if (directory / "runs").exists()
+                else []
+            )
             if run_files:
                 try:
                     last_run = json.loads(run_files[-1].read_text(encoding="utf-8"))
@@ -206,14 +210,16 @@ class SessionStore:
                     last_activity = str(last_run.get("created_at", last_activity))
                 except (OSError, json.JSONDecodeError):
                     pass
-            sessions.append({
-                "id": directory.name,
-                "title": title,
-                "message_count": str(message_count),
-                "run_count": str(len(run_files)),
-                "last_status": last_status,
-                "last_activity": last_activity,
-            })
+            sessions.append(
+                {
+                    "id": directory.name,
+                    "title": title,
+                    "message_count": str(message_count),
+                    "run_count": str(len(run_files)),
+                    "last_status": last_status,
+                    "last_activity": last_activity,
+                }
+            )
         return sorted(sessions, key=lambda item: item["id"], reverse=True)
 
     def _append_jsonl(self, path: Path, value: dict[str, Any]) -> None:
@@ -227,5 +233,7 @@ class SessionStore:
     @staticmethod
     def _atomic_json(path: Path, value: dict[str, Any]) -> None:
         temporary = path.with_suffix(path.suffix + ".tmp")
-        temporary.write_text(json.dumps(value, indent=2, default=str) + "\n", encoding="utf-8")
+        temporary.write_text(
+            json.dumps(value, indent=2, default=str) + "\n", encoding="utf-8"
+        )
         temporary.replace(path)

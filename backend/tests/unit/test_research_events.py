@@ -20,7 +20,11 @@ def test_event_factory_assigns_shared_run_identity_and_sequence() -> None:
     completed = factory.make(RunCompleted, terminal_status="success", duration_ms=12.5)
 
     assert started.meta.run_id == delta.meta.run_id == completed.meta.run_id
-    assert [started.meta.sequence, delta.meta.sequence, completed.meta.sequence] == [1, 2, 3]
+    assert [started.meta.sequence, delta.meta.sequence, completed.meta.sequence] == [
+        1,
+        2,
+        3,
+    ]
     assert isinstance(UUID(str(started.meta.event_id)), UUID)
     assert started.meta.occurred_at.tzinfo == UTC
 

@@ -50,7 +50,7 @@ def test_format_ticker_normalizes_explicit_nse_suffix() -> None:
     assert fetcher._format_ticker("reliance.ns") == "RELIANCE.NS"
 
 
-def test_format_ticker_applies_legacy_default_nse_suffix() -> None:
+def test_format_ticker_applies_default_nse_suffix() -> None:
     fetcher = YFinanceFetcher()
 
     assert fetcher._format_ticker("TCS") == "TCS.NS"

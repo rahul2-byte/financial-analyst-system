@@ -4,20 +4,18 @@
 
 - CLI: `PYTHONPATH=backend python -m finai`
 - HTTP: `app.main:app`, with `/api/chat` returning Server-Sent Events
-- Compatibility import: `from finai.__main__ import FinAIRepl`
+- Python import: `from finai.session import FinAIRepl`
 
 ## Production flow
 
 ```text
 CLI or HTTP adapter -> AgentLoop -> HiveService
-                    -> RegistryToolRunner -> providers / deterministic quant
+                    -> FinancialToolRunner -> providers / deterministic quant
                     -> ResearchEvent -> TUI or SSE adapter
 ```
 
-`finai/session.py` is the terminal compatibility facade. Persistence is
-delegated to `SessionPersistence` and production execution to `ResearchRunner`.
-The former LangGraph/PipelineOrchestrator runtime is removed; specialist
-handlers now use the shared AgentLoop-compatible contracts.
+`finai/session.py` owns terminal session state. Persistence is delegated to
+`SessionPersistence` and execution to `ResearchRunner`.
 
 ## Safe change locations
 

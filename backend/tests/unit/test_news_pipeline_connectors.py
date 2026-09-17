@@ -165,9 +165,7 @@ Author: None
     ### India's HDFC Bank delayed action in AT-1 bond mis-selling, former chair tells CNBC-TV18
 
 Reuters 12d ago
-""".replace(
-        "__PUBLISHED__", published.isoformat()
-    )
+""".replace("__PUBLISHED__", published.isoformat())
 
     class _Client:
         async def search(self, *, query, num_results, start_published_date):
@@ -218,9 +216,7 @@ Reuters 2d ago
 ### India's HDFC Bank delayed action in AT-1 bond mis-selling, former chair tells CNBC-TV18
 
 Reuters 12d ago
-""".replace(
-        "__PUBLISHED__", published.isoformat()
-    )
+""".replace("__PUBLISHED__", published.isoformat())
 
     class _Client:
         async def search(self, *, query, num_results, start_published_date):
@@ -263,9 +259,7 @@ Reuters 2h ago
 ### India's HDFC Bank delayed action in AT-1 bond mis-selling, former chair tells CNBC-TV18
 
 Reuters 12d ago
-""".replace(
-        "__PUBLISHED__", stale_published.isoformat()
-    )
+""".replace("__PUBLISHED__", stale_published.isoformat())
 
     class _Client:
         async def search(self, *, query, num_results, start_published_date):
@@ -358,9 +352,7 @@ Reuters 1d ago
                     url="https://finance.yahoo.com/quote/HDB/news/",
                     id="https://finance.yahoo.com/quote/HDB/news/",
                     text=portal_text,
-                    published_date=(
-                        datetime.now(UTC) - timedelta(days=1)
-                    ).isoformat(),
+                    published_date=(datetime.now(UTC) - timedelta(days=1)).isoformat(),
                 )
             ]
 
@@ -394,9 +386,7 @@ Reuters 12d ago
                     url="https://finance.yahoo.com/quote/HDB/news/",
                     id="https://finance.yahoo.com/quote/HDB/news/",
                     text=portal_text,
-                    published_date=(
-                        datetime.now(UTC) - timedelta(days=1)
-                    ).isoformat(),
+                    published_date=(datetime.now(UTC) - timedelta(days=1)).isoformat(),
                 )
             ]
 
@@ -500,18 +490,14 @@ Reuters 12d ago
                     url="https://finance.yahoo.com/quote/HDB/news/",
                     id="https://finance.yahoo.com/quote/HDB/news/",
                     text=portal_text,
-                    published_date=(
-                        datetime.now(UTC) - timedelta(days=1)
-                    ).isoformat(),
+                    published_date=(datetime.now(UTC) - timedelta(days=1)).isoformat(),
                 ),
                 _TinyFishResult(
                     title="HDFC Bank opens rural branches",
                     url="https://example.com/hdfc-rural-branches",
                     id="https://example.com/hdfc-rural-branches",
                     text="HDFC Bank expands its rural branch footprint.",
-                    published_date=(
-                        datetime.now(UTC) - timedelta(days=1)
-                    ).isoformat(),
+                    published_date=(datetime.now(UTC) - timedelta(days=1)).isoformat(),
                 ),
             ]
 

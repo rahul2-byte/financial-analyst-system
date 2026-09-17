@@ -133,7 +133,11 @@ class HiveService(LLMServiceInterface):
         choices = chunk.get("choices", [])
         if isinstance(usage, dict) and not choices:
             return {"event": "usage", "data": usage}
-        delta = choices[0].get("delta", {}) if choices and isinstance(choices[0], dict) else {}
+        delta = (
+            choices[0].get("delta", {})
+            if choices and isinstance(choices[0], dict)
+            else {}
+        )
         event: dict[str, Any] = {"event": "chunk", "data": chunk}
         if isinstance(usage, dict):
             event["usage"] = usage
@@ -192,121 +196,131 @@ class HiveService(LLMServiceInterface):
                 # stalled SSE stream can run past the configured deadline.
                 async with asyncio.timeout(remaining):
                     async with self._client.stream(
-                            "POST",
-                            f"{self.base_url}/chat/completions",
-                            json=payload,
-                            headers={
-                                "Authorization": f"Bearer {self.api_key}",
-                                "Content-Type": "application/json",
-                                "Accept": "text/event-stream",
-                            },
-                        ) as response:
-                            if response.status_code != 200:
-                                body = (await response.aread()).decode(errors="replace")
-                                if (
-                                    _retryable_status(response.status_code)
-                                    and retries < self.retry_policy.max_retries
-                                ):
-                                    delay = _retry_delay(
-                                        retries,
-                                        response.headers.get("Retry-After"),
-                                        self.retry_policy,
+                        "POST",
+                        f"{self.base_url}/chat/completions",
+                        json=payload,
+                        headers={
+                            "Authorization": f"Bearer {self.api_key}",
+                            "Content-Type": "application/json",
+                            "Accept": "text/event-stream",
+                        },
+                    ) as response:
+                        if response.status_code != 200:
+                            body = (await response.aread()).decode(errors="replace")
+                            if (
+                                _retryable_status(response.status_code)
+                                and retries < self.retry_policy.max_retries
+                            ):
+                                delay = _retry_delay(
+                                    retries,
+                                    response.headers.get("Retry-After"),
+                                    self.retry_policy,
+                                )
+                                if time.perf_counter() + delay >= request_deadline:
+                                    raise HiveProviderError(
+                                        "Hive request budget exhausted during retry"
                                     )
-                                    if time.perf_counter() + delay >= request_deadline:
-                                        raise HiveProviderError(
-                                            "Hive request budget exhausted during retry"
-                                        )
-                                    retries += 1
-                                    yield {
-                                        "event": "provider_retrying",
-                                        "data": {
-                                            "attempt": attempt,
-                                            "status_code": response.status_code,
-                                            "delay_ms": round(delay * 1000, 2),
-                                            "reason": f"HTTP {response.status_code}",
-                                        },
-                                    }
-                                    await asyncio.sleep(delay)
-                                    continue
+                                retries += 1
                                 yield {
-                                    "event": "provider_failed",
+                                    "event": "provider_retrying",
                                     "data": {
-                                        "attempts": attempt,
-                                        "phase": "http",
+                                        "attempt": attempt,
                                         "status_code": response.status_code,
-                                        "message": f"Hive HTTP {response.status_code}",
+                                        "delay_ms": round(delay * 1000, 2),
+                                        "reason": f"HTTP {response.status_code}",
                                     },
                                 }
-                                raise HiveProviderError(
-                                    f"Hive HTTP {response.status_code}: {body[:500]}"
+                                await asyncio.sleep(delay)
+                                continue
+                            yield {
+                                "event": "provider_failed",
+                                "data": {
+                                    "attempts": attempt,
+                                    "phase": "http",
+                                    "status_code": response.status_code,
+                                    "message": f"Hive HTTP {response.status_code}",
+                                },
+                            }
+                            raise HiveProviderError(
+                                f"Hive HTTP {response.status_code}: {body[:500]}"
+                            )
+                        saw_done = False
+                        stream_started_emitted = False
+                        lines = response.aiter_lines()
+                        while True:
+                            try:
+                                line = await asyncio.wait_for(
+                                    lines.__anext__(),
+                                    timeout=self.retry_policy.read_timeout_seconds,
                                 )
-                            saw_done = False
-                            stream_started_emitted = False
-                            lines = response.aiter_lines()
-                            while True:
-                                try:
-                                    line = await asyncio.wait_for(
-                                        lines.__anext__(),
-                                        timeout=self.retry_policy.read_timeout_seconds,
+                            except StopAsyncIteration:
+                                break
+                            if not stream_started_emitted:
+                                stream_started_emitted = True
+                                yield {
+                                    "event": "provider_stream_started",
+                                    "data": {
+                                        "attempt": attempt,
+                                        "first_byte_ms": round(
+                                            (time.perf_counter() - started) * 1000, 2
+                                        ),
+                                    },
+                                }
+                            parsed = self.parse_sse_line(line)
+                            if not parsed:
+                                continue
+                            if parsed["event"] == "usage":
+                                usage = parsed["data"]
+                                yield parsed
+                            elif parsed["event"] == "token":
+                                first_token_at = first_token_at or time.perf_counter()
+                                streamed_token_count += 1
+                                public_token_chars += len(str(parsed["data"]))
+                                logger.debug(
+                                    "Hive SSE token chunk received",
+                                    extra={
+                                        "chunk_index": streamed_token_count,
+                                        "chunk_chars": len(str(parsed["data"])),
+                                    },
+                                )
+                                sink = get_public_token_sink()
+                                if sink:
+                                    await sink(str(parsed["data"]))
+                                    # Let the orchestrator and terminal consume this
+                                    # chunk before the provider reads the next one.
+                                    await asyncio.sleep(0)
+                                yield parsed
+                            elif parsed["event"] == "done":
+                                saw_done = True
+                                yield parsed
+                                break
+                            elif parsed["event"] == "chunk":
+                                if isinstance(parsed.get("usage"), dict):
+                                    usage = parsed["usage"]
+                                choices = parsed["data"].get("choices", [])
+                                delta = choices[0].get("delta", {}) if choices else {}
+                                if isinstance(delta, dict) and delta.get(
+                                    "reasoning_content"
+                                ):
+                                    reasoning_chunk_count += 1
+                                    reasoning_chars += len(
+                                        str(delta["reasoning_content"])
                                     )
-                                except StopAsyncIteration:
-                                    break
-                                if not stream_started_emitted:
-                                    stream_started_emitted = True
-                                    yield {
-                                        "event": "provider_stream_started",
-                                        "data": {
-                                            "attempt": attempt,
-                                            "first_byte_ms": round(
-                                                (time.perf_counter() - started) * 1000, 2
-                                            ),
-                                        },
-                                    }
-                                parsed = self.parse_sse_line(line)
-                                if not parsed:
-                                    continue
-                                if parsed["event"] == "usage":
-                                    usage = parsed["data"]
-                                    yield parsed
-                                elif parsed["event"] == "token":
-                                    first_token_at = first_token_at or time.perf_counter()
-                                    streamed_token_count += 1
-                                    public_token_chars += len(str(parsed["data"]))
-                                    logger.debug(
-                                        "Hive SSE token chunk received",
-                                        extra={
-                                            "chunk_index": streamed_token_count,
-                                            "chunk_chars": len(str(parsed["data"])),
-                                        },
-                                    )
-                                    sink = get_public_token_sink()
-                                    if sink:
-                                        await sink(str(parsed["data"]))
-                                        # Let the orchestrator and terminal consume this
-                                        # chunk before the provider reads the next one.
-                                        await asyncio.sleep(0)
-                                    yield parsed
-                                elif parsed["event"] == "done":
-                                    saw_done = True
-                                    yield parsed
-                                    break
-                                elif parsed["event"] == "chunk":
-                                    if isinstance(parsed.get("usage"), dict):
-                                        usage = parsed["usage"]
-                                    choices = parsed["data"].get("choices", [])
-                                    delta = choices[0].get("delta", {}) if choices else {}
-                                    if isinstance(delta, dict) and delta.get("reasoning_content"):
-                                        reasoning_chunk_count += 1
-                                        reasoning_chars += len(str(delta["reasoning_content"]))
-                                    if isinstance(delta, dict) and delta.get("tool_calls"):
-                                        emitted_tool_call = True
-                                    yield parsed
-                            if not saw_done:
-                                raise HiveProviderError("incomplete Hive SSE stream")
+                                if isinstance(delta, dict) and delta.get("tool_calls"):
+                                    emitted_tool_call = True
+                                yield parsed
+                        if not saw_done:
+                            raise HiveProviderError("incomplete Hive SSE stream")
                 self.last_telemetry = {
                     "model_id": self._model(model),
-                    "request_latency_ms": round((time.perf_counter() - started) * 1000, 2),
-                    "first_token_latency_ms": round((first_token_at - started) * 1000, 2) if first_token_at else None,
+                    "request_latency_ms": round(
+                        (time.perf_counter() - started) * 1000, 2
+                    ),
+                    "first_token_latency_ms": round(
+                        (first_token_at - started) * 1000, 2
+                    )
+                    if first_token_at
+                    else None,
                     "retry_count": retries,
                     "provider_status": "completed",
                     "streamed_token_count": streamed_token_count,
@@ -321,9 +335,7 @@ class HiveService(LLMServiceInterface):
                     "data": {
                         "attempts": attempt,
                         "duration_ms": self.last_telemetry["request_latency_ms"],
-                        "first_token_ms": self.last_telemetry[
-                            "first_token_latency_ms"
-                        ],
+                        "first_token_ms": self.last_telemetry["first_token_latency_ms"],
                     },
                 }
                 return
@@ -361,6 +373,7 @@ class HiveService(LLMServiceInterface):
             except HiveProviderError:
                 self._circuit.record_failure()
                 raise
+
     def generate_stream(
         self, messages: list[Message], model: str, **kwargs: Any
     ) -> AsyncGenerator[dict[str, Any], None]:

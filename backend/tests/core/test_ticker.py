@@ -56,7 +56,10 @@ def test_provider_format_yfinance_preserves_provider_forms(raw: str) -> None:
 def test_provider_format_yfinance_appends_default_suffix_to_hyphenated_equity() -> None:
     ticker = parse_ticker("BAJAJ-AUTO")
 
-    assert ticker.provider_format_yfinance(default_exchange_suffix=".NS") == "BAJAJ-AUTO.NS"
+    assert (
+        ticker.provider_format_yfinance(default_exchange_suffix=".NS")
+        == "BAJAJ-AUTO.NS"
+    )
 
 
 def test_parse_ticker_is_idempotent_for_existing_ticker() -> None:

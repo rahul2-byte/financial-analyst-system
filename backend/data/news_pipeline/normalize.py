@@ -111,7 +111,9 @@ class DuplicateDetector:
     def _title_similarity(self, first: str, second: str) -> float:
         normalized_first = " ".join(sorted(first.lower().split()))
         normalized_second = " ".join(sorted(second.lower().split()))
-        return SequenceMatcher(None, normalized_first, normalized_second).ratio() * 100.0
+        return (
+            SequenceMatcher(None, normalized_first, normalized_second).ratio() * 100.0
+        )
 
     def _prefer_more_complete(
         self,

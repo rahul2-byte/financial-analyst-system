@@ -14,7 +14,9 @@ class RuntimeResources:
     yf_fetcher: Any
 
 
-def build_runtime_resources(*, llm_service: Any | None = None, yf_fetcher: Any | None = None) -> RuntimeResources:
+def build_runtime_resources(
+    *, llm_service: Any | None = None, yf_fetcher: Any | None = None
+) -> RuntimeResources:
     """Build runtime dependencies, allowing tests to inject fakes."""
     if llm_service is None:
         from app.services.hive_service import HiveService

@@ -280,12 +280,16 @@ def test_trace_command_shows_live_ledger_path_and_recent_events(tmp_path) -> Non
 def test_session_picker_uses_compact_ids() -> None:
     from finai.screens import SessionScreen
 
-    screen = SessionScreen([{
-        "id": "1234567890abcdef1234567890abcdef",
-        "title": "Analyse HDFC Bank",
-        "message_count": "4",
-        "last_status": "success",
-    }])
+    screen = SessionScreen(
+        [
+            {
+                "id": "1234567890abcdef1234567890abcdef",
+                "title": "Analyse HDFC Bank",
+                "message_count": "4",
+                "last_status": "success",
+            }
+        ]
+    )
     assert "12345678" in screen._body()
     assert "1234567890abcdef1234567890abcdef" not in screen._body()
 

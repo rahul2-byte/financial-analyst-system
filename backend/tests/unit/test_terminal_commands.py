@@ -24,9 +24,9 @@ def test_registry_suggests_commands_for_slash_input() -> None:
 def test_registry_exposes_command_descriptions_for_palette() -> None:
     registry = CommandRegistry.default()
 
-    assert [(item.name, item.description) for item in registry.suggestion_items("st")] == [
-        ("status", "Show current run status")
-    ]
+    assert [
+        (item.name, item.description) for item in registry.suggestion_items("st")
+    ] == [("status", "Show current run status")]
 
 
 def test_registry_formats_help_from_the_command_catalog() -> None:

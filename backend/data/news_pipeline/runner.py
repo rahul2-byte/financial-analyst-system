@@ -23,7 +23,9 @@ from data.news_pipeline.query_templates import (
 
 
 class NewsConnector(Protocol):
-    async def fetch(self, company: CompanyContext, *, time_window_days: int) -> list[RawSearchResult]: ...
+    async def fetch(
+        self, company: CompanyContext, *, time_window_days: int
+    ) -> list[RawSearchResult]: ...
 
 
 class NewsPipelineRunner:
@@ -138,7 +140,7 @@ class NewsPipelineRunner:
 
         scored.sort(key=lambda item: item.quality_score, reverse=True)
         final_list = scored[: self.max_articles_per_company]
-        
+
         run_context.update_current_span(
             metadata={
                 "raw_results": len(raw_results),

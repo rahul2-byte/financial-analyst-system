@@ -140,6 +140,8 @@ class TechnicalScanner:
             return {
                 "error": f"Missing required columns: {missing}. Found: {list(df.columns)}"
             }
+        if not np.isfinite(df[required].to_numpy(dtype=float)).all():
+            return {"error": "OHLCV data contains non-finite values."}
 
         close = df["close"]
         row_count = len(df)
@@ -228,5 +230,5 @@ class TechnicalScanner:
     @classmethod
     @observe(name="Logic:TechnicalScanner:Scan")
     def scan(cls, df: pd.DataFrame) -> dict[str, Any]:
-        """Legacy compatibility layer."""
+        """Return the deterministic technical signal summary."""
         return cls.get_signal_summary(df)

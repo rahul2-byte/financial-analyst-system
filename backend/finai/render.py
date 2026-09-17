@@ -66,28 +66,56 @@ def render_activity(state: PresentationState) -> Text:
         heading = f"Research · {outcome}"
     else:
         heading = "Research · processing"
-    heading_color = COLORS["process"] if heading.startswith(("Research", "Request")) else COLORS["info"]
+    heading_color = (
+        COLORS["process"]
+        if heading.startswith(("Research", "Request"))
+        else COLORS["info"]
+    )
     output = Text(f"{heading}\n", style=f"bold {heading_color}")
     for activity in state.activities.values():
-        marker = "✓" if activity.status == "completed" else "✗" if activity.status == "failed" else "◉"
-        style = COLORS["success"] if activity.status == "completed" else COLORS["error"] if activity.status == "failed" else COLORS["process"]
+        marker = (
+            "✓"
+            if activity.status == "completed"
+            else "✗"
+            if activity.status == "failed"
+            else "◉"
+        )
+        style = (
+            COLORS["success"]
+            if activity.status == "completed"
+            else COLORS["error"]
+            if activity.status == "failed"
+            else COLORS["process"]
+        )
         output.append(f"  {marker} {activity.label}", style=style)
         if activity.detail:
             output.append(f" · {sanitize_terminal_text(activity.detail)}", style="dim")
         output.append("\n")
     if state.error:
-        output.append(f"  Error · {sanitize_terminal_text(state.error)}\n", style=COLORS["error"])
+        output.append(
+            f"  Error · {sanitize_terminal_text(state.error)}\n", style=COLORS["error"]
+        )
     return output
 
 
-def render_header(state: PresentationState, *, mode: str, session_id: str | None) -> Text:
+def render_header(
+    state: PresentationState, *, mode: str, session_id: str | None
+) -> Text:
     """Render compact, persistent chrome without inventing research metadata."""
     status = state.phase.value.replace("_", " ")
     session = (session_id or "local")[:8]
     output = Text("FIN-AI", style=f"bold {COLORS['text']}")
-    output.append("  Financial intelligence, grounded in evidence.", style=COLORS["secondary"])
-    output.append("\n  Research companies · Analyze filings · Trace sources", style=COLORS["muted"])
-    output.append(f"                                      ● Online · {status} · session {session} · v0.1.0", style=COLORS["muted"])
+    output.append(
+        "  Financial intelligence, grounded in evidence.", style=COLORS["secondary"]
+    )
+    output.append(
+        "\n  Research companies · Analyze filings · Trace sources",
+        style=COLORS["muted"],
+    )
+    output.append(
+        f"                                      ● Online · {status} · session {session} · v0.1.0",
+        style=COLORS["muted"],
+    )
     return output
 
 
@@ -98,7 +126,9 @@ def render_context(
     output = Text("RESEARCH CONTEXT\n", style=f"bold {COLORS['text']}")
     if state.query:
         output.append("Request\n", style=f"bold {COLORS['muted']}")
-        output.append(f"{sanitize_terminal_text(state.query)}\n\n", style=COLORS["text"])
+        output.append(
+            f"{sanitize_terminal_text(state.query)}\n\n", style=COLORS["text"]
+        )
     else:
         output.append("No active research\n\n", style=COLORS["muted"])
     output.append("Session\n", style=f"bold {COLORS['muted']}")
@@ -109,13 +139,26 @@ def render_context(
         f"{count} verified source{'s' if count != 1 else ''}\n",
         style=COLORS["success"] if count else COLORS["muted"],
     )
-    if state.activities and state.phase.value not in {"complete", "failed", "cancelled"}:
+    if state.activities and state.phase.value not in {
+        "complete",
+        "failed",
+        "cancelled",
+    }:
         output.append("\nACTIVE TOOLS\n", style=f"bold {COLORS['text']}")
         for activity in state.activities.values():
-            marker = "✓" if activity.status == "completed" else "✗" if activity.status == "failed" else "◉"
+            marker = (
+                "✓"
+                if activity.status == "completed"
+                else "✗"
+                if activity.status == "failed"
+                else "◉"
+            )
             output.append(f"{marker} {activity.label}", style=COLORS["secondary"])
             if activity.detail:
-                output.append(f" · {sanitize_terminal_text(activity.detail)}", style=COLORS["muted"])
+                output.append(
+                    f" · {sanitize_terminal_text(activity.detail)}",
+                    style=COLORS["muted"],
+                )
             output.append("\n")
     return output
 
@@ -123,10 +166,17 @@ def render_context(
 def render_sources(sources: list[dict[str, str]]) -> Text:
     output = Text("Sources\n", style="bold")
     for index, source in enumerate(sources, 1):
-        title = sanitize_terminal_text(source.get("title") or source.get("source") or "Untitled source")
+        title = sanitize_terminal_text(
+            source.get("title") or source.get("source") or "Untitled source"
+        )
         source_type = sanitize_terminal_text(source.get("source_type", "source"))
         url = source.get("url", "")
-        marker = "[file]" if source_type in {"filing", "transcript", "presentation"} or url.lower().endswith(".pdf") else "[web]"
+        marker = (
+            "[file]"
+            if source_type in {"filing", "transcript", "presentation"}
+            or url.lower().endswith(".pdf")
+            else "[web]"
+        )
         output.append(f"\n[{index}] {marker} {title}")
         output.append(f"\n    {source_type}", style="dim")
         parsed = urlparse(url)
@@ -141,7 +191,11 @@ def render_response(state: PresentationState, *, streaming: bool = False) -> Mar
     if streaming:
         prefix = "**FIN-AI** · streaming\n\n"
     elif state.terminal_status in {"partial", "insufficient_data"}:
-        label = "Partial evidence" if state.terminal_status == "partial" else "Insufficient evidence"
+        label = (
+            "Partial evidence"
+            if state.terminal_status == "partial"
+            else "Insufficient evidence"
+        )
         prefix = f"**FIN-AI** · {label}\n\n> This report is limited to verified data returned by the available tools.\n\n"
     return Markdown(prefix + text, code_theme="ansi_dark", style="finai.body")
 
@@ -155,7 +209,11 @@ def render_status(
     label = state.phase.value.replace("_", " ")
     if spinner and state.phase.value not in {"complete", "failed", "cancelled"}:
         label = f"{spinner} {label}"
-    if state.current_operation and state.phase.value not in {"complete", "failed", "cancelled"}:
+    if state.current_operation and state.phase.value not in {
+        "complete",
+        "failed",
+        "cancelled",
+    }:
         label += f" · {state.current_operation}"
     if elapsed_s is not None and state.phase.value != "idle":
         label += f" · {elapsed_s:.1f}s"

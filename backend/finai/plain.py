@@ -35,7 +35,9 @@ def render_event(event: ResearchEvent) -> str:
     if event.type == "run.cancelled":
         return "\n✓ Cancelled\n"
     if event.type == "run.completed":
-        duration = f" · {event.duration_ms:.0f}ms" if event.duration_ms is not None else ""
+        duration = (
+            f" · {event.duration_ms:.0f}ms" if event.duration_ms is not None else ""
+        )
         label = {
             "partial": "Partial response",
             "insufficient_data": "Insufficient evidence",
@@ -49,4 +51,6 @@ def render_plain(events: Iterable[ResearchEvent]) -> str:
 
 
 def render_json(events: Iterable[ResearchEvent]) -> str:
-    return json.dumps([event.model_dump(mode="json") for event in events], indent=2) + "\n"
+    return (
+        json.dumps([event.model_dump(mode="json") for event in events], indent=2) + "\n"
+    )

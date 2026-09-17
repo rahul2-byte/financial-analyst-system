@@ -18,9 +18,8 @@ from app.core.agent_loop.model_events import (
     sanitize_tool_calls,
 )
 from app.core.diagnostics import diagnostic_payload, diagnostics_enabled
-from app.core.resources import RuntimeResources
+from app.core.research_schemas import EvidenceProvenance
 from app.core.skills import SkillPackage, SkillRegistry
-from app.core.tools.tool_system import initialize_tool_system
 from app.events.models import (
     ApprovalRequested,
     ClarificationRequested,
@@ -54,11 +53,22 @@ _EVIDENCE_TOOLS = {
     "data:fetch_stock_data",
     "data:fetch_fundamentals",
     "news:fetch_news",
-    "macro:fetch_macro_data",
     "analysis:run_fundamental_scan",
     "analysis:run_technical_scan",
 }
+_PROVENANCE_REQUIRED_TOOLS = {
+    "data:fetch_stock_data",
+    "data:fetch_fundamentals",
+    "news:fetch_news",
+}
 _PARTIAL_RESPONSE_MIN_CHARS = 200
+_EVIDENCE_REQUIRED_SKILLS = {
+    "fundamental-analysis",
+    "technical-analysis",
+    "research-planning",
+    "report-writing",
+    "report-review",
+}
 
 
 class ModelStream(Protocol):
@@ -71,148 +81,6 @@ class ToolRunner(Protocol):
     def definitions(self) -> list[dict[str, Any]]: ...
 
     async def execute(self, name: str, arguments: dict[str, Any]) -> Any: ...
-
-
-class RegistryToolRunner:
-    """Typed boundary around the existing registry/executor compatibility API."""
-
-    def __init__(self, registry: Any, executor: Any, resources: RuntimeResources | None = None) -> None:
-        self.registry = registry
-        self.executor = executor
-        self.resources = resources
-        self._ohlcv_by_ticker: dict[str, list[dict[str, Any]]] = {}
-        self._fundamentals_by_ticker: dict[str, dict[str, Any]] = {}
-        initialize_tool_system()
-
-    def definitions(self) -> list[dict[str, Any]]:
-        executable = set(getattr(self.executor, "_handlers", {}))
-        executable.add("interaction:ask_user")
-        return [
-            {
-                "type": "function",
-                "function": {
-                    "name": tool.full_name,
-                    "description": tool.description,
-                    "parameters": tool.parameters,
-                },
-            }
-            for tool in self.registry.list_tools()
-            if tool.full_name in executable
-            and not tool.name.startswith("submit_")
-        ]
-
-    async def execute(self, name: str, arguments: dict[str, Any]) -> Any:
-        if name == "analysis:run_fundamental_scan":
-            ticker = str(arguments.get("ticker", "")).strip()
-            cached_fundamentals = (
-                self._fundamentals_by_ticker.get(ticker) if ticker else None
-            )
-            if cached_fundamentals is None and len(self._fundamentals_by_ticker) == 1:
-                cached_fundamentals = next(iter(self._fundamentals_by_ticker.values()))
-            if cached_fundamentals is None and ticker:
-                fetched = await asyncio.to_thread(
-                    self._resources().yf_fetcher.fetch_company_fundamentals,
-                    ticker,
-                )
-                if isinstance(fetched, dict) and "error" not in fetched:
-                    cached_fundamentals = fetched
-                    self._fundamentals_by_ticker[
-                        str(fetched.get("ticker") or ticker)
-                    ] = fetched
-            if cached_fundamentals:
-                arguments = {**arguments, "raw_data": cached_fundamentals}
-        if name == "analysis:run_technical_scan":
-            ticker = str(arguments.get("ticker", "")).strip()
-            cached = self._ohlcv_by_ticker.get(ticker) if ticker else None
-            if cached is None and not ticker and len(self._ohlcv_by_ticker) == 1:
-                cached = next(iter(self._ohlcv_by_ticker.values()))
-            if cached:
-                arguments = {**arguments, "ohlcv_data": cached}
-            elif arguments.get("ohlcv_data"):
-                pass
-            elif not ticker:
-                return {
-                    "success": False,
-                    "error": "No OHLCV data or ticker provided; fetch market data first",
-                    "retryable": True,
-                }
-            else:
-                runtime_resources = self._resources()
-                fetched = await asyncio.to_thread(
-                    runtime_resources.yf_fetcher.fetch_stock_price,
-                    ticker,
-                    str(arguments.get("period", "1y")),
-                    str(arguments.get("interval", "1d")),
-                )
-                data = fetched.get("data") if isinstance(fetched, dict) else None
-                if not data:
-                    return {"success": False, "error": "No OHLCV data returned for ticker"}
-                self._ohlcv_by_ticker[ticker] = data
-                arguments = {**arguments, "ohlcv_data": data}
-        if name in {"data:fetch_stock_data", "data:fetch_fundamentals", "news:fetch_news"}:
-            runtime_resources = self._resources()
-
-            if name == "data:fetch_stock_data":
-                value = await asyncio.to_thread(
-                    runtime_resources.yf_fetcher.fetch_stock_price,
-                    str(arguments["ticker"]),
-                    str(arguments.get("period", "1y")),
-                    str(arguments.get("interval", "1d")),
-                )
-                rows = value.get("data") if isinstance(value, dict) else None
-                if not rows:
-                    return {"success": False, "error": "No evidence returned for data:fetch_stock_data"}
-                ticker = str(value.get("ticker") or arguments["ticker"])
-                self._ohlcv_by_ticker[ticker] = rows
-                value = {
-                    "ticker": ticker,
-                    "period": value.get("period", arguments.get("period", "1y")),
-                    "interval": value.get("interval", arguments.get("interval", "1d")),
-                    "row_count": len(rows),
-                    "period_return_pct": _period_return_pct(rows[0], rows[-1]),
-                    "first": rows[0],
-                    "latest": rows[-1],
-                }
-            elif name == "data:fetch_fundamentals":
-                value = await asyncio.to_thread(
-                    runtime_resources.yf_fetcher.fetch_company_fundamentals,
-                    str(arguments["ticker"]),
-                )
-                if isinstance(value, dict) and "error" not in value:
-                    ticker = str(value.get("ticker") or arguments["ticker"])
-                    self._fundamentals_by_ticker[ticker] = value
-            else:
-                articles = await asyncio.to_thread(
-                    runtime_resources.yf_fetcher.fetch_news,
-                    str(arguments["ticker"]),
-                    int(arguments.get("limit", 10)),
-                )
-                value = [
-                    article.model_dump(mode="json")
-                    if hasattr(article, "model_dump")
-                    else dict(article)
-                    for article in articles
-                ]
-            if not value:
-                return {
-                    "success": False,
-                    "error": f"No evidence returned for {name}",
-                }
-            return {"success": True, "data": value}
-        handler_result = getattr(self.executor, "execute_handler", None)
-        if handler_result is not None:
-            return (await handler_result(name, arguments)).to_dict()
-        return await self.executor.execute(name, arguments)
-
-    def _resources(self) -> RuntimeResources:
-        if self.resources is not None:
-            return self.resources
-        from app.core.node_resources import resources as legacy_resources
-
-        return RuntimeResources(
-            llm_service=legacy_resources.llm_service,
-            yf_fetcher=legacy_resources.yf_fetcher,
-        )
 
 
 class AgentLoopError(RuntimeError):
@@ -265,6 +133,7 @@ class AgentLoop:
         successful_tools = 0
         failed_evidence_tools = 0
         successful_evidence_tools = 0
+        invalid_evidence = False
         evidence_warning_added = False
         completed_tool_ids = {
             message.tool_call_id
@@ -325,9 +194,16 @@ class AgentLoop:
                             if isinstance(item, TextDelta):
                                 streamed_text.append(item.text)
                                 yield item
-                            elif isinstance(item, (ProviderAttemptStarted, ProviderRetrying,
-                                                   ProviderStreamStarted, ProviderCompleted,
-                                                   ProviderFailed)):
+                            elif isinstance(
+                                item,
+                                (
+                                    ProviderAttemptStarted,
+                                    ProviderRetrying,
+                                    ProviderStreamStarted,
+                                    ProviderCompleted,
+                                    ProviderFailed,
+                                ),
+                            ):
                                 yield item
                             else:
                                 assistant = item
@@ -362,9 +238,17 @@ class AgentLoop:
                     )
 
                 if not assistant.tool_calls:
+                    evidence_blocked = (
+                        (failed_tools > 0 and successful_tools == 0)
+                        or (
+                            _requires_evidence(selected_skills)
+                            and successful_evidence_tools == 0
+                        )
+                        or invalid_evidence
+                    )
                     terminal_status = (
                         "insufficient_data"
-                        if failed_tools and not successful_tools
+                        if evidence_blocked
                         else "partial"
                         if failed_tools or assistant.name == "partial_provider_response"
                         else "success"
@@ -411,7 +295,9 @@ class AgentLoop:
                         history.append(
                             Message(
                                 role="tool",
-                                content=json.dumps({"success": False, "error": message}),
+                                content=json.dumps(
+                                    {"success": False, "error": message}
+                                ),
                                 tool_call_id=call_id,
                             )
                         )
@@ -427,11 +313,16 @@ class AgentLoop:
                     if call_id in completed_tool_ids:
                         continue
                     if name == "interaction:ask_user":
-                        question = str(arguments.get("question", "Please clarify the request."))
+                        question = str(
+                            arguments.get("question", "Please clarify the request.")
+                        )
                         if checkpoint_writer:
                             checkpoint_writer(
                                 {
-                                    "messages": [message.model_dump(mode="json") for message in history],
+                                    "messages": [
+                                        message.model_dump(mode="json")
+                                        for message in history
+                                    ],
                                     "tool_call_id": call_id,
                                     "tool_name": name,
                                     "arguments": arguments,
@@ -487,7 +378,9 @@ class AgentLoop:
                         return
                     except Exception as exc:
                         payload = {"success": False, "error": str(exc)}
-                        logger.exception("tool call raised tool=%s tool_id=%s", name, call_id)
+                        logger.exception(
+                            "tool call raised tool=%s tool_id=%s", name, call_id
+                        )
                     if diagnostics_enabled():
                         logger.debug(
                             "tool call end run_id=%s tool=%s tool_id=%s duration_ms=%.1f success=%s",
@@ -500,10 +393,16 @@ class AgentLoop:
 
                     if payload.get("success", True) is False:
                         failed_tools += 1
-                        if name in _EVIDENCE_TOOLS and not payload.get("retryable", False):
+                        if name in _EVIDENCE_TOOLS and not payload.get(
+                            "retryable", False
+                        ):
                             failed_evidence_tools += 1
                         message = str(payload.get("error", "tool failed"))
-                        if name in _EVIDENCE_TOOLS and not payload.get("retryable", False) and not evidence_warning_added:
+                        if (
+                            name in _EVIDENCE_TOOLS
+                            and not payload.get("retryable", False)
+                            and not evidence_warning_added
+                        ):
                             history.append(
                                 Message(
                                     role="system",
@@ -521,17 +420,24 @@ class AgentLoop:
                         history.append(
                             Message(
                                 role="tool",
-                            content=json.dumps(payload, default=str),
+                                content=json.dumps(payload, default=str),
                                 tool_call_id=call_id,
                             )
                         )
                         if message_writer:
                             message_writer(history[-1])
-                        yield factory.make(ToolFailed, tool=name, tool_id=call_id, message=message)
+                        yield factory.make(
+                            ToolFailed, tool=name, tool_id=call_id, message=message
+                        )
                     else:
                         successful_tools += 1
                         if name in _EVIDENCE_TOOLS:
                             successful_evidence_tools += 1
+                            if (
+                                name in _PROVENANCE_REQUIRED_TOOLS
+                                and not _valid_provenance(payload)
+                            ):
+                                invalid_evidence = True
                         history.append(
                             Message(
                                 role="tool",
@@ -546,12 +452,12 @@ class AgentLoop:
                             tool=name,
                             tool_id=call_id,
                             detail=_summary(payload),
-                            duration_ms=round((time.perf_counter() - tool_started) * 1000, 2),
+                            duration_ms=round(
+                                (time.perf_counter() - tool_started) * 1000, 2
+                            ),
                         )
-                        sources = payload.get("sources")
-                        if isinstance(sources, list) and all(
-                            isinstance(source, dict) for source in sources
-                        ):
+                        sources = _extract_sources(payload)
+                        if sources:
                             yield factory.make(SourcesUpdated, sources=sources)
                     self._drain_input_queue(history, input_queue)
                 if failed_evidence_tools and not successful_evidence_tools:
@@ -586,7 +492,6 @@ class AgentLoop:
             "data:fetch_stock_data",
             "data:fetch_fundamentals",
             "news:fetch_news",
-            "macro:fetch_macro_data",
             "analysis:run_fundamental_scan",
             "analysis:run_technical_scan",
             "interaction:ask_user",
@@ -597,11 +502,7 @@ class AgentLoop:
                 for definition in definitions
                 if definition.get("function", {}).get("name") in base_tools
             ]
-        allowed = {
-            tool
-            for skill in skills
-            for tool in skill.manifest.allowed_tools
-        }
+        allowed = {tool for skill in skills for tool in skill.manifest.allowed_tools}
         if any(skill.manifest.id == "research-planning" for skill in skills):
             allowed.update(base_tools)
         if not allowed:
@@ -704,7 +605,9 @@ class AgentLoop:
                             yield factory.make(TextDelta, text=part)
                             await asyncio.sleep(0)
                 merge_chunk_tool_calls(calls, chunk_payload)
-        tool_calls = sanitize_tool_calls([calls[index] for index in sorted(calls)]) or None
+        tool_calls = (
+            sanitize_tool_calls([calls[index] for index in sorted(calls)]) or None
+        )
         yield Message(role="assistant", content="".join(text), tool_calls=tool_calls)
 
     def _needs_approval(self, name: str, call_id: str, approved: set[str]) -> bool:
@@ -713,7 +616,9 @@ class AgentLoop:
         return name.split(":", 1)[0] in {"data", "news", "research", "market"}
 
     @staticmethod
-    def _drain_input_queue(history: list[Message], queue: asyncio.Queue[Message] | None) -> None:
+    def _drain_input_queue(
+        history: list[Message], queue: asyncio.Queue[Message] | None
+    ) -> None:
         if queue is None:
             return
         while True:
@@ -746,8 +651,6 @@ def _tool_call_identity(call: dict[str, Any]) -> tuple[str, str]:
     return name, call_id
 
 
-
-
 def _summary(payload: dict[str, Any]) -> str:
     if "summary" in payload:
         return str(payload["summary"])
@@ -756,14 +659,54 @@ def _summary(payload: dict[str, Any]) -> str:
     return "completed"
 
 
-def _period_return_pct(first: dict[str, Any], latest: dict[str, Any]) -> float | None:
-    first_close = first.get("Close", first.get("close"))
-    latest_close = latest.get("Close", latest.get("close"))
-    if not isinstance(first_close, (int, float)) or not first_close:
-        return None
-    if not isinstance(latest_close, (int, float)):
-        return None
-    return round((latest_close / first_close - 1) * 100, 2)
+def _extract_sources(payload: dict[str, Any]) -> list[dict[str, str]]:
+    """Extract a small, presentation-safe source list from tool evidence."""
+    candidates: Any = payload.get("sources")
+    if candidates is None and isinstance(payload.get("provenance"), dict):
+        source = payload["provenance"].get("source")
+        if source:
+            candidates = [{"name": source}]
+    if candidates is None and isinstance(payload.get("data"), dict):
+        candidates = payload["data"].get("sources")
+    if not isinstance(candidates, list):
+        candidates = (
+            payload.get("data") if isinstance(payload.get("data"), list) else []
+        )
+
+    sources: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        name = str(
+            item.get("name") or item.get("publisher") or item.get("source") or ""
+        ).strip()
+        url = str(item.get("url") or item.get("link") or "").strip()
+        if not name or name in seen:
+            continue
+        seen.add(name)
+        sources.append({"name": name, "url": url})
+    return sources
+
+
+def _requires_evidence(skills: list[SkillPackage]) -> bool:
+    """Return whether the selected workflow may publish without evidence."""
+    return any(skill.manifest.id in _EVIDENCE_REQUIRED_SKILLS for skill in skills)
+
+
+def _valid_provenance(payload: dict[str, Any]) -> bool:
+    """Require provider evidence to carry a valid provenance envelope."""
+    raw = payload.get("provenance")
+    if not isinstance(raw, dict):
+        return False
+    try:
+        provenance = EvidenceProvenance.model_validate(raw)
+    except Exception:  # noqa: BLE001 - malformed provider metadata is a data failure
+        return False
+    return (
+        provenance.quality_status != "rejected"
+        and provenance.ingested_at >= provenance.observed_at
+    )
 
 
 def _last_user_query(messages: list[Message]) -> str:
@@ -781,6 +724,8 @@ def _add_skill_context(
     prompt = "\n\n---\n\n".join(skill.prompt() for skill in skills)
     for index, message in enumerate(messages):
         if message.role == "system":
-            messages[index] = Message(role="system", content=f"{message.content}\n\n{prompt}")
+            messages[index] = Message(
+                role="system", content=f"{message.content}\n\n{prompt}"
+            )
             return messages
     return [Message(role="system", content=prompt), *messages]

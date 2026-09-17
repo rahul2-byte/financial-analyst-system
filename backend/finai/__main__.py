@@ -35,5 +35,6 @@ def __getattr__(name: str):
         return FinAIRepl
     raise AttributeError(name)
 
+
 if __name__ == "__main__":
     main()

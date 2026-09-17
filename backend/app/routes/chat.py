@@ -7,14 +7,9 @@ from collections.abc import AsyncIterator
 from uuid import uuid4
 
 from app.config import settings
-from app.core.agent_loop import AgentLoop, AgentLoopConfig, RegistryToolRunner
-from app.core.node_resources import resources
+from app.core.agent_loop import AgentLoop, AgentLoopConfig, FinancialToolRunner
+from app.core.resources import build_runtime_resources
 from app.core.skills import SkillRegistry
-from app.core.tools.tool_system import (
-    initialize_tool_system,
-    tool_executor,
-    tool_registry,
-)
 from app.events.models import ResearchEvent
 from app.models.request_models import ChatRequest
 from app.models.response_models import StreamEvent
@@ -25,10 +20,10 @@ router = APIRouter()
 
 
 def _runtime(request: ChatRequest) -> AgentLoop:
-    initialize_tool_system()
+    runtime_resources = build_runtime_resources()
     return AgentLoop(
-        resources.llm_service,
-        RegistryToolRunner(tool_registry, tool_executor),
+        runtime_resources.llm_service,
+        FinancialToolRunner(runtime_resources),
         config=AgentLoopConfig(
             model=request.model or settings.HIVE_MODEL,
             max_tokens=request.max_tokens or settings.HIVE_MAX_OUTPUT_TOKENS,
@@ -38,35 +33,14 @@ def _runtime(request: ChatRequest) -> AgentLoop:
     )
 
 
-class _SharedRuntimeOrchestrator:
-    """Compatibility seam for callers that patch ``orchestrator.execute_query``."""
-
-    async def execute_query(
-        self,
-        query: str,
-        *,
-        conversation_history: list,
-        **_: object,
-    ) -> AsyncIterator[StreamEvent]:
-        request = ChatRequest(messages=conversation_history)
-        async for event in _runtime(request).run(
-            conversation_history,
-            conversation_id=uuid4(),
-        ):
-            mapped = _to_sse_event(event)
-            if mapped is not None:
-                yield mapped
-
-
-# Kept for source compatibility with integrations and tests. Production calls
-# still execute through the shared AgentLoop implementation above.
-orchestrator = _SharedRuntimeOrchestrator()
-
-
 @router.post("/chat")
 async def chat_endpoint(request: ChatRequest) -> StreamingResponse:
     user_query = next(
-        (message.content for message in reversed(request.messages) if message.role == "user"),
+        (
+            message.content
+            for message in reversed(request.messages)
+            if message.role == "user"
+        ),
         "",
     )
     if not user_query:
@@ -75,9 +49,9 @@ async def chat_endpoint(request: ChatRequest) -> StreamingResponse:
     async def event_generator() -> AsyncIterator[str]:
         yield ": " + (" " * 1024) + "\n\n"
         try:
-            events = orchestrator.execute_query(
-                user_query,
-                conversation_history=request.messages,
+            events = _runtime(request).run(
+                request.messages,
+                conversation_id=uuid4(),
             )
             async for event in events:
                 yield f"data: {json.dumps(event.model_dump())}\n\n"
@@ -107,7 +81,9 @@ def _to_sse_event(event: ResearchEvent) -> StreamEvent | None:
     if event.type == "model.request.started":
         return StreamEvent(type="status", message="Contacting research model")
     if event.type == "provider.attempt.started":
-        return StreamEvent(type="status", message=f"Contacting Hive · attempt {event.attempt}")
+        return StreamEvent(
+            type="status", message=f"Contacting Hive · attempt {event.attempt}"
+        )
     if event.type == "provider.retrying":
         return StreamEvent(
             type="status",
@@ -153,7 +129,9 @@ def _to_sse_event(event: ResearchEvent) -> StreamEvent | None:
             message=event.message,
         )
     if event.type == "approval.requested":
-        return StreamEvent(type="approval_required", message=event.prompt, data=event.details)
+        return StreamEvent(
+            type="approval_required", message=event.prompt, data=event.details
+        )
     if event.type == "clarification.requested":
         return StreamEvent(type="clarification_required", message=event.prompt)
     if event.type == "run.failed":

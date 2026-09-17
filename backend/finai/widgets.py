@@ -38,7 +38,10 @@ class NavigationRail(Vertical):
         yield Button("Reports", id="nav-reports", classes="nav-item")
         yield Button("Watchlist", id="nav-watchlist", classes="nav-item")
         yield Button("Settings", id="nav-settings", classes="nav-item")
-        yield Static("\nRECENT SESSIONS\n\n● HDFC Bank Analysis\n  Just now\n\n● Reliance Industries\n  2 hours ago\n\n● TCS Q4 Results\n  5 hours ago", classes="recent-sessions")
+        yield Static(
+            "\nRECENT SESSIONS\n\n● HDFC Bank Analysis\n  Just now\n\n● Reliance Industries\n  2 hours ago\n\n● TCS Q4 Results\n  5 hours ago",
+            classes="recent-sessions",
+        )
 
 
 class ContextRail(Static):

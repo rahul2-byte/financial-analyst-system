@@ -21,7 +21,9 @@ class ContextBudget:
     def should_compact(self, estimated_tokens: int) -> bool:
         return estimated_tokens >= self.compaction_limit
 
-    def compact(self, messages: list[Message]) -> tuple[list[Message], dict[str, int | str]]:
+    def compact(
+        self, messages: list[Message]
+    ) -> tuple[list[Message], dict[str, int | str]]:
         """Keep the newest turns and a bounded textual summary of older turns."""
         estimated = sum(self._message_tokens(message) for message in messages)
         if not self.should_compact(estimated):
@@ -40,10 +42,7 @@ class ContextBudget:
         dropped = messages[: len(messages) - len(kept)]
         summary_lines = [
             "Earlier FIN-AI conversation context (compacted):",
-            *(
-                self._summary_line(message)
-                for message in dropped
-            ),
+            *(self._summary_line(message) for message in dropped),
         ]
         compacted = [
             Message(role="system", content="\n".join(summary_lines)),

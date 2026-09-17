@@ -19,7 +19,6 @@ class CircuitBreakerOpen(Exception):
     """Raised when circuit is open and call is rejected."""
 
 
-
 class CircuitBreaker:
     """
     Circuit breaker to prevent cascading failures from external services.
@@ -50,13 +49,13 @@ class CircuitBreaker:
     @property
     def state(self) -> CircuitState:
         if self._state == CircuitState.OPEN and self._last_failure_time:
-                elapsed = time.time() - self._last_failure_time
-                if elapsed >= self.recovery_timeout:
-                    logger.info(
-                        f"Circuit '{self.name}': Opening half-open state after {elapsed:.1f}s"
-                    )
-                    self._state = CircuitState.HALF_OPEN
-                    self._half_open_calls = 0
+            elapsed = time.time() - self._last_failure_time
+            if elapsed >= self.recovery_timeout:
+                logger.info(
+                    f"Circuit '{self.name}': Opening half-open state after {elapsed:.1f}s"
+                )
+                self._state = CircuitState.HALF_OPEN
+                self._half_open_calls = 0
         return self._state
 
     def record_success(self) -> None:

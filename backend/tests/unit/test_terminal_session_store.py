@@ -1,8 +1,8 @@
 import asyncio
 import json
 
+from app.events.models import EventFactory, RunCompleted, RunStarted, TextDelta
 from app.models.request_models import Message
-from app.models.response_models import StreamEvent
 from finai.__main__ import FinAIRepl
 from finai.session_store import SessionStore
 
@@ -22,7 +22,7 @@ def test_session_store_persists_history_and_run_artifacts(tmp_path) -> None:
         Message(role="user", content="Analyze INFY"),
         Message(role="assistant", content="Working."),
     ]
-    assert json.loads(run_path.read_text())['status'] == "completed"
+    assert json.loads(run_path.read_text())["status"] == "completed"
 
 
 def test_session_store_round_trips_context_and_pending_interaction(tmp_path) -> None:
@@ -52,32 +52,32 @@ def test_session_listing_includes_activity_metadata(tmp_path) -> None:
 
 
 def test_repl_persists_typed_stream_transcript_and_run(tmp_path) -> None:
-    calls: list[dict[str, object]] = []
-
-    class StreamOrchestrator:
-        async def execute_query(self, _query, **kwargs):
-            calls.append(kwargs)
-            yield StreamEvent(type="status", message="Checking request...")
-            yield StreamEvent(type="text_delta", content="answer")
-            yield StreamEvent(type="done")
-
     repl = FinAIRepl(root=tmp_path / ".finai")
-    repl.orchestrator = StreamOrchestrator()
+
+    async def stream(history, query, conversation_id, **kwargs):
+        del history, query, kwargs
+        factory = EventFactory(conversation_id)
+        yield factory.make(RunStarted, query="hello")
+        yield factory.make(TextDelta, text="answer")
+        yield factory.make(RunCompleted, terminal_status="success", duration_ms=1.0)
+
+    repl.runtime.stream = stream
 
     async def scenario() -> None:
         events = [event async for event in repl.typed_stream("hello")]
         assert events[-1].type == "run.completed"
 
     asyncio.run(scenario())
-    assert [message.role for message in repl.store.load_history()] == ["user", "assistant"]
+    assert [message.role for message in repl.store.load_history()] == [
+        "user",
+        "assistant",
+    ]
     run_files = list((repl.store.session_dir / "runs").glob("*.json"))
     assert len(run_files) == 1
     assert json.loads(run_files[0].read_text())["status"] == "success"
-    assert calls[0]["expose_model_stream"] is True
     trace_records = repl.store.trace.read()
     assert [record["event_type"] for record in trace_records] == [
         "run.started",
-        "stage.started",
         "response.delta",
         "run.completed",
     ]

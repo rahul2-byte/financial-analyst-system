@@ -6,12 +6,21 @@ from app.routes import chat
 
 
 @pytest.mark.asyncio
+async def test_chat_route_has_no_orchestrator_global(monkeypatch) -> None:
+    assert not hasattr(chat, "orchestrator")
+
+
+@pytest.mark.asyncio
 async def test_chat_endpoint_streams_error_event_with_type_field(monkeypatch) -> None:
-    async def _broken_execute_query(*_args, **_kwargs):
+    async def _broken_run(*_args, **_kwargs):
         raise RuntimeError("boom")
         yield  # pragma: no cover
 
-    monkeypatch.setattr(chat.orchestrator, "execute_query", _broken_execute_query)
+    class BrokenRuntime:
+        def run(self, *_args, **_kwargs):
+            return _broken_run()
+
+    monkeypatch.setattr(chat, "_runtime", lambda _request: BrokenRuntime())
 
     request = ChatRequest(messages=[Message(role="user", content="hello")])
     response = await chat.chat_endpoint(request)

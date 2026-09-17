@@ -91,3 +91,12 @@ def test_scan_success():
 
     assert isinstance(result["momentum"]["rsi_14"], float)
     assert isinstance(result["volatility"]["bb_upper"], float)
+
+
+def test_scan_rejects_non_finite_ohlcv_values():
+    df = create_dummy_data(100)
+    df.loc[df.index[-1], "close"] = np.nan
+
+    result = TechnicalScanner.scan(df)
+
+    assert result == {"error": "OHLCV data contains non-finite values."}
