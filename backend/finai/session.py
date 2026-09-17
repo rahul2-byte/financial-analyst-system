@@ -14,7 +14,7 @@ from app.core.diagnostics import diagnostic_payload, diagnostics_enabled
 from app.core.resources import build_runtime_resources
 from app.events.models import EventFactory, ResearchEvent, RunCancelled
 from app.models.request_models import Message
-from app.services.hive_service import HiveService
+from app.observability.provider_archive import ProviderArchive
 
 from .context_budget import ContextBudget
 from .session_persistence import SessionPersistence
@@ -25,7 +25,12 @@ logger = logging.getLogger(__name__)
 
 
 class FinAIRepl:
-    def __init__(self, root: Path | None = None, session_id: str | None = None) -> None:
+    def __init__(
+        self,
+        root: Path | None = None,
+        session_id: str | None = None,
+        replay_snapshots: dict[str, str] | None = None,
+    ) -> None:
         self.root = root or Path(".finai")
         self.session_id = session_id or uuid.uuid4().hex
         self.store = SessionStore(self.root, self.session_id)
@@ -33,8 +38,12 @@ class FinAIRepl:
         self.mode = "guided"
         self.history: list[Message] = []
         self._load_session()
-        self.hive_service = HiveService()
-        self.resources = build_runtime_resources(llm_service=self.hive_service)
+        self.resources = build_runtime_resources(
+            llm_service=None,
+            provider_archive=ProviderArchive(self.root),
+            replay_snapshots=replay_snapshots,
+        )
+        self.hive_service = self.resources.llm_service
         self.runtime = ResearchRunner(
             self.resources,
             self.mode,

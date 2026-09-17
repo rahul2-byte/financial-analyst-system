@@ -4,12 +4,14 @@ import logging
 import re
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
+from pathlib import Path
 from time import struct_time
 from typing import Any
 from urllib.parse import urlparse
 
 import httpx
 from app.config import settings
+from app.observability.provider_archive import ProviderArchive
 from data.news_pipeline.models import CompanyContext, RawSearchResult
 from data.news_pipeline.query_templates import (
     QueryTemplateLibrary,
@@ -154,11 +156,13 @@ class TinyFishSearchConnector:
         *,
         client: TinyFishSearchClient | Any | None = None,
         max_results_per_query: int | None = None,
+        archive: ProviderArchive | None = None,
     ) -> None:
         self.client = client or TinyFishSearchClient(
             api_key=str(settings.TINYFISH_API_KEY or ""),
             base_url=settings.TINYFISH_SEARCH_URL,
             timeout=float(settings.TINYFISH_SEARCH_TIMEOUT),
+            archive=archive or ProviderArchive(Path(".finai")),
         )
         self.max_results_per_query = max_results_per_query or int(
             settings.TINYFISH_MAX_RESULTS_PER_QUERY

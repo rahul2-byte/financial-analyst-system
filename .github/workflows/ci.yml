@@ -33,7 +33,10 @@ jobs:
         run: PYTHONPATH=backend uv run python -m finai --help
 
       - name: Pytest backend
-        run: uv run pytest backend/tests
+        run: uv run pytest backend/tests --no-cov
+
+      - name: Coverage threshold
+        run: uv run pytest backend/tests --cov=backend --cov-report=term-missing --cov-fail-under=70
 
   docs-sanity:
     runs-on: ubuntu-latest

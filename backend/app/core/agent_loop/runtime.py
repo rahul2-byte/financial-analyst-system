@@ -5,28 +5,23 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import math
 import os
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
-from app.core.agent_loop.model_events import (
-    merge_chunk_tool_calls,
-    result_payload,
-    sanitize_tool_calls,
-)
+from app.core.agent_loop.evidence import EvidenceAccounting
+from app.core.agent_loop.model_streaming import ModelStreaming
 from app.core.agent_loop.publication import (
-    EvidenceFact,
     PublicationError,
     parse_report_draft,
     publish_report,
 )
+from app.core.agent_loop.terminal_state import terminal_status
+from app.core.agent_loop.tool_execution import ToolExecutor
 from app.core.diagnostics import diagnostic_payload, diagnostics_enabled
-from app.core.research_schemas import EvidenceProvenance
 from app.core.skills import SkillPackage, SkillRegistry
 from app.events.models import (
     ApprovalRequested,
@@ -63,11 +58,6 @@ _EVIDENCE_TOOLS = {
     "news:fetch_news",
     "analysis:run_fundamental_scan",
     "analysis:run_technical_scan",
-}
-_PROVENANCE_REQUIRED_TOOLS = {
-    "data:fetch_stock_data",
-    "data:fetch_fundamentals",
-    "news:fetch_news",
 }
 _PARTIAL_RESPONSE_MIN_CHARS = 200
 _EVIDENCE_REQUIRED_SKILLS = {
@@ -152,11 +142,9 @@ class AgentLoop:
         tool_calls_seen = 0
         failed_tools = 0
         successful_tools = 0
-        failed_evidence_tools = 0
-        successful_evidence_tools = 0
-        invalid_evidence = False
+        evidence = EvidenceAccounting()
         evidence_warning_added = False
-        evidence_facts: dict[str, EvidenceFact] = {}
+        tool_executor = ToolExecutor(self.tool_runner)
         completed_tool_ids = {
             message.tool_call_id
             for message in history
@@ -263,32 +251,26 @@ class AgentLoop:
                     )
 
                 if not assistant.tool_calls:
-                    evidence_blocked = (
-                        (failed_tools > 0 and successful_tools == 0)
-                        or (
-                            _requires_evidence(selected_skills)
-                            and successful_evidence_tools == 0
-                        )
-                        or invalid_evidence
+                    status = terminal_status(
+                        failed_tools=failed_tools,
+                        successful_tools=successful_tools,
+                        requires_evidence=_requires_evidence(selected_skills),
+                        successful_evidence_tools=evidence.successful_evidence_tools,
+                        invalid_evidence=evidence.invalid_evidence,
+                        partial_provider_response=assistant.name
+                        == "partial_provider_response",
                     )
-                    terminal_status = (
-                        "insufficient_data"
-                        if evidence_blocked
-                        else "partial"
-                        if failed_tools or assistant.name == "partial_provider_response"
-                        else "success"
-                    )
-                    if self.config.publish_reports and terminal_status == "success":
+                    if self.config.publish_reports and status == "success":
                         try:
                             published = publish_report(
-                                parse_report_draft(assistant.content), evidence_facts
+                                parse_report_draft(assistant.content), evidence.facts
                             )
                         except PublicationError:
                             published = (
                                 "The report was held for review because its structured "
                                 "claims or evidence could not be verified."
                             )
-                            terminal_status = "needs_review"
+                            status = "needs_review"
                         else:
                             if message_writer:
                                 message_writer(
@@ -300,7 +282,7 @@ class AgentLoop:
                             )
                     yield factory.make(
                         RunCompleted,
-                        terminal_status=terminal_status,
+                        terminal_status=status,
                         duration_ms=round((time.perf_counter() - started) * 1000, 2),
                     )
                     return
@@ -416,16 +398,10 @@ class AgentLoop:
                             else "omitted",
                         )
                     try:
-                        result = await self.tool_runner.execute(name, arguments)
-                        payload = result_payload(result)
+                        payload = await tool_executor.execute(name, arguments)
                     except asyncio.CancelledError:
                         yield factory.make(RunCancelled, reason="cancelled by user")
                         return
-                    except Exception as exc:
-                        payload = {"success": False, "error": str(exc)}
-                        logger.exception(
-                            "tool call raised tool=%s tool_id=%s", name, call_id
-                        )
                     if diagnostics_enabled():
                         logger.debug(
                             "tool call end run_id=%s tool=%s tool_id=%s duration_ms=%.1f success=%s",
@@ -438,10 +414,7 @@ class AgentLoop:
 
                     if payload.get("success", True) is False:
                         failed_tools += 1
-                        if name in _EVIDENCE_TOOLS and not payload.get(
-                            "retryable", False
-                        ):
-                            failed_evidence_tools += 1
+                        evidence.record_failure(name, payload)
                         message = str(payload.get("error", "tool failed"))
                         if (
                             name in _EVIDENCE_TOOLS
@@ -476,14 +449,7 @@ class AgentLoop:
                         )
                     else:
                         successful_tools += 1
-                        if name in _EVIDENCE_TOOLS:
-                            successful_evidence_tools += 1
-                            evidence_facts.update(_extract_evidence_facts(payload))
-                            if (
-                                name in _PROVENANCE_REQUIRED_TOOLS
-                                and not _valid_provenance(payload)
-                            ):
-                                invalid_evidence = True
+                        evidence.record_success(name, payload)
                         history.append(
                             Message(
                                 role="tool",
@@ -506,7 +472,10 @@ class AgentLoop:
                         if sources:
                             yield factory.make(SourcesUpdated, sources=sources)
                     self._drain_input_queue(history, input_queue)
-                if failed_evidence_tools and not successful_evidence_tools:
+                if (
+                    evidence.failed_evidence_tools
+                    and not evidence.successful_evidence_tools
+                ):
                     message = (
                         "I couldn't produce a reliable analysis because the required "
                         "evidence tools returned no usable data. Retry the request or "
@@ -574,89 +543,15 @@ class AgentLoop:
         | ProviderCompleted
         | ProviderFailed
     ]:
-        text: list[str] = []
-        calls: dict[int, dict[str, Any]] = {}
-        async for event in self.model_client.generate_stream(
-            messages,
+        streamer = ModelStreaming(
+            self.model_client,
             self.config.model,
-            tools=self._tool_definitions(skills),
-            max_tokens=(
-                self.config.max_tokens
-                if any(message.role == "tool" for message in messages)
-                else min(self.config.max_tokens, 512)
-            ),
-            temperature=0.1,
-        ):
-            event_name = event.get("event")
-            if event_name == "provider_attempt_started":
-                yield factory.make(
-                    ProviderAttemptStarted,
-                    attempt=int(event.get("data", {}).get("attempt", 1)),
-                )
-            elif event_name == "provider_retrying":
-                data = event.get("data", {})
-                yield factory.make(
-                    ProviderRetrying,
-                    attempt=int(data.get("attempt", 1)),
-                    status_code=data.get("status_code"),
-                    delay_ms=float(data.get("delay_ms", 0)),
-                    reason=str(data.get("reason", "transient provider failure")),
-                )
-            elif event_name == "provider_stream_started":
-                data = event.get("data", {})
-                yield factory.make(
-                    ProviderStreamStarted,
-                    attempt=int(data.get("attempt", 1)),
-                    first_byte_ms=float(data.get("first_byte_ms", 0)),
-                )
-            elif event_name == "provider_completed":
-                data = event.get("data", {})
-                yield factory.make(
-                    ProviderCompleted,
-                    attempts=int(data.get("attempts", 1)),
-                    duration_ms=float(data.get("duration_ms", 0)),
-                    first_token_ms=data.get("first_token_ms"),
-                )
-            elif event_name == "provider_failed":
-                data = event.get("data", {})
-                yield factory.make(
-                    ProviderFailed,
-                    attempts=int(data.get("attempts", 1)),
-                    phase=str(data.get("phase", "unknown")),
-                    status_code=data.get("status_code"),
-                    message=str(data.get("message", "Hive provider failed")),
-                )
-            elif event_name == "token":
-                chunk = str(event.get("data", ""))
-                if chunk:
-                    for offset in range(0, len(chunk), 64):
-                        part = chunk[offset : offset + 64]
-                        text.append(part)
-                        if not self.config.publish_reports:
-                            yield factory.make(TextDelta, text=part)
-                        # Give the TUI a scheduling point between coalesced
-                        # provider frames without inventing progress.
-                        await asyncio.sleep(0)
-                raw_chunk = event.get("chunk")
-                merge_chunk_tool_calls(calls, raw_chunk)
-            elif event.get("event") == "chunk":
-                chunk_payload = event.get("data")
-                if isinstance(chunk_payload, dict):
-                    choices = chunk_payload.get("choices", [])
-                    delta = choices[0].get("delta", {}) if choices else {}
-                    content = delta.get("content") if isinstance(delta, dict) else None
-                    if content:
-                        for offset in range(0, len(str(content)), 64):
-                            part = str(content)[offset : offset + 64]
-                            text.append(part)
-                            if not self.config.publish_reports:
-                                yield factory.make(TextDelta, text=part)
-                            await asyncio.sleep(0)
-                merge_chunk_tool_calls(calls, chunk_payload)
-        tool_calls = (
-            sanitize_tool_calls([calls[index] for index in sorted(calls)]) or None
+            self.config.max_tokens,
+            self.config.publish_reports,
+            lambda: self._tool_definitions(skills),
         )
-        yield Message(role="assistant", content="".join(text), tool_calls=tool_calls)
+        async for item in streamer.stream(messages, factory, round_number):
+            yield item
 
     def _needs_approval(self, name: str, call_id: str, approved: set[str]) -> bool:
         if call_id in approved or self.config.mode == "autonomous":
@@ -707,55 +602,6 @@ def _summary(payload: dict[str, Any]) -> str:
     return "completed"
 
 
-def _extract_evidence_facts(payload: dict[str, Any]) -> dict[str, EvidenceFact]:
-    """Index finite provider numbers by stable payload path for this run."""
-    provenance = payload.get("provenance")
-    if not isinstance(provenance, dict):
-        return {}
-    source_id = str(provenance.get("dataset") or provenance.get("source") or "")
-    instrument = str(provenance.get("instrument") or "")
-    observed_at = provenance.get("observed_at")
-    ingested_at = provenance.get("ingested_at")
-    quality_status = provenance.get("quality_status")
-    if not source_id or not instrument or quality_status != "verified":
-        return {}
-    try:
-        observed = datetime.fromisoformat(str(observed_at))
-        datetime.fromisoformat(str(ingested_at))
-    except (TypeError, ValueError):
-        return {}
-    facts: dict[str, EvidenceFact] = {}
-
-    def visit(value: Any, path: str) -> None:
-        if isinstance(value, bool):
-            return
-        if isinstance(value, (int, float)):
-            if isinstance(value, float) and not math.isfinite(value):
-                return
-            fact_id = f"{source_id}:{path}"
-            try:
-                facts[fact_id] = EvidenceFact(
-                    fact_id=fact_id,
-                    value=value,
-                    unit="provider_value",
-                    source_id=source_id,
-                    instrument=instrument,
-                    observed_at=observed,
-                    quality_status="verified",
-                )
-            except ValueError:
-                return
-        elif isinstance(value, dict):
-            for key, item in value.items():
-                visit(item, f"{path}.{key}" if path else str(key))
-        elif isinstance(value, list):
-            for index, item in enumerate(value):
-                visit(item, f"{path}.{index}")
-
-    visit(payload.get("data"), "data")
-    return facts
-
-
 def _extract_sources(payload: dict[str, Any]) -> list[dict[str, str]]:
     """Extract a small, presentation-safe source list from tool evidence."""
     candidates: Any = payload.get("sources")
@@ -789,21 +635,6 @@ def _extract_sources(payload: dict[str, Any]) -> list[dict[str, str]]:
 def _requires_evidence(skills: list[SkillPackage]) -> bool:
     """Return whether the selected workflow may publish without evidence."""
     return any(skill.manifest.id in _EVIDENCE_REQUIRED_SKILLS for skill in skills)
-
-
-def _valid_provenance(payload: dict[str, Any]) -> bool:
-    """Require provider evidence to carry a valid provenance envelope."""
-    raw = payload.get("provenance")
-    if not isinstance(raw, dict):
-        return False
-    try:
-        provenance = EvidenceProvenance.model_validate(raw)
-    except Exception:  # noqa: BLE001 - malformed provider metadata is a data failure
-        return False
-    return (
-        provenance.quality_status != "rejected"
-        and provenance.ingested_at >= provenance.observed_at
-    )
 
 
 def _last_user_query(messages: list[Message]) -> str:

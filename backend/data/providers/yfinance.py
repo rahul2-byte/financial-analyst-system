@@ -21,15 +21,55 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import yfinance as yf
+from app.config import settings
 from app.core.observability import observe
 from app.core.ticker import Ticker, parse_ticker
+from app.observability.provider_archive import ProviderArchive
 from data.interfaces.fetcher import IDataFetcher
-from data.quality import utc_now, validate_market_records
+from data.quality import (
+    utc_now,
+    validate_market_freshness,
+    validate_market_records,
+)
 from data.schemas.market import OHLCVData
 from data.schemas.text import NewsArticle
 
 INDIAN_STOCK_SUFFIX = ".NS"
 DEFAULT_TICKER_SUFFIXES = [".NS", ".BO", ".SS"]
+
+
+class ReplayYFinanceFetcher:
+    """Strict offline yfinance replacement backed only by archived payloads."""
+
+    def __init__(self, archive: ProviderArchive, snapshots: dict[str, str]) -> None:
+        self._archive = archive
+        self._snapshots = snapshots
+
+    def fetch_stock_price(
+        self, ticker: str, period: str = "1mo", interval: str = "1d"
+    ) -> dict[str, Any]:
+        del ticker, period, interval
+        return self._payload("fetch_stock_price")
+
+    def fetch_company_fundamentals(self, ticker: str) -> dict[str, Any]:
+        del ticker
+        return self._payload("fetch_fundamentals")
+
+    def fetch_news(self, ticker: str, limit: int = 10) -> list[dict[str, Any]]:
+        del ticker, limit
+        payload = self._payload("fetch_news")
+        if not isinstance(payload, list):
+            raise TypeError("replay snapshot has an invalid news payload")
+        return payload
+
+    def _payload(self, operation: str) -> Any:
+        content_hash = self._snapshots.get(operation)
+        if not content_hash:
+            raise RuntimeError(f"replay snapshot missing for {operation}")
+        snapshot = self._archive.load(content_hash)
+        if snapshot.provider != "yfinance" or snapshot.operation != operation:
+            raise RuntimeError(f"replay snapshot does not match {operation}")
+        return snapshot.payload
 
 
 class YFinanceFetcher(IDataFetcher):
@@ -207,7 +247,11 @@ class YFinanceFetcher(IDataFetcher):
         formatted_ticker = self._format_ticker(ticker)
 
         df = yf.download(
-            formatted_ticker, period=period, interval=interval, progress=False
+            formatted_ticker,
+            period=period,
+            interval=interval,
+            progress=False,
+            auto_adjust=False,
         )
 
         if df is None or df.empty:
@@ -249,6 +293,11 @@ class YFinanceFetcher(IDataFetcher):
         quality_issues = validate_market_records(
             normalized_records, formatted_ticker, observed_at
         )
+        quality_issues += validate_market_freshness(
+            observed_at=observed_at,
+            as_of=ingested_at,
+            max_age_days=settings.MARKET_DATA_MAX_AGE_DAYS,
+        )
 
         return {
             "ticker": formatted_ticker,
@@ -263,6 +312,15 @@ class YFinanceFetcher(IDataFetcher):
                 "ingested_at": ingested_at.isoformat(),
                 "version": "yfinance-live-v1",
                 "quality_status": "verified" if not quality_issues else "rejected",
+                "currency": "INR"
+                if formatted_ticker.endswith((".NS", ".BO"))
+                else None,
+                "timezone": "Asia/Kolkata"
+                if formatted_ticker.endswith((".NS", ".BO"))
+                else "UTC",
+                "adjustment": "unadjusted",
+                "as_of": observed_at.isoformat(),
+                "source_url": "https://finance.yahoo.com",
             },
             "quality_issues": [
                 issue.model_dump(mode="json") for issue in quality_issues

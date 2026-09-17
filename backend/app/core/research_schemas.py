@@ -27,6 +27,12 @@ class EvidenceProvenance(BaseModel):
     ingested_at: datetime
     version: str = Field(min_length=1)
     quality_status: Literal["verified", "degraded", "rejected"]
+    currency: str | None = None
+    timezone: str | None = None
+    adjustment: str | None = None
+    as_of: datetime | None = None
+    source_url: str | None = None
+    snapshot_hash: str | None = None
 
 
 class EvidenceRecord(BaseModel):

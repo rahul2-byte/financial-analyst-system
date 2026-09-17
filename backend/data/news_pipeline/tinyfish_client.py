@@ -4,6 +4,8 @@ from collections.abc import Callable
 from datetime import datetime
 from typing import Any
 
+from app.observability.provider_archive import ProviderArchive, ProviderSnapshot
+
 
 class TinyFishSearchClient:
     def __init__(
@@ -13,11 +15,14 @@ class TinyFishSearchClient:
         base_url: str = "https://api.search.tinyfish.ai",
         timeout: float = 20.0,
         client_factory: Callable[[float], Any] | None = None,
+        archive: ProviderArchive | None = None,
     ) -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self.client_factory = client_factory or self._default_client_factory
+        self.archive = archive
+        self.last_snapshot_hash: str | None = None
 
     def _default_client_factory(self, timeout: float) -> Any:
         import httpx
@@ -47,4 +52,14 @@ class TinyFishSearchClient:
             )
             response.raise_for_status()
             payload = response.json()
+        if self.archive is not None:
+            snapshot = self.archive.store(
+                ProviderSnapshot(
+                    provider="tinyfish",
+                    operation="news_search",
+                    payload=payload,
+                    fetched_at=datetime.now().astimezone(),
+                )
+            )
+            self.last_snapshot_hash = snapshot.content_hash
         return [item for item in payload.get("results", []) if isinstance(item, dict)]

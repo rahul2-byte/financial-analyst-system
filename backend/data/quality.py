@@ -19,6 +19,8 @@ class DataQualityIssue(BaseModel):
         "INVALID_PRICE",
         "INSTRUMENT_MISMATCH",
         "NON_FINITE_VALUE",
+        "STALE_DATA",
+        "VENDOR_DISAGREEMENT",
     ]
     message: str = Field(min_length=1)
     blocking: bool = True
@@ -96,3 +98,51 @@ def validate_market_records(
 def utc_now() -> datetime:
     """Return a timezone-aware ingestion timestamp."""
     return datetime.now(UTC)
+
+
+def validate_market_freshness(
+    *, observed_at: datetime, as_of: datetime, max_age_days: int
+) -> tuple[DataQualityIssue, ...]:
+    """Reject observations whose declared as-of time is too old."""
+    if max_age_days < 0:
+        raise ValueError("max_age_days must be non-negative")
+    if observed_at.tzinfo is None or as_of.tzinfo is None:
+        return (
+            DataQualityIssue(
+                code="INVALID_TIMEZONE",
+                message="freshness timestamps must be timezone-aware",
+            ),
+        )
+    age_days = (
+        as_of.astimezone(UTC) - observed_at.astimezone(UTC)
+    ).total_seconds() / 86_400
+    if age_days > max_age_days:
+        return (
+            DataQualityIssue(
+                code="STALE_DATA",
+                message=f"observation is {age_days:.2f} days old; maximum is {max_age_days}",
+            ),
+        )
+    return ()
+
+
+def compare_vendor_values(
+    values: dict[str, float], *, max_relative_difference: float
+) -> tuple[DataQualityIssue, ...]:
+    """Flag a material spread when independent vendors report one value."""
+    if not 0 <= max_relative_difference < 1:
+        raise ValueError("max_relative_difference must be in [0, 1)")
+    finite_values = [
+        float(value) for value in values.values() if isfinite(float(value))
+    ]
+    if len(finite_values) < 2:
+        return ()
+    low, high = min(finite_values), max(finite_values)
+    if low <= 0 or (high - low) / low > max_relative_difference:
+        return (
+            DataQualityIssue(
+                code="VENDOR_DISAGREEMENT",
+                message="provider values exceed the permitted relative difference",
+            ),
+        )
+    return ()

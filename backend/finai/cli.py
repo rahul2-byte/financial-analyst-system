@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -20,6 +21,11 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Interactive FIN-AI research terminal")
     parser.add_argument("--data-dir", type=Path, default=Path(".finai"))
     parser.add_argument("--session", default=None)
+    parser.add_argument(
+        "--replay-snapshots",
+        type=Path,
+        help="JSON mapping of provider operation to archived content hash; disables live providers",
+    )
     parser.add_argument(
         "--plain", action="store_true", help="Print a readable one-shot response"
     )
@@ -107,7 +113,14 @@ def main() -> None:
             filename=log_dir / "finai.log",
             format="%(asctime)s %(levelname)s %(name)s %(message)s",
         )
-        repl = FinAIRepl(args.data_dir, args.session)
+        replay_snapshots = (
+            json.loads(args.replay_snapshots.read_text(encoding="utf-8"))
+            if args.replay_snapshots
+            else None
+        )
+        if replay_snapshots is not None and not isinstance(replay_snapshots, dict):
+            raise ValueError("--replay-snapshots must contain a JSON object")
+        repl = FinAIRepl(args.data_dir, args.session, replay_snapshots)
         repl.mode = args.mode
         if args.query:
             asyncio.run(run_one_shot(repl, " ".join(args.query), as_json=args.json))

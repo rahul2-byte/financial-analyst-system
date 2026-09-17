@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -16,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 class SessionStore:
     def __init__(self, root: Path, session_id: str) -> None:
+        if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", session_id):
+            raise ValueError("invalid session id")
         self.root = root
         self.session_id = session_id
         self.session_dir = root / "sessions" / session_id

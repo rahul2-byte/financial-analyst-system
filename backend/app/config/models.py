@@ -13,6 +13,8 @@ class EnvSettings(BaseSettings):
     API_TITLE: str = "Financial Intelligence Platform API"
     API_VERSION: str = "v1"
     DEBUG: bool = False
+    HTTP_API_TOKEN: str | None = None
+    HTTP_API_OWNER: str = "local-api"
 
     DEFAULT_LLM_MODEL: str = "zai-org/glm-5.3-flash"
     HIVE_API_KEY: str | None = None
@@ -32,6 +34,8 @@ class EnvSettings(BaseSettings):
     FINAI_CONTEXT_MAX_TOKENS: int = 250_000
     FINAI_CONTEXT_COMPACTION_RATIO: float = 0.9
     MIN_QUALITY_SCORE: float = 40.0
+    MARKET_DATA_MAX_AGE_DAYS: int = 7
+    VENDOR_MAX_RELATIVE_DIFFERENCE: float = 0.02
     MAX_ARTICLES_PER_COMPANY: int = 50
     PIPELINE_VERSION: str = "1.0.0"
     TINYFISH_API_KEY: str | None = None

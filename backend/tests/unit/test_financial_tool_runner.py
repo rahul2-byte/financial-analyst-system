@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 from app.core.agent_loop import FinancialToolRunner
 from app.core.resources import RuntimeResources
+from app.observability.provider_archive import ProviderArchive
 
 
 class FakeFetcher:
@@ -58,9 +59,49 @@ async def test_stock_data_returns_summary_and_caches_for_analysis() -> None:
 
 
 @pytest.mark.asyncio
+async def test_stock_data_archives_the_provider_payload_before_returning_evidence(
+    tmp_path,
+) -> None:
+    fetcher = FakeFetcher()
+    tool_runner = FinancialToolRunner(
+        RuntimeResources(
+            llm_service=object(),
+            yf_fetcher=fetcher,
+            provider_archive=ProviderArchive(tmp_path),
+        )
+    )
+
+    result = await tool_runner.execute("data:fetch_stock_data", {"ticker": "ABC"})
+
+    snapshot_hash = result["provenance"]["snapshot_hash"]
+    archived = tool_runner.resources.provider_archive.load(snapshot_hash)
+    assert archived.operation == "fetch_stock_price"
+    assert archived.payload["data"] == [{"Close": 10}, {"Close": 12}]
+
+
+@pytest.mark.asyncio
 async def test_unknown_tool_and_missing_ticker_fail_closed() -> None:
     tool_runner, _ = runner()
     unknown = await tool_runner.execute("unknown:tool", {})
     missing = await tool_runner.execute("analysis:run_technical_scan", {})
     assert unknown == {"success": False, "error": "Unknown tool: unknown:tool"}
     assert missing["success"] is False
+
+
+@pytest.mark.asyncio
+async def test_stock_data_blocks_material_vendor_disagreement() -> None:
+    class DisagreeingFetcher(FakeFetcher):
+        def fetch_stock_price(self, ticker: str, period: str, interval: str) -> dict:
+            value = super().fetch_stock_price(ticker, period, interval)
+            value["vendor_values"] = {"yfinance": 100.0, "independent": 110.0}
+            return value
+
+    fetcher = DisagreeingFetcher()
+    tool_runner = FinancialToolRunner(
+        RuntimeResources(llm_service=object(), yf_fetcher=fetcher)
+    )
+
+    result = await tool_runner.execute("data:fetch_stock_data", {"ticker": "ABC"})
+
+    assert result["success"] is False
+    assert result["quality_issues"][0]["code"] == "VENDOR_DISAGREEMENT"

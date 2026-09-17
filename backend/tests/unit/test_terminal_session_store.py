@@ -1,6 +1,7 @@
 import asyncio
 import json
 
+import pytest
 from app.events.models import EventFactory, RunCompleted, RunStarted, TextDelta
 from app.models.request_models import Message
 from finai.__main__ import FinAIRepl
@@ -35,6 +36,11 @@ def test_session_store_round_trips_context_and_pending_interaction(tmp_path) -> 
     pending = store.read_pending()
     assert pending is not None
     assert pending["interaction_id"] == "i-1"
+
+
+def test_session_store_rejects_path_traversal_session_ids(tmp_path) -> None:
+    with pytest.raises(ValueError, match="session id"):
+        SessionStore(tmp_path / ".finai", "../other")
 
 
 def test_session_listing_includes_activity_metadata(tmp_path) -> None:

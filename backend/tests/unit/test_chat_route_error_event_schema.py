@@ -3,6 +3,7 @@ import json
 import pytest
 from app.models.request_models import ChatRequest, Message
 from app.routes import chat
+from fastapi import HTTPException
 
 
 @pytest.mark.asyncio
@@ -23,7 +24,9 @@ async def test_chat_endpoint_streams_error_event_with_type_field(monkeypatch) ->
     monkeypatch.setattr(chat, "_runtime", lambda _request: BrokenRuntime())
 
     request = ChatRequest(messages=[Message(role="user", content="hello")])
-    response = await chat.chat_endpoint(request)
+    monkeypatch.setattr(chat.settings, "HTTP_API_TOKEN", "test-token")
+    monkeypatch.setattr(chat.settings, "HTTP_API_OWNER", "test-owner")
+    response = await chat.chat_endpoint(request, authorization="Bearer test-token")
 
     chunks = []
     async for chunk in response.body_iterator:
@@ -38,3 +41,31 @@ async def test_chat_endpoint_streams_error_event_with_type_field(monkeypatch) ->
     assert event["type"] == "error"
     assert event["message"].startswith("The research request failed. Reference: ")
     assert "boom" not in event["message"]
+
+
+def test_http_authentication_derives_an_owner_scoped_conversation_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(chat.settings, "HTTP_API_TOKEN", "test-token")
+    monkeypatch.setattr(chat.settings, "HTTP_API_OWNER", "test-owner")
+
+    owner = chat._authenticated_owner("Bearer test-token")
+
+    assert owner == "test-owner"
+    assert chat._conversation_id(owner, "shared") != chat._conversation_id(
+        "other", "shared"
+    )
+
+
+def test_http_authentication_rejects_missing_or_wrong_bearer_token(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(chat.settings, "HTTP_API_TOKEN", "test-token")
+
+    with pytest.raises(HTTPException) as missing:
+        chat._authenticated_owner(None)
+    with pytest.raises(HTTPException) as wrong:
+        chat._authenticated_owner("Bearer wrong")
+
+    assert missing.value.status_code == 401
+    assert wrong.value.status_code == 401

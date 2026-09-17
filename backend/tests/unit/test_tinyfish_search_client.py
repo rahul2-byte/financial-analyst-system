@@ -1,6 +1,7 @@
 from datetime import UTC, datetime
 
 import pytest
+from app.observability.provider_archive import ProviderArchive
 from data.news_pipeline.tinyfish_client import TinyFishSearchClient
 
 
@@ -62,3 +63,22 @@ async def test_tinyfish_search_client_requests_news_results_with_date_filter():
             "after_date": "2026-03-01",
         },
     }
+
+
+@pytest.mark.asyncio
+async def test_tinyfish_search_client_archives_raw_response(tmp_path):
+    http_client = _Client()
+    client = TinyFishSearchClient(
+        api_key="test-key",
+        client_factory=lambda timeout: http_client,
+        archive=ProviderArchive(tmp_path),
+    )
+
+    await client.search(
+        query="HDFC Bank latest news India",
+        num_results=1,
+        start_published_date=datetime(2026, 3, 1, tzinfo=UTC),
+    )
+
+    snapshot = client.archive.load(client.last_snapshot_hash)
+    assert snapshot.payload["results"][0]["title"] == "HDFC Bank raises rates"

@@ -19,6 +19,7 @@ class ChatRequest(BaseModel):
     temperature: float = Field(default=0.7, ge=0.0, le=1.0)
     tools: list[dict[str, Any]] | None = None
     publish_report: bool = False
+    session_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,128}$")
 
     @field_validator("messages")
     @classmethod
@@ -26,3 +27,10 @@ class ChatRequest(BaseModel):
         if not v:
             raise ValueError("Messages list cannot be empty")
         return v
+
+    @field_validator("messages")
+    @classmethod
+    def reject_untrusted_tool_messages(cls, messages: list[Message]) -> list[Message]:
+        if any(message.role in {"system", "tool"} for message in messages):
+            raise ValueError("HTTP chat messages may only have user or assistant roles")
+        return messages

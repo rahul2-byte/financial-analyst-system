@@ -5,7 +5,8 @@ from __future__ import annotations
 import json
 import logging
 from collections.abc import AsyncIterator
-from uuid import uuid4
+from hmac import compare_digest
+from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from app.config import settings
 from app.core.agent_loop import AgentLoop, AgentLoopConfig, FinancialToolRunner
@@ -14,7 +15,7 @@ from app.core.skills import SkillRegistry
 from app.events.models import ResearchEvent
 from app.models.request_models import ChatRequest
 from app.models.response_models import StreamEvent
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
 
 router = APIRouter()
@@ -36,8 +37,25 @@ def _runtime(request: ChatRequest) -> AgentLoop:
     )
 
 
+def _authenticated_owner(authorization: str | None) -> str:
+    """Authenticate the HTTP boundary without logging bearer credentials."""
+    token = settings.HTTP_API_TOKEN
+    expected = f"Bearer {token}" if token else ""
+    if not token or not authorization or not compare_digest(authorization, expected):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return settings.HTTP_API_OWNER
+
+
+def _conversation_id(owner: str, session_id: str) -> UUID:
+    return uuid5(NAMESPACE_URL, f"finai:http:{owner}:{session_id}")
+
+
 @router.post("/chat")
-async def chat_endpoint(request: ChatRequest) -> StreamingResponse:
+async def chat_endpoint(
+    request: ChatRequest,
+    authorization: str | None = Header(default=None),
+) -> StreamingResponse:
+    owner = _authenticated_owner(authorization)
     user_query = next(
         (
             message.content
@@ -49,16 +67,20 @@ async def chat_endpoint(request: ChatRequest) -> StreamingResponse:
     if not user_query:
         raise HTTPException(status_code=400, detail="No user message found.")
 
+    session_id = request.session_id or uuid4().hex
+
     async def event_generator() -> AsyncIterator[str]:
         yield ": " + (" " * 1024) + "\n\n"
         request_id = uuid4().hex
         try:
             events = _runtime(request).run(
                 request.messages,
-                conversation_id=uuid4(),
+                conversation_id=_conversation_id(owner, session_id),
             )
             async for event in events:
-                yield f"data: {json.dumps(event.model_dump())}\n\n"
+                safe_event = _to_sse_event(event)
+                if safe_event is not None:
+                    yield f"data: {json.dumps(safe_event.model_dump())}\n\n"
         except Exception:
             logger.exception("chat stream failed request_id=%s", request_id)
             yield (
@@ -81,6 +103,7 @@ async def chat_endpoint(request: ChatRequest) -> StreamingResponse:
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",
+            "X-FINAI-Session": session_id,
         },
     )
 
@@ -109,7 +132,7 @@ def _to_sse_event(event: ResearchEvent) -> StreamEvent | None:
             message=f"Hive stream started · {event.first_byte_ms / 1000:.1f}s",
         )
     if event.type == "provider.failed":
-        return StreamEvent(type="error", message=event.message)
+        return StreamEvent(type="error", message="The research provider failed.")
     if event.type == "tool.started":
         return StreamEvent(
             type="tool_status",
@@ -140,7 +163,7 @@ def _to_sse_event(event: ResearchEvent) -> StreamEvent | None:
             tool_id=event.tool_id,
             tool_name=event.tool,
             status="error",
-            message=event.message,
+            message="The research tool failed.",
         )
     if event.type == "approval.requested":
         return StreamEvent(
@@ -149,7 +172,7 @@ def _to_sse_event(event: ResearchEvent) -> StreamEvent | None:
     if event.type == "clarification.requested":
         return StreamEvent(type="clarification_required", message=event.prompt)
     if event.type == "run.failed":
-        return StreamEvent(type="error", message=event.message)
+        return StreamEvent(type="error", message="The research request failed.")
     if event.type == "run.cancelled":
         return StreamEvent(type="run_cancelled", message=event.reason)
     if event.type == "run.completed":

@@ -7,6 +7,7 @@ import random
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 import httpx
@@ -14,6 +15,8 @@ from app.config import settings
 from app.core.circuit_breaker import CircuitBreaker
 from app.core.model_stream import get_public_token_sink
 from app.models.request_models import Message
+from app.observability.provider_archive import ProviderArchive, ProviderSnapshot
+from app.observability.provider_metrics import ProviderMetrics
 from app.services.llm_interface import LLMServiceInterface
 
 logger = logging.getLogger(__name__)
@@ -83,11 +86,14 @@ class HiveService(LLMServiceInterface):
         *,
         retry_policy: HiveRetryPolicy | None = None,
         circuit_breaker: CircuitBreaker | None = None,
+        provider_archive: ProviderArchive | None = None,
     ) -> None:
         self.base_url = str(settings.HIVE_BASE_URL).rstrip("/")
         self.api_key = settings.HIVE_API_KEY
         self.default_model = str(settings.HIVE_MODEL)
         self.last_telemetry: dict[str, Any] = {}
+        self.provider_archive = provider_archive
+        self.metrics = ProviderMetrics()
         self.retry_policy = retry_policy or HiveRetryPolicy(
             max_retries=settings.HIVE_MAX_RETRIES,
             total_budget_seconds=settings.HIVE_TIMEOUT,
@@ -179,14 +185,16 @@ class HiveService(LLMServiceInterface):
         reasoning_chars = 0
         public_token_chars = 0
         emitted_tool_call = False
+        raw_events: list[dict[str, Any]] = []
         while True:
             first_token_at: float | None = None
             usage: dict[str, Any] = {}
             attempt = retries + 1
-            yield {
+            attempt_event = {
                 "event": "provider_attempt_started",
                 "data": {"attempt": attempt, "provider": "hive"},
             }
+            yield attempt_event
             try:
                 remaining = request_deadline - time.perf_counter()
                 if remaining <= 0:
@@ -221,7 +229,7 @@ class HiveService(LLMServiceInterface):
                                         "Hive request budget exhausted during retry"
                                     )
                                 retries += 1
-                                yield {
+                                retry_event = {
                                     "event": "provider_retrying",
                                     "data": {
                                         "attempt": attempt,
@@ -230,6 +238,8 @@ class HiveService(LLMServiceInterface):
                                         "reason": f"HTTP {response.status_code}",
                                     },
                                 }
+                                raw_events.append(retry_event)
+                                yield retry_event
                                 await asyncio.sleep(delay)
                                 continue
                             yield {
@@ -257,7 +267,7 @@ class HiveService(LLMServiceInterface):
                                 break
                             if not stream_started_emitted:
                                 stream_started_emitted = True
-                                yield {
+                                stream_event = {
                                     "event": "provider_stream_started",
                                     "data": {
                                         "attempt": attempt,
@@ -266,11 +276,14 @@ class HiveService(LLMServiceInterface):
                                         ),
                                     },
                                 }
+                                raw_events.append(stream_event)
+                                yield stream_event
                             parsed = self.parse_sse_line(line)
                             if not parsed:
                                 continue
                             if parsed["event"] == "usage":
                                 usage = parsed["data"]
+                                raw_events.append(parsed)
                                 yield parsed
                             elif parsed["event"] == "token":
                                 first_token_at = first_token_at or time.perf_counter()
@@ -289,9 +302,11 @@ class HiveService(LLMServiceInterface):
                                     # Let the orchestrator and terminal consume this
                                     # chunk before the provider reads the next one.
                                     await asyncio.sleep(0)
+                                raw_events.append(parsed)
                                 yield parsed
                             elif parsed["event"] == "done":
                                 saw_done = True
+                                raw_events.append(parsed)
                                 yield parsed
                                 break
                             elif parsed["event"] == "chunk":
@@ -308,6 +323,7 @@ class HiveService(LLMServiceInterface):
                                     )
                                 if isinstance(delta, dict) and delta.get("tool_calls"):
                                     emitted_tool_call = True
+                                raw_events.append(parsed)
                                 yield parsed
                         if not saw_done:
                             raise HiveProviderError("incomplete Hive SSE stream")
@@ -329,6 +345,22 @@ class HiveService(LLMServiceInterface):
                     "reasoning_chars": reasoning_chars,
                     "usage": usage,
                 }
+                if self.provider_archive is not None:
+                    snapshot = self.provider_archive.store(
+                        ProviderSnapshot(
+                            provider="hive",
+                            operation="model_stream",
+                            payload=raw_events,
+                            fetched_at=datetime.now(UTC),
+                        )
+                    )
+                    self.last_telemetry["snapshot_hash"] = snapshot.content_hash
+                self.metrics.record(
+                    status="completed",
+                    latency_ms=self.last_telemetry["request_latency_ms"],
+                    timeout=False,
+                    partial=bool(streamed_token_count and not saw_done),
+                )
                 self._circuit.record_success()
                 yield {
                     "event": "provider_completed",
@@ -340,6 +372,20 @@ class HiveService(LLMServiceInterface):
                 }
                 return
             except (TimeoutError, httpx.TimeoutException, httpx.TransportError) as exc:
+                latency_ms = round((time.perf_counter() - started) * 1000, 2)
+                self.last_telemetry = {
+                    "model_id": self._model(model),
+                    "request_latency_ms": latency_ms,
+                    "provider_status": "failed",
+                    "timeout": isinstance(exc, (TimeoutError, httpx.TimeoutException)),
+                    "partial_output": bool(streamed_token_count or emitted_tool_call),
+                }
+                self.metrics.record(
+                    status="failed",
+                    latency_ms=latency_ms,
+                    timeout=self.last_telemetry["timeout"],
+                    partial=self.last_telemetry["partial_output"],
+                )
                 if streamed_token_count or emitted_tool_call:
                     raise HiveProviderError(
                         "Hive transport failed after the response had started"
@@ -370,7 +416,21 @@ class HiveService(LLMServiceInterface):
                     },
                 }
                 raise HiveProviderError(f"Hive transport failure: {exc}") from exc
-            except HiveProviderError:
+            except HiveProviderError as exc:
+                latency_ms = round((time.perf_counter() - started) * 1000, 2)
+                self.last_telemetry = {
+                    "model_id": self._model(model),
+                    "request_latency_ms": latency_ms,
+                    "provider_status": "failed",
+                    "timeout": "timeout" in str(exc).lower(),
+                    "partial_output": bool(streamed_token_count or emitted_tool_call),
+                }
+                self.metrics.record(
+                    status="failed",
+                    latency_ms=latency_ms,
+                    timeout=self.last_telemetry["timeout"],
+                    partial=self.last_telemetry["partial_output"],
+                )
                 self._circuit.record_failure()
                 raise
 

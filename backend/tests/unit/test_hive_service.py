@@ -5,6 +5,7 @@ import pytest
 from app.config import settings
 from app.core.circuit_breaker import CircuitBreaker, CircuitBreakerOpen
 from app.models.request_models import Message
+from app.observability.provider_archive import ProviderArchive
 from app.services.hive_service import (
     HiveProviderError,
     HiveRetryPolicy,
@@ -82,6 +83,35 @@ async def test_hive_reuses_injected_client_and_retries_504_before_streaming(
     ]
     await service.aclose()
     assert client.is_closed
+
+
+@pytest.mark.asyncio
+async def test_hive_archives_completed_raw_model_stream(tmp_path, monkeypatch) -> None:
+    monkeypatch.setattr(settings, "HIVE_API_KEY", "test-key")
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                200,
+                request=request,
+                content=b'data: {"choices":[{"delta":{"content":"ready"}}]}\n\ndata: [DONE]\n\n',
+            )
+        )
+    )
+    service = HiveService(client=client, provider_archive=ProviderArchive(tmp_path))
+
+    events = [
+        event
+        async for event in service._stream_request(
+            [Message(role="user", content="hello")], settings.HIVE_MODEL
+        )
+    ]
+
+    snapshot_hash = service.last_telemetry["snapshot_hash"]
+    snapshot = service.provider_archive.load(snapshot_hash)
+    assert snapshot.operation == "model_stream"
+    assert any(event["event"] == "token" for event in snapshot.payload)
+    assert events[-1]["event"] == "provider_completed"
+    await service.aclose()
 
 
 def test_hive_sse_parser_extracts_text_tool_calls_and_usage() -> None:

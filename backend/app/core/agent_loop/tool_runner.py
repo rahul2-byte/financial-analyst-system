@@ -6,8 +6,11 @@ from datetime import UTC, datetime
 from typing import Any
 
 import pandas as pd
+from app.config import settings
 from app.core.research_schemas import EvidenceProvenance
 from app.core.resources import RuntimeResources
+from app.observability.provider_archive import ProviderSnapshot
+from data.quality import compare_vendor_values
 from quant.fundamentals import FundamentalScanner
 from quant.indicators import TechnicalScanner
 
@@ -181,6 +184,15 @@ class FinancialToolRunner:
                 str(arguments.get("period", "1y")),
                 str(arguments.get("interval", "1d")),
             )
+            raw_value = value.get("provenance") if isinstance(value, dict) else None
+            raw_provenance = (
+                dict(raw_value)
+                if isinstance(raw_value, dict)
+                else _provider_provenance("historical_prices", ticker, None)
+            )
+            self._archive("fetch_stock_price", value, raw_provenance)
+            if isinstance(value, dict):
+                value["provenance"] = raw_provenance
             rows = value.get("data") if isinstance(value, dict) else None
             if not rows:
                 return {
@@ -188,6 +200,20 @@ class FinancialToolRunner:
                     "error": "No evidence returned for data:fetch_stock_data",
                 }
             issues = value.get("quality_issues", []) if isinstance(value, dict) else []
+            vendor_values = (
+                value.get("vendor_values") if isinstance(value, dict) else None
+            )
+            if isinstance(vendor_values, dict):
+                issues = [
+                    *issues,
+                    *(
+                        issue.model_dump(mode="json")
+                        for issue in compare_vendor_values(
+                            vendor_values,
+                            max_relative_difference=settings.VENDOR_MAX_RELATIVE_DIFFERENCE,
+                        )
+                    ),
+                ]
             if any(
                 isinstance(issue, dict) and issue.get("blocking", True)
                 for issue in issues
@@ -203,6 +229,7 @@ class FinancialToolRunner:
                 str(value.get("interval", arguments.get("interval", "1d"))),
             )
             self._ohlcv_by_request[(ticker, period, interval)] = rows
+            provenance = dict(value.get("provenance") or raw_provenance)
             result = {
                 "ticker": ticker,
                 "period": period,
@@ -211,10 +238,7 @@ class FinancialToolRunner:
                 "period_return_pct": _period_return_pct(rows[0], rows[-1]),
                 "first": rows[0],
                 "latest": rows[-1],
-                "provenance": value.get("provenance")
-                or _provider_provenance(
-                    "historical_prices", ticker, _row_timestamp(rows[-1])
-                ),
+                "provenance": provenance,
             }
             return {"success": True, "data": result, "provenance": result["provenance"]}
 
@@ -236,8 +260,6 @@ class FinancialToolRunner:
             ]
         else:
             return {"success": False, "error": f"Unknown tool: {name}"}
-        if not value:
-            return {"success": False, "error": f"No evidence returned for {name}"}
         dataset = (
             "fundamentals_snapshot"
             if name == "data:fetch_fundamentals"
@@ -249,7 +271,28 @@ class FinancialToolRunner:
             _news_timestamp(value),
             "degraded" if name == "data:fetch_fundamentals" else "verified",
         )
+        self._archive(
+            name.removeprefix("data:").removeprefix("news:"), value, provenance
+        )
+        if not value:
+            return {"success": False, "error": f"No evidence returned for {name}"}
         return {"success": True, "data": value, "provenance": provenance}
+
+    def _archive(
+        self, operation: str, payload: Any, provenance: dict[str, Any]
+    ) -> None:
+        archive = self.resources.provider_archive
+        if archive is None:
+            return
+        stored = archive.store(
+            ProviderSnapshot(
+                provider=str(provenance.get("source", "unknown")),
+                operation=operation,
+                payload=payload,
+                fetched_at=datetime.now(UTC),
+            )
+        )
+        provenance["snapshot_hash"] = stored.content_hash
 
 
 def _provider_provenance(
@@ -267,6 +310,11 @@ def _provider_provenance(
         ingested_at=datetime.now(UTC),
         version="yfinance-live-v1",
         quality_status=quality_status,
+        currency="INR" if instrument.endswith((".NS", ".BO")) else None,
+        timezone="Asia/Kolkata" if instrument.endswith((".NS", ".BO")) else "UTC",
+        adjustment="unadjusted" if dataset == "historical_prices" else None,
+        as_of=observed,
+        source_url="https://finance.yahoo.com",
     ).model_dump(mode="json")
 
 
