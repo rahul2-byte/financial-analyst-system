@@ -16,7 +16,10 @@ class FakeFetcher:
             "ticker": ticker,
             "period": period,
             "interval": interval,
-            "data": [{"Close": 10}, {"Close": 12}],
+            "data": [
+                {"Open": 10, "High": 11, "Low": 9, "Close": 10, "Volume": 100},
+                {"Open": 11, "High": 13, "Low": 10, "Close": 12, "Volume": 120},
+            ],
         }
 
     def fetch_company_fundamentals(self, ticker: str) -> dict:
@@ -44,6 +47,7 @@ def test_definitions_are_the_current_finite_tool_surface() -> None:
         "news:fetch_news",
         "analysis:run_fundamental_scan",
         "analysis:run_technical_scan",
+        "analysis:get_technical_overview",
         "interaction:ask_user",
     }
 
@@ -56,6 +60,131 @@ async def test_stock_data_returns_summary_and_caches_for_analysis() -> None:
     assert result["data"]["period_return_pct"] == 20.0
     await tool_runner.execute("analysis:run_technical_scan", {"ticker": "ABC"})
     assert [call[0] for call in fetcher.calls] == ["price"]
+
+
+@pytest.mark.asyncio
+async def test_stock_data_prefers_valid_upstox_daily_candles() -> None:
+    class FakeUpstox:
+        def resolve_instrument(self, ticker: str) -> list[dict]:
+            assert ticker == "ABC.NS"
+            return [{"instrument_key": "NSE_EQ|ABC"}]
+
+        def fetch_candles(self, instrument_key, *, start, end) -> list[dict]:
+            assert instrument_key == "NSE_EQ|ABC"
+            assert start < end
+            return [
+                {
+                    "timestamp": "2026-09-16T00:00:00+05:30",
+                    "open": 10,
+                    "high": 11,
+                    "low": 9,
+                    "close": 10,
+                    "volume": 100,
+                },
+                {
+                    "timestamp": "2026-09-17T00:00:00+05:30",
+                    "open": 10,
+                    "high": 13,
+                    "low": 10,
+                    "close": 12,
+                    "volume": 120,
+                },
+            ]
+
+    fetcher = FakeFetcher()
+    tool_runner = FinancialToolRunner(
+        RuntimeResources(
+            llm_service=object(), yf_fetcher=fetcher, upstox_fetcher=FakeUpstox()
+        )
+    )
+
+    result = await tool_runner.execute("data:fetch_stock_data", {"ticker": "ABC.NS"})
+
+    assert result["success"] is True
+    assert result["provenance"]["source"] == "upstox"
+    assert result["data"]["period_return_pct"] == 20.0
+    assert fetcher.calls == []
+
+
+@pytest.mark.asyncio
+async def test_fundamentals_prefer_upstox_when_an_isin_is_resolved() -> None:
+    class FakeUpstox:
+        def resolve_instrument(self, ticker: str) -> list[dict]:
+            assert ticker == "ABC.NS"
+            return [{"isin": "INE000A00000"}]
+
+        def fetch_fundamentals(self, isin: str) -> dict:
+            assert isin == "INE000A00000"
+            return {"source": "upstox", "peRatio": 12.5, "returnOnEquity": 0.2}
+
+    fetcher = FakeFetcher()
+    tool_runner = FinancialToolRunner(
+        RuntimeResources(
+            llm_service=object(), yf_fetcher=fetcher, upstox_fetcher=FakeUpstox()
+        )
+    )
+
+    result = await tool_runner.execute("data:fetch_fundamentals", {"ticker": "ABC.NS"})
+
+    assert result["success"] is True
+    assert result["data"]["peRatio"] == 12.5
+    assert result["provenance"]["source"] == "upstox"
+    assert result["provenance"]["quality_status"] == "verified"
+    assert fetcher.calls == []
+
+
+@pytest.mark.asyncio
+async def test_news_prefers_upstox_and_retains_article_citations() -> None:
+    class FakeUpstox:
+        def resolve_instrument(self, ticker: str) -> list[dict]:
+            assert ticker == "ABC.NS"
+            return [{"instrument_key": "NSE_EQ|ABC"}]
+
+        def fetch_news(self, keys: list[str], *, page_size: int) -> dict:
+            assert keys == ["NSE_EQ|ABC"]
+            assert page_size == 10
+            return {
+                "data": {
+                    "NSE_EQ|ABC": [
+                        {
+                            "heading": "ABC announces results",
+                            "article_link": "https://news.example/abc-results",
+                            "summary": "Results summary",
+                            "published_time": "2026-09-17T00:00:00+05:30",
+                        }
+                    ]
+                }
+            }
+
+    fetcher = FakeFetcher()
+    tool_runner = FinancialToolRunner(
+        RuntimeResources(
+            llm_service=object(), yf_fetcher=fetcher, upstox_fetcher=FakeUpstox()
+        )
+    )
+
+    result = await tool_runner.execute("news:fetch_news", {"ticker": "ABC.NS"})
+
+    assert result["success"] is True
+    assert result["provenance"]["source"] == "upstox"
+    assert result["sources"] == [
+        {"name": "news.example", "url": "https://news.example/abc-results"}
+    ]
+    assert fetcher.calls == []
+
+
+@pytest.mark.asyncio
+async def test_cached_technical_analysis_retains_market_data_provenance() -> None:
+    tool_runner, _ = runner()
+
+    await tool_runner.execute("data:fetch_stock_data", {"ticker": "ABC"})
+    result = await tool_runner.execute(
+        "analysis:get_technical_overview", {"ticker": "ABC"}
+    )
+
+    assert result["success"] is True
+    assert result["provenance"]["source"] == "yfinance"
+    assert result["provenance"]["source_url"] == "https://finance.yahoo.com"
 
 
 @pytest.mark.asyncio
@@ -76,7 +205,7 @@ async def test_stock_data_archives_the_provider_payload_before_returning_evidenc
     snapshot_hash = result["provenance"]["snapshot_hash"]
     archived = tool_runner.resources.provider_archive.load(snapshot_hash)
     assert archived.operation == "fetch_stock_price"
-    assert archived.payload["data"] == [{"Close": 10}, {"Close": 12}]
+    assert archived.payload["data"][0]["Close"] == 10
 
 
 @pytest.mark.asyncio

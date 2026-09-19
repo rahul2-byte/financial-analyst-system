@@ -8,9 +8,24 @@ from uuid import UUID
 
 from app.config import settings
 from app.core.agent_loop import AgentLoop, AgentLoopConfig, FinancialToolRunner
+from app.core.query_scope import normalize_research_scope
 from app.core.resources import RuntimeResources
+from app.core.skills import SkillRegistry
 from app.events.models import ResearchEvent
 from app.models.request_models import Message
+
+
+def _wants_report(query: str) -> bool:
+    lowered = query.casefold().strip()
+    return lowered.startswith(("analyze ", "analyse ", "research ", "compare ")) or any(
+        marker in lowered
+        for marker in (
+            "report",
+            "investment thesis",
+            "full analysis",
+            "detailed analysis",
+        )
+    )
 
 
 class ResearchRunner:
@@ -32,7 +47,6 @@ class ResearchRunner:
         message_writer: Callable[[Message], None] | None = None,
     ) -> AsyncIterator[ResearchEvent]:
         """Yield events for ``query`` while keeping construction out of the session."""
-        del query
         runtime = AgentLoop(
             self.hive_service,
             self.tool_runner,
@@ -40,8 +54,10 @@ class ResearchRunner:
                 mode=self.mode,
                 model=settings.HIVE_MODEL,
                 max_tokens=settings.HIVE_MAX_OUTPUT_TOKENS,
-                publish_reports=True,
+                report_max_tokens=settings.HIVE_MAX_REPORT_TOKENS,
+                publish_reports=_wants_report(normalize_research_scope(query)),
             ),
+            skill_registry=SkillRegistry.bundled(),
         )
         async for event in runtime.run(
             history,

@@ -2,21 +2,25 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import logging
 from collections.abc import AsyncIterator
 from hmac import compare_digest
+from pathlib import Path
 from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 
 from app.config import settings
 from app.core.agent_loop import AgentLoop, AgentLoopConfig, FinancialToolRunner
+from app.core.query_scope import normalize_research_scope
 from app.core.resources import build_runtime_resources
 from app.core.skills import SkillRegistry
 from app.events.models import ResearchEvent
-from app.models.request_models import ChatRequest
+from app.models.request_models import ChatRequest, Message
 from app.models.response_models import StreamEvent
 from fastapi import APIRouter, Header, HTTPException
 from fastapi.responses import StreamingResponse
+from finai.session_store import SessionStore
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
@@ -30,10 +34,42 @@ def _runtime(request: ChatRequest) -> AgentLoop:
         config=AgentLoopConfig(
             model=request.model or settings.HIVE_MODEL,
             max_tokens=request.max_tokens or settings.HIVE_MAX_OUTPUT_TOKENS,
+            report_max_tokens=settings.HIVE_MAX_REPORT_TOKENS,
             mode="autonomous",
-            publish_reports=request.publish_report,
+            publish_reports=request.publish_report or _requires_report(request),
         ),
         skill_registry=SkillRegistry.bundled(),
+    )
+
+
+def _requires_report(request: ChatRequest) -> bool:
+    query = next(
+        (
+            message.content
+            for message in reversed(request.messages)
+            if message.role == "user"
+        ),
+        "",
+    )
+    lowered = normalize_research_scope(query).casefold()
+    return any(
+        marker in lowered
+        for marker in (
+            "analyse ",
+            "analyze ",
+            "research ",
+            "investment thesis",
+            "technical analysis",
+            "fundamental analysis",
+            "financial analysis",
+            "rsi",
+            "macd",
+            "valuation",
+            "sentiment",
+            "news",
+            "stock",
+            "company",
+        )
     )
 
 
@@ -68,14 +104,21 @@ async def chat_endpoint(
         raise HTTPException(status_code=400, detail="No user message found.")
 
     session_id = request.session_id or uuid4().hex
+    storage_id = hashlib.sha256(f"{owner}:{session_id}".encode()).hexdigest()[:32]
+    store = SessionStore(Path(settings.HTTP_SESSION_ROOT), storage_id)
+    history = store.load_history()
+    history.append(Message(role="user", content=user_query))
+    store.append_message(history[-1])
 
     async def event_generator() -> AsyncIterator[str]:
         yield ": " + (" " * 1024) + "\n\n"
         request_id = uuid4().hex
         try:
             events = _runtime(request).run(
-                request.messages,
+                history,
                 conversation_id=_conversation_id(owner, session_id),
+                checkpoint_writer=store.write_checkpoint,
+                message_writer=store.append_message,
             )
             async for event in events:
                 safe_event = _to_sse_event(event)
@@ -165,6 +208,8 @@ def _to_sse_event(event: ResearchEvent) -> StreamEvent | None:
             status="error",
             message="The research tool failed.",
         )
+    if event.type == "sources.updated":
+        return StreamEvent(type="final_payload", data={"sources": event.sources})
     if event.type == "approval.requested":
         return StreamEvent(
             type="approval_required", message=event.prompt, data=event.details
@@ -176,5 +221,11 @@ def _to_sse_event(event: ResearchEvent) -> StreamEvent | None:
     if event.type == "run.cancelled":
         return StreamEvent(type="run_cancelled", message=event.reason)
     if event.type == "run.completed":
-        return StreamEvent(type="done", data={"status": event.terminal_status})
+        return StreamEvent(
+            type="done",
+            data={
+                "status": event.terminal_status,
+                "run_id": str(event.meta.run_id),
+            },
+        )
     return None

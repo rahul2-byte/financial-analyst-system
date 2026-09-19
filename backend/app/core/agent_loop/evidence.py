@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from datetime import datetime
 from typing import Any
 
@@ -15,6 +16,7 @@ _EVIDENCE_TOOLS = {
     "news:fetch_news",
     "analysis:run_fundamental_scan",
     "analysis:run_technical_scan",
+    "analysis:get_technical_overview",
 }
 _PROVENANCE_REQUIRED_TOOLS = {
     "data:fetch_stock_data",
@@ -64,13 +66,16 @@ def extract_evidence_facts(payload: dict[str, Any]) -> dict[str, EvidenceFact]:
         return {}
     facts: dict[str, EvidenceFact] = {}
 
+    def safe_path(value: str) -> str:
+        return re.sub(r"[^a-zA-Z0-9_.:-]+", "_", value).strip("_") or "field"
+
     def visit(value: Any, path: str) -> None:
         if isinstance(value, bool):
             return
         if isinstance(value, (int, float)):
             if isinstance(value, float) and not math.isfinite(value):
                 return
-            fact_id = f"{source_id}:{path}"
+            fact_id = f"{source_id}:{safe_path(path)}"
             facts[fact_id] = EvidenceFact(
                 fact_id=fact_id,
                 value=value,
@@ -79,6 +84,7 @@ def extract_evidence_facts(payload: dict[str, Any]) -> dict[str, EvidenceFact]:
                 instrument=instrument,
                 observed_at=observed,
                 quality_status="verified",
+                source_url=str(provenance.get("source_url") or "") or None,
             )
         elif isinstance(value, dict):
             for key, item in value.items():

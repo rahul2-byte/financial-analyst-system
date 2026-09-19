@@ -15,7 +15,7 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
   - `quant/`: Deterministic logic for financial indicators and scanners.
   - `app/`: Core services, routes (`/api/chat`, `/api/health`), and Pydantic config.
   - `.finai/`: Local run artifacts; provider results remain in current graph state.
-- **`ai_engineering/`**: Governance layer containing `PROJECT_CONSTITUTION.md` and `CODING_STANDARDS.md`.
+- **`AGENTS.md`**: Repository engineering and compliance guidance.
 
 ---
 
@@ -74,7 +74,7 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
 ## 6. Integrity Rules (Constitution)
 - **Rule #1**: LLM reasoning != Computation. Keep them strictly separate.
 - **Rule #2**: All data sources must define: **Fetch, Validate, Normalize, Store**.
-- **Rule #3**: No architectural drift. Check `ai_engineering/` before changing patterns.
+- **Rule #3**: No architectural drift. Check the repository architecture and existing implementation before changing patterns.
 - **Rule #4**: No secrets in source. Use `.env` and `app.config.settings`.
 - **Rule #5**: All data used for investment theses must be verified and deterministic.
 - **Rule #6**: Market data must be normalized to standard SI units and ISO currency codes.
@@ -95,7 +95,7 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
 
 ## 8. Development Boot Sequence
 Before submitting any code changes, agents must:
-1. **Load Context**: Read `PROJECT_CONSTITUTION.md`, `CODING_STANDARDS.md`, `AGENT_RULES.md`, and **Section 9 (Behavioral Guidelines)**.
+1. **Load Context**: Read this file and the relevant repository source, tests, configuration, and architecture references.
 2. **Verify Patterns**: Use `glob`/`grep` to find existing implementations of similar logic.
 3. **Plan & Summarize**: Summarize current task and identify impacted modules before writing code.
 4. **TDD**: Write unit tests for new quant logic or tools BEFORE implementation.

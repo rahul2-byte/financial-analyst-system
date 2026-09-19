@@ -27,14 +27,17 @@ class ModelStreaming:
         client: Any,
         model: str,
         max_tokens: int,
-        publish_reports: bool,
         tool_definitions: Callable[[], list[dict[str, Any]]],
+        *,
+        publish_reports: bool = False,
+        report_max_tokens: int = 8192,
     ) -> None:
         self._client = client
         self._model = model
         self._max_tokens = max_tokens
-        self._publish_reports = publish_reports
         self._tool_definitions = tool_definitions
+        self._publish_reports = publish_reports
+        self._report_max_tokens = report_max_tokens
 
     async def stream(
         self, messages: list[Message], factory: EventFactory, round_number: int
@@ -47,7 +50,10 @@ class ModelStreaming:
             self._model,
             tools=self._tool_definitions(),
             max_tokens=(
-                self._max_tokens
+                self._report_max_tokens
+                if self._publish_reports
+                and any(message.role == "tool" for message in messages)
+                else self._max_tokens
                 if any(message.role == "tool" for message in messages)
                 else min(self._max_tokens, 512)
             ),
@@ -123,6 +129,5 @@ class ModelStreaming:
             if not part:
                 continue
             text.append(part)
-            if not self._publish_reports:
-                yield factory.make(TextDelta, text=part)
+            yield factory.make(TextDelta, text=part)
             await asyncio.sleep(0)

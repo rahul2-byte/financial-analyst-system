@@ -17,6 +17,7 @@ class DataQualityIssue(BaseModel):
         "DUPLICATE_TIMESTAMP",
         "INVALID_TIMEZONE",
         "INVALID_PRICE",
+        "INVALID_OHLC",
         "INSTRUMENT_MISMATCH",
         "NON_FINITE_VALUE",
         "STALE_DATA",
@@ -49,7 +50,13 @@ def validate_market_records(
                     code="MISSING_FIELD", message=f"row {index} missing {missing}"
                 )
             )
-        timestamp = record.get("Date", record.get("Datetime", record.get("date")))
+        timestamp = record.get(
+            "Date",
+            record.get(
+                "Datetime",
+                record.get("date", record.get("datetime", record.get("timestamp"))),
+            ),
+        )
         if timestamp is not None:
             key = str(timestamp)
             if key in seen_timestamps:
@@ -84,6 +91,24 @@ def validate_market_records(
                             message=f"row {index} has non-positive {field}",
                         )
                     )
+        values = [record.get(field) for field in ("open", "high", "low", "close")]
+        if all(
+            isinstance(value, (int, float)) and isfinite(float(value))
+            for value in values
+        ):
+            numeric_values = [
+                float(value) for value in values if isinstance(value, (int, float))
+            ]
+            open_value, high_value, low_value, close_value = numeric_values
+            if high_value < max(open_value, close_value) or low_value > min(
+                open_value, close_value
+            ):
+                issues.append(
+                    DataQualityIssue(
+                        code="INVALID_OHLC",
+                        message=f"row {index} has impossible OHLC bounds",
+                    )
+                )
         volume = record.get("volume")
         if isinstance(volume, (int, float)) and not isfinite(float(volume)):
             issues.append(

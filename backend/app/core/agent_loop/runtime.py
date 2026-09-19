@@ -18,13 +18,14 @@ from app.core.agent_loop.publication import (
     PublicationError,
     parse_report_draft,
     publish_report,
+    report_repair_instruction,
+    report_validation_fallback,
 )
 from app.core.agent_loop.terminal_state import terminal_status
 from app.core.agent_loop.tool_execution import ToolExecutor
 from app.core.diagnostics import diagnostic_payload, diagnostics_enabled
 from app.core.skills import SkillPackage, SkillRegistry
 from app.events.models import (
-    ApprovalRequested,
     ClarificationRequested,
     EventFactory,
     ModelRequestStarted,
@@ -49,6 +50,7 @@ from app.events.models import (
     ToolStarted,
 )
 from app.models.request_models import Message
+from app.security.policy import redact_secrets
 
 logger = logging.getLogger(__name__)
 
@@ -58,14 +60,14 @@ _EVIDENCE_TOOLS = {
     "news:fetch_news",
     "analysis:run_fundamental_scan",
     "analysis:run_technical_scan",
+    "analysis:get_technical_overview",
 }
 _PARTIAL_RESPONSE_MIN_CHARS = 200
 _EVIDENCE_REQUIRED_SKILLS = {
     "fundamental-analysis",
     "technical-analysis",
-    "research-planning",
-    "report-writing",
-    "report-review",
+    "equity-research",
+    "report-synthesis",
 }
 
 
@@ -92,6 +94,7 @@ class AgentLoopConfig:
     model: str = "reasoning"
     mode: str = "guided"
     max_tokens: int = 2048
+    report_max_tokens: int = 8192
     publish_reports: bool = False
 
 
@@ -132,10 +135,18 @@ class AgentLoop:
                 Message(
                     role="system",
                     content=(
-                        "Report mode: return only a JSON object matching the structured report schema. "
-                        "Use citations that name source_id values from successful evidence tools. "
+                        "Report mode: call research tools before writing conclusions. "
+                        "Return only one JSON object with these fields: "
+                        "executive_summary (string), key_drivers (nonempty string list), "
+                        "detailed_analysis (string), risks (nonempty string list), "
+                        "final_view (string), claims (nonempty list of objects with "
+                        "claim_id, text, importance, evidence_refs, numeric_refs), "
+                        "and citations (list of objects with citation_id, source_id). "
+                        "importance is major, supporting, or minor. Every major claim "
+                        "must reference a citation_id. Each citation source_id must match "
+                        "a verified tool source_id. "
                         "For every numeric statement, use a marker exactly like [[fact:DATASET:data.path]] "
-                        "and list that fact ID in numeric_refs. Do not write any other digits."
+                        "and list that fact ID in numeric_refs. Do not write other digits in report prose."
                     ),
                 )
             )
@@ -144,7 +155,10 @@ class AgentLoop:
         successful_tools = 0
         evidence = EvidenceAccounting()
         evidence_warning_added = False
-        tool_executor = ToolExecutor(self.tool_runner)
+        report_repair_attempted = False
+        tool_executor = ToolExecutor(
+            self.tool_runner, self._allowed_tool_names(selected_skills)
+        )
         completed_tool_ids = {
             message.tool_call_id
             for message in history
@@ -260,22 +274,40 @@ class AgentLoop:
                         partial_provider_response=assistant.name
                         == "partial_provider_response",
                     )
-                    if self.config.publish_reports and status == "success":
-                        try:
-                            published = publish_report(
-                                parse_report_draft(assistant.content), evidence.facts
-                            )
-                        except PublicationError:
-                            published = (
-                                "The report was held for review because its structured "
-                                "claims or evidence could not be verified."
-                            )
-                            status = "needs_review"
-                        else:
-                            if message_writer:
-                                message_writer(
-                                    Message(role="assistant", content=published)
+                    if self.config.publish_reports:
+                        if status == "success":
+                            try:
+                                published = publish_report(
+                                    parse_report_draft(assistant.content),
+                                    evidence.facts,
                                 )
+                            except PublicationError as exc:
+                                logger.warning(
+                                    "report publication validation failed: %s", exc
+                                )
+                                if evidence.facts and not report_repair_attempted:
+                                    history.append(
+                                        Message(
+                                            role="system",
+                                            content=report_repair_instruction(
+                                                evidence.facts, exc.reasons
+                                            ),
+                                        )
+                                    )
+                                    report_repair_attempted = True
+                                    continue
+                                published = report_validation_fallback(
+                                    evidence.facts, exc.reasons
+                                )
+                                status = (
+                                    "partial" if evidence.facts else "insufficient_data"
+                                )
+                        else:
+                            published = report_validation_fallback(
+                                evidence.facts, ("provider_response_partial",)
+                            )
+                        if message_writer:
+                            message_writer(Message(role="assistant", content=published))
                         for offset in range(0, len(published), 64):
                             yield factory.make(
                                 TextDelta, text=published[offset : offset + 64]
@@ -358,27 +390,6 @@ class AgentLoop:
                             )
                         yield factory.make(ClarificationRequested, prompt=question)
                         return
-                    if self._needs_approval(name, call_id, approved):
-                        if checkpoint_writer:
-                            checkpoint_writer(
-                                {
-                                    "messages": [
-                                        message.model_dump(mode="json")
-                                        for message in history
-                                    ],
-                                    "tool_call_id": call_id,
-                                    "tool_name": name,
-                                    "arguments": arguments,
-                                    "status": "awaiting_approval",
-                                }
-                            )
-                        yield factory.make(
-                            ApprovalRequested,
-                            prompt=f"FIN-AI wants to run {name}.",
-                            details=json.dumps(arguments, sort_keys=True),
-                        )
-                        return
-
                     yield factory.make(ToolStarted, tool=name, tool_id=call_id)
                     yield factory.make(
                         ToolProgress,
@@ -413,9 +424,12 @@ class AgentLoop:
                         )
 
                     if payload.get("success", True) is False:
-                        failed_tools += 1
+                        if not payload.get("retryable", False):
+                            failed_tools += 1
                         evidence.record_failure(name, payload)
-                        message = str(payload.get("error", "tool failed"))
+                        message = str(
+                            redact_secrets(payload.get("error", "tool failed"))
+                        )
                         if (
                             name in _EVIDENCE_TOOLS
                             and not payload.get("retryable", False)
@@ -438,12 +452,22 @@ class AgentLoop:
                         history.append(
                             Message(
                                 role="tool",
-                                content=json.dumps(payload, default=str),
+                                content=_tool_message_content(payload),
                                 tool_call_id=call_id,
                             )
                         )
                         if message_writer:
                             message_writer(history[-1])
+                        if payload.get("retryable", False):
+                            history.append(
+                                Message(
+                                    role="system",
+                                    content=(
+                                        "Tool arguments were rejected. Retry the same tool with "
+                                        "valid arguments before writing an answer."
+                                    ),
+                                )
+                            )
                         yield factory.make(
                             ToolFailed, tool=name, tool_id=call_id, message=message
                         )
@@ -453,7 +477,7 @@ class AgentLoop:
                         history.append(
                             Message(
                                 role="tool",
-                                content=json.dumps(payload, default=str),
+                                content=_tool_message_content(payload),
                                 tool_call_id=call_id,
                             )
                         )
@@ -509,17 +533,12 @@ class AgentLoop:
             "news:fetch_news",
             "analysis:run_fundamental_scan",
             "analysis:run_technical_scan",
+            "analysis:get_technical_overview",
             "interaction:ask_user",
         }
         if not skills:
-            return [
-                definition
-                for definition in definitions
-                if definition.get("function", {}).get("name") in base_tools
-            ]
+            return definitions
         allowed = {tool for skill in skills for tool in skill.manifest.allowed_tools}
-        if any(skill.manifest.id == "research-planning" for skill in skills):
-            allowed.update(base_tools)
         if not allowed:
             allowed = base_tools
         return [
@@ -527,6 +546,12 @@ class AgentLoop:
             for definition in definitions
             if definition.get("function", {}).get("name") in allowed
         ]
+
+    def _allowed_tool_names(self, skills: list[SkillPackage]) -> set[str]:
+        return {
+            str(definition.get("function", {}).get("name"))
+            for definition in self._tool_definitions(skills)
+        }
 
     async def _stream_model(
         self,
@@ -547,16 +572,12 @@ class AgentLoop:
             self.model_client,
             self.config.model,
             self.config.max_tokens,
-            self.config.publish_reports,
             lambda: self._tool_definitions(skills),
+            publish_reports=self.config.publish_reports,
+            report_max_tokens=self.config.report_max_tokens,
         )
         async for item in streamer.stream(messages, factory, round_number):
             yield item
-
-    def _needs_approval(self, name: str, call_id: str, approved: set[str]) -> bool:
-        if call_id in approved or self.config.mode == "autonomous":
-            return False
-        return name.split(":", 1)[0] in {"data", "news", "research", "market"}
 
     @staticmethod
     def _drain_input_queue(
@@ -602,13 +623,35 @@ def _summary(payload: dict[str, Any]) -> str:
     return "completed"
 
 
+def _tool_message_content(payload: dict[str, Any], *, max_chars: int = 7_500) -> str:
+    """Bound provider results before inserting them into model history."""
+    encoded = json.dumps(payload, default=str)
+    if len(encoded) <= max_chars:
+        return encoded
+    compact = {
+        "success": payload.get("success", True),
+        "truncated": True,
+        "summary": _summary(payload),
+        "provenance": payload.get("provenance"),
+    }
+    error = payload.get("error")
+    if error:
+        compact["error"] = error
+    return json.dumps(compact, default=str)
+
+
 def _extract_sources(payload: dict[str, Any]) -> list[dict[str, str]]:
     """Extract a small, presentation-safe source list from tool evidence."""
     candidates: Any = payload.get("sources")
     if candidates is None and isinstance(payload.get("provenance"), dict):
         source = payload["provenance"].get("source")
         if source:
-            candidates = [{"name": source}]
+            candidates = [
+                {
+                    "name": source,
+                    "url": payload["provenance"].get("source_url", ""),
+                }
+            ]
     if candidates is None and isinstance(payload.get("data"), dict):
         candidates = payload["data"].get("sources")
     if not isinstance(candidates, list):

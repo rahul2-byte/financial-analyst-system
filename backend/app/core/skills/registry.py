@@ -16,6 +16,19 @@ class SkillValidationError(ValueError):
     """A bundled skill is malformed or references files outside its package."""
 
 
+BUILTIN_TOOL_NAMES = frozenset(
+    {
+        "data:fetch_stock_data",
+        "analysis:get_technical_overview",
+        "data:fetch_fundamentals",
+        "news:fetch_news",
+        "analysis:run_fundamental_scan",
+        "analysis:run_technical_scan",
+        "interaction:ask_user",
+    }
+)
+
+
 class SkillManifest(BaseModel):
     model_config = ConfigDict(frozen=True)
 
@@ -54,10 +67,12 @@ class SkillRegistry:
     @classmethod
     def bundled(cls, root: Path | None = None) -> SkillRegistry:
         package_root = root or Path(__file__).resolve().parents[3] / "skills"
-        return cls.load(package_root)
+        return cls.load(package_root, registered_tools=BUILTIN_TOOL_NAMES)
 
     @classmethod
-    def load(cls, root: Path) -> SkillRegistry:
+    def load(
+        cls, root: Path, *, registered_tools: set[str] | frozenset[str] | None = None
+    ) -> SkillRegistry:
         if not root.is_dir():
             raise SkillValidationError(f"skill root does not exist: {root}")
         packages: dict[str, SkillPackage] = {}
@@ -72,6 +87,13 @@ class SkillRegistry:
                 referenced = _safe_child(path, relative)
                 if not referenced.is_file():
                     raise SkillValidationError(f"skill file does not exist: {relative}")
+            if registered_tools is not None:
+                unknown_tools = set(manifest.allowed_tools) - set(registered_tools)
+                if unknown_tools:
+                    names = ", ".join(sorted(unknown_tools))
+                    raise SkillValidationError(
+                        f"skill {manifest.id} references unknown tool(s): {names}"
+                    )
             digest = hashlib.sha256(skill_file.read_bytes()).hexdigest()
             packages[manifest.id] = SkillPackage(
                 manifest=manifest,
@@ -110,7 +132,7 @@ class SkillRegistry:
             "finance",
             "financial",
         }:
-            planning = self._skills.get("research-planning")
+            planning = self._skills.get("equity-research")
             if planning is not None:
                 ranked.append((1, planning.manifest.id, planning))
         ranked.sort(key=lambda item: (-item[0], item[1]))

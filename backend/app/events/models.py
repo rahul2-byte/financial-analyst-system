@@ -30,6 +30,7 @@ class RunCompleted(BaseModel):
     meta: EventMeta
     terminal_status: str
     duration_ms: float | None = None
+    artifact_path: str | None = None
 
 
 class RunFailed(BaseModel):

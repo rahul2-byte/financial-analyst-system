@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from app.config import settings
 from app.observability.provider_archive import ProviderArchive
 
 
@@ -16,6 +17,7 @@ class RuntimeResources:
     llm_service: Any
     yf_fetcher: Any
     provider_archive: ProviderArchive | None = None
+    upstox_fetcher: Any | None = None
 
 
 def build_runtime_resources(
@@ -52,8 +54,15 @@ def build_runtime_resources(
         from data.providers.yfinance import YFinanceFetcher
 
         yf_fetcher = YFinanceFetcher()
+    if settings.UPSTOX_ACCESS_TOKEN:
+        from data.providers.upstox import UpstoxFetcher
+
+        upstox_fetcher = UpstoxFetcher()
+    else:
+        upstox_fetcher = None
     return RuntimeResources(
         llm_service=llm_service,
         yf_fetcher=yf_fetcher,
         provider_archive=archive,
+        upstox_fetcher=upstox_fetcher,
     )

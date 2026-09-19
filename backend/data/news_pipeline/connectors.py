@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import UTC, datetime, timedelta
@@ -19,6 +20,7 @@ from data.news_pipeline.query_templates import (
     derive_company_aliases,
 )
 from data.news_pipeline.tinyfish_client import TinyFishSearchClient
+from data.providers.upstox import UpstoxError, UpstoxFetcher
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +39,8 @@ def _parse_datetime(value: Any) -> datetime | None:
         return value if value.tzinfo else value.replace(tzinfo=UTC)
     if isinstance(value, struct_time):
         return datetime(*value[:6], tzinfo=UTC)
+    if isinstance(value, (int, float)):
+        return datetime.fromtimestamp(value / 1000, tz=UTC)
     if isinstance(value, str):
         stripped = value.strip()
         if not stripped:
@@ -129,6 +133,55 @@ class BaseNewsConnector:
             response = await client.get(url, headers=headers)
             response.raise_for_status()
             return response
+
+
+class UpstoxNewsConnector:
+    """Adapt Upstox instrument news into the existing news pipeline contract."""
+
+    def __init__(self, fetcher: UpstoxFetcher | None = None) -> None:
+        self.fetcher = fetcher or UpstoxFetcher()
+
+    async def fetch(
+        self, company: CompanyContext, *, time_window_days: int
+    ) -> list[RawSearchResult]:
+        del time_window_days
+        keys = [company.nse_symbol or company.ticker]
+        try:
+            payload = await asyncio.to_thread(self.fetcher.fetch_news, keys)
+        except (UpstoxError, OSError):
+            logger.warning("Upstox news unavailable", extra={"ticker": company.ticker})
+            return []
+        data = payload.get("data", {}) if isinstance(payload, dict) else {}
+        results: list[RawSearchResult] = []
+        items = (
+            [item for group in data.values() for item in group]
+            if isinstance(data, dict)
+            else []
+        )
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            url = str(item.get("article_link") or "").strip()
+            title = str(item.get("heading") or "").strip()
+            if not url or not title:
+                continue
+            results.append(
+                RawSearchResult(
+                    ticker=company.ticker,
+                    company_name=company.company_name,
+                    market=company.market,
+                    title=title,
+                    url=url,
+                    source_domain=_source_domain(url),
+                    source_type="news",
+                    query_intent="company_news",
+                    search_provider="upstox",
+                    snippet=str(item.get("summary") or ""),
+                    author=str(item.get("author") or "") or None,
+                    publish_time=_parse_datetime(item.get("published_time")),
+                )
+            )
+        return results
 
 
 def _matches_company_terms(text: str, company: CompanyContext) -> bool:

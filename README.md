@@ -4,6 +4,13 @@ FIN-AI is a CLI-first, human-in-the-loop financial research workflow for NSE/BSE
 
 It produces research artifacts for review. It does not place trades, provide personalized advice, predict returns, or claim investment performance.
 
+Offline experiment and shadow-evaluation components live separately under
+`backend/experiments/`. They use frozen, hashed datasets, causal features,
+chronological out-of-sample splits, explicit transaction costs, and
+hypothetical fills only; they never place orders or alter the research CLI.
+Their command-line usage is documented in the package module help and covered
+by the offline experiment tests.
+
 ## Architecture
 
 ```text
@@ -38,7 +45,7 @@ uv run uvicorn app.main:app --reload
 PYTHONPATH=backend uv run python -m finai --replay-snapshots snapshots.json --plain "Analyze ABC"
 ```
 
-The CLI pauses for clarification and plan approval when the request is incomplete, ambiguous, unsafe, or missing required evidence. Press `Esc` to cancel an active run safely; use `/debug` and `/logs` to inspect the latest state and local artifacts. Context compaction is automatic at 90% of the configured 250K-token working budget.
+The CLI runs read-only research tools without approval and asks for clarification only when the request needs user input. Requested structured reports are validated before display; if validation fails, FIN-AI explains the evidence gap instead of showing unsupported claims. The saved run artifact path appears with the completed response. Press `Esc` to cancel an active run safely; use `/debug` and `/logs` to inspect local artifacts. Context compaction is automatic at 90% of the configured 250K-token working budget.
 
 ## Verification
 
@@ -53,7 +60,9 @@ Pytest is the regression suite, but live provider calls and the full suite are i
 
 ## Evaluation evidence
 
-Evaluation design and artifacts are in [`docs/evaluation-design.md`](docs/evaluation-design.md), [`docs/benchmark-report.md`](docs/benchmark-report.md), and [`evals/`](evals/). Scores are only reported when generated from a versioned local gold set and recorded run metadata. No benchmark result is claimed in this README until it exists.
+Evaluation fixtures and runners are in [`evals/`](evals/). Scores are only
+reported when generated from a versioned local gold set and recorded run
+metadata. No benchmark result is claimed in this README until it exists.
 
 ## Known limitations
 

@@ -1,13 +1,13 @@
 ---
 id: fundamental-analysis
-version: 1.0.0
-description: Analyze financial statements, earnings, growth, margins, valuation, and business quality from verified data.
-triggers: [fundamental, fundamentals, revenue, earnings, margin, valuation, financials, balance, income, cashflow, compare]
-inputs: [company identifiers, period, verified financial data]
-outputs: [evidence-backed findings, metric references, coverage gaps]
-allowed_tools: [data:fetch_fundamentals, data:fetch_stock_data, validation:validate_data]
+version: 2.0.0
+description: Interpret available company fundamentals and deterministic scans without inventing missing accounting context.
+triggers: [fundamental, fundamentals, revenue, earnings, margin, valuation, financials, balance, income, cashflow, debt, profitability]
+inputs: [ticker, reporting context]
+outputs: [available metrics, deterministic findings, source provenance, coverage gaps]
+allowed_tools: [data:fetch_fundamentals, analysis:run_fundamental_scan]
 scripts: []
 references: []
 ---
 
-Identify the reporting period and accounting basis before comparing companies. Use deterministic tool results for every number. Separate reported values from interpretation, flag unavailable periods, and never estimate a ratio in prose.
+Fetch fundamentals and run the deterministic scanner when usable provider metrics exist. Preserve reporting period, units, currency, and source. Distinguish reported values from interpretation; disclose missing statements or peer baselines. Never estimate a ratio, compare incompatible periods, or describe unavailable filings as if they were returned.

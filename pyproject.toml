@@ -17,6 +17,9 @@ dependencies = [
     "textual>=0.70.0",
     "uvicorn",
     "yfinance",
+    "TA-Lib>=0.6.5,<0.7",
+    "pandas-ta-classic>=0.6.5,<0.7",
+    "vectorbt>=1.1,<1.2",
 ]
 
 [dependency-groups]

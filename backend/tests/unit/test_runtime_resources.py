@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 
+from app.config import settings
 from app.core.resources import build_runtime_resources
 from app.observability.provider_archive import ProviderArchive, ProviderSnapshot
 from data.providers.yfinance import ReplayYFinanceFetcher
@@ -35,3 +36,17 @@ def test_resource_builder_uses_strict_replay_fetcher_when_snapshot_map_is_suppli
     )
 
     assert isinstance(resources.yf_fetcher, ReplayYFinanceFetcher)
+
+
+def test_resource_builder_enables_upstox_when_a_token_is_configured(
+    monkeypatch,
+) -> None:
+    class FakeUpstoxFetcher:
+        pass
+
+    monkeypatch.setattr(settings, "UPSTOX_ACCESS_TOKEN", "test-token")
+    monkeypatch.setattr("data.providers.upstox.UpstoxFetcher", FakeUpstoxFetcher)
+
+    resources = build_runtime_resources(llm_service=object(), yf_fetcher=object())
+
+    assert isinstance(resources.upstox_fetcher, FakeUpstoxFetcher)

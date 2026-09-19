@@ -1,12 +1,16 @@
 from __future__ import annotations
 
+import ipaddress
 import logging
 import re
+import socket
+from urllib.parse import urlparse
 
 import httpx
 from data.news_pipeline.models import ExtractionResult
 
 logger = logging.getLogger(__name__)
+MAX_ARTICLE_BYTES = 2_000_000
 
 PAYWALL_PATTERNS = (
     "subscribe to read",
@@ -65,8 +69,11 @@ class ArticleExtractor:
         except ImportError:
             return None
 
+        response = self._safe_get(url)
+        if response is None:
+            return None
         try:
-            downloaded = trafilatura.fetch_url(url)
+            downloaded = response.text
             if not downloaded:
                 return None
             return trafilatura.extract(
@@ -80,15 +87,40 @@ class ArticleExtractor:
             return None
 
     def _extract_pdf_text(self, url: str, *, max_pages: int = 15) -> str | None:
-        try:
-            response = httpx.get(url, timeout=20.0, follow_redirects=True)
-            response.raise_for_status()
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("PDF download failed for %s: %s", url, exc)
+        response = self._safe_get(url)
+        if response is None:
             return None
 
         pdf_bytes = response.content
         return self._extract_with_pymupdf(pdf_bytes, max_pages=max_pages)
+
+    def _safe_get(self, url: str) -> httpx.Response | None:
+        current = url
+        try:
+            for _ in range(3):
+                parsed = urlparse(current)
+                if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+                    return None
+                addresses = socket.getaddrinfo(
+                    parsed.hostname, 443 if parsed.scheme == "https" else 80
+                )
+                if any(
+                    ipaddress.ip_address(item[4][0]).is_private
+                    or ipaddress.ip_address(item[4][0]).is_loopback
+                    for item in addresses
+                ):
+                    return None
+                response = httpx.get(current, timeout=20.0, follow_redirects=False)
+                if response.status_code in {301, 302, 303, 307, 308}:
+                    current = response.headers.get("location", "")
+                    continue
+                response.raise_for_status()
+                if len(response.content) > MAX_ARTICLE_BYTES:
+                    return None
+                return response
+        except (OSError, httpx.HTTPError, ValueError) as exc:
+            logger.warning("Article download failed: %s", exc)
+        return None
 
     def _extract_with_pymupdf(self, pdf_bytes: bytes, *, max_pages: int) -> str | None:
         try:

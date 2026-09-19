@@ -41,9 +41,13 @@ def render_event(event: ResearchEvent) -> str:
         label = {
             "partial": "Partial response",
             "insufficient_data": "Insufficient evidence",
-            "needs_review": "Held for review",
         }.get(event.terminal_status, "Completed")
-        return f"\n✓ {label}{duration}\n"
+        artifact = (
+            f"  Run artifact: {sanitize_terminal_text(event.artifact_path)}\n"
+            if event.artifact_path
+            else ""
+        )
+        return f"\n✓ {label}{duration}\n{artifact}"
     return ""
 
 

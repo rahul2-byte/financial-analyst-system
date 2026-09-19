@@ -7,6 +7,7 @@ from app.core.agent_loop.publication import (
     ReportDraft,
     parse_report_draft,
     publish_report,
+    report_validation_fallback,
 )
 
 
@@ -97,3 +98,11 @@ def test_publish_report_rejects_unknown_source() -> None:
 def test_parse_report_draft_rejects_non_json() -> None:
     with pytest.raises(PublicationError, match="structured_report_invalid"):
         parse_report_draft("plain text report")
+
+
+def test_report_validation_fallback_renders_evidence_and_limitations() -> None:
+    result = report_validation_fallback(_evidence(), ("structured_report_invalid",))
+
+    assert "Verified evidence" in result
+    assert "Data limitations" in result
+    assert "123.4" in result

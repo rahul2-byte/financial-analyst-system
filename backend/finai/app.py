@@ -15,6 +15,7 @@ from rich.markup import escape
 from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, VerticalScroll
+from textual.css.query import NoMatches
 from textual.widgets import Button, Static, TextArea
 
 from .app_dispatch import CommandDispatchMixin
@@ -206,10 +207,14 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         elapsed_s = (
             time.monotonic() - self._run_started_at if self._run_started_at else None
         )
-        self.query_one("#status", Static).update(
-            render_status(self.state, spinner=spinner, elapsed_s=elapsed_s)
-        )
-        self._refresh_chrome()
+        try:
+            self.query_one("#status", Static).update(
+                render_status(self.state, spinner=spinner, elapsed_s=elapsed_s)
+            )
+            self._refresh_chrome()
+        except NoMatches:
+            # Textual may tick once while its test/runtime screen is unmounting.
+            return
 
     def on_text_area_changed(self, message: TextArea.Changed) -> None:
         if message.text_area.id == "composer":
@@ -368,6 +373,13 @@ class FinAIApp(CommandDispatchMixin, App[None]):
                         and self._response_widget is not None
                     ):
                         self._response_widget.update(render_response(self.state))
+                    if event.type == "run.completed" and event.artifact_path:
+                        await conversation.mount(
+                            Static(
+                                f"Run artifact: {escape(event.artifact_path)}",
+                                classes="activity",
+                            )
+                        )
                 elif event.type == "approval.requested":
                     self.push_screen(
                         ApprovalScreen(event.prompt, event.details),

@@ -23,6 +23,7 @@ class EvidenceFact(BaseModel):
     instrument: str = Field(min_length=1)
     observed_at: datetime
     quality_status: Literal["verified"]
+    source_url: str | None = None
 
     @field_validator("value")
     @classmethod
@@ -57,6 +58,12 @@ class ReportDraft(BaseModel):
     citations: list[ReportCitation] = Field(default_factory=list, max_length=200)
 
 
+class ResearchAnswerV2(ReportDraft):
+    """Structured answer contract used for concise and full research answers."""
+
+    answer_type: Literal["analysis", "report"] = "analysis"
+
+
 class PublicationError(ValueError):
     """A report draft cannot be released as verified research."""
 
@@ -69,11 +76,11 @@ _FACT_MARKER = re.compile(r"\[\[fact:([a-zA-Z0-9_.:-]+)\]\]")
 _NUMBER = re.compile(r"(?<![A-Za-z])[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:%|\b)")
 
 
-def parse_report_draft(text: str) -> ReportDraft:
+def parse_report_draft(text: str) -> ResearchAnswerV2:
     """Parse the model's complete response without accepting wrapper prose."""
     try:
         value = json.loads(text)
-        return ReportDraft.model_validate(value)
+        return ResearchAnswerV2.model_validate(value)
     except (json.JSONDecodeError, TypeError, ValidationError) as exc:
         raise PublicationError(["structured_report_invalid"]) from exc
 
@@ -105,8 +112,10 @@ def publish_report(
     )
     marker_ids = set(_FACT_MARKER.findall(all_text))
     for claim in draft.claims:
-        if claim.importance == "major" and not claim.evidence_refs:
-            reasons.append("major_claim_unsupported")
+        if not claim.evidence_refs:
+            reasons.append("claim_unsupported")
+            if claim.importance == "major":
+                reasons.append("major_claim_unsupported")
         if any(ref not in citation_ids for ref in claim.evidence_refs):
             reasons.append("claim_citation_missing")
         for fact_id in claim.numeric_refs:
@@ -127,6 +136,79 @@ def publish_report(
     if reasons:
         raise PublicationError(reasons)
     return _render(draft, evidence)
+
+
+_REASON_TEXT = {
+    "structured_report_invalid": "The report format was invalid.",
+    "major_claim_unsupported": "A main conclusion lacked cited evidence.",
+    "numeric_claim_unbound": "A number was not linked to verified data.",
+    "numeric_fact_missing": "A cited number was absent from verified data.",
+    "citation_source_missing": "A citation did not match a verified source.",
+}
+
+
+def report_validation_fallback(
+    evidence: dict[str, EvidenceFact], reasons: tuple[str, ...] = ()
+) -> str:
+    """Give the user a safe result when a model draft fails publication checks."""
+    explanation = " ".join(
+        dict.fromkeys(
+            _REASON_TEXT.get(reason, "The report failed a verification check.")
+            for reason in reasons
+        )
+    )
+    if explanation:
+        explanation = " " + explanation
+    if not evidence:
+        return (
+            "I could not verify a publishable report from the available evidence."
+            + explanation
+            + " "
+            "No financial claim or figure was released. Inspect the available "
+            "tool and source events for details."
+        )
+    sources = sorted({fact.source_id for fact in evidence.values()})
+    facts = sorted(
+        evidence.values(), key=lambda fact: ("latest" not in fact.fact_id, fact.fact_id)
+    )[:10]
+    observations = "\n".join(
+        f"- {fact.fact_id}: {fact.value} {fact.unit} "
+        f"({fact.source_id}, observed {fact.observed_at.isoformat()})"
+        for fact in facts
+    )
+    return (
+        "## Verified evidence\n"
+        "I could not verify a publishable narrative, so this response contains "
+        "only deterministic provider observations."
+        + explanation
+        + "\n\nSources: "
+        + ", ".join(sources)
+        + ".\n\n"
+        + observations
+        + "\n\n## Data limitations\n"
+        "- The model did not produce a report that passed the evidence-binding checks.\n"
+        "- No investment conclusion is provided from this fallback.\n"
+        "- Inspect source events and rerun the analysis if a cited source is missing."
+    )
+
+
+def report_repair_instruction(
+    evidence: dict[str, EvidenceFact], reasons: tuple[str, ...]
+) -> str:
+    """Return one bounded correction request after a report-format failure."""
+    facts = list(evidence.values())[:80]
+    fact_catalog = ", ".join(fact.fact_id for fact in facts) or "none"
+    sources = ", ".join(sorted({fact.source_id for fact in facts})) or "none"
+    return (
+        "Formatting repair required. Your preceding response cannot be published: "
+        + ", ".join(reasons)
+        + ". Return only the required report JSON now; do not call tools. Use only "
+        "these evidence fact IDs for numeric_refs and [[fact:...]] markers: "
+        + fact_catalog
+        + ". Citation source_id values must be one of: "
+        + sources
+        + ". Do not state a conclusion that lacks a claim citation."
+    )
 
 
 def _render(draft: ReportDraft, evidence: dict[str, EvidenceFact]) -> str:

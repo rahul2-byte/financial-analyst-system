@@ -16,6 +16,18 @@ from .plain import render_json, render_plain
 from .session import FinAIRepl
 
 
+def _validate_cli_paths(data_dir: Path, replay_path: Path | None) -> None:
+    resolved = data_dir.expanduser().resolve()
+    if resolved in {Path("/"), Path.home(), Path.cwd().resolve()}:
+        raise ValueError("--data-dir must be a dedicated project data directory")
+    if replay_path is not None:
+        replay = replay_path.expanduser().resolve()
+        if not replay.is_file():
+            raise ValueError("--replay-snapshots must point to a file")
+        if replay.stat().st_size > 256 * 1024:
+            raise ValueError("--replay-snapshots is too large")
+
+
 def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     """Parse CLI options without starting providers or touching the store."""
     parser = argparse.ArgumentParser(description="Interactive FIN-AI research terminal")
@@ -107,6 +119,7 @@ def main() -> None:
         elif args.debug:
             os.environ["FINAI_DIAGNOSTICS"] = "trace"
         log_dir = args.data_dir / "logs"
+        _validate_cli_paths(args.data_dir, args.replay_snapshots)
         log_dir.mkdir(parents=True, exist_ok=True)
         logging.basicConfig(
             level=logging.DEBUG if args.debug else logging.WARNING,

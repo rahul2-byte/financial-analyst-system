@@ -32,6 +32,9 @@ jobs:
       - name: CLI smoke
         run: PYTHONPATH=backend uv run python -m finai --help
 
+      - name: Offline experiment CLI smoke
+        run: PYTHONPATH=backend uv run python -m experiments --help
+
       - name: Pytest backend
         run: uv run pytest backend/tests --no-cov
 

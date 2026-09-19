@@ -31,6 +31,7 @@ class EnvSettings(BaseSettings):
     HIVE_CIRCUIT_FAILURE_THRESHOLD: int = 3
     HIVE_CIRCUIT_RECOVERY_TIMEOUT: float = 30.0
     HIVE_MAX_OUTPUT_TOKENS: int = 4096
+    HIVE_MAX_REPORT_TOKENS: int = 8192
     FINAI_CONTEXT_MAX_TOKENS: int = 250_000
     FINAI_CONTEXT_COMPACTION_RATIO: float = 0.9
     MIN_QUALITY_SCORE: float = 40.0
@@ -44,6 +45,12 @@ class EnvSettings(BaseSettings):
     TINYFISH_MAX_RESULTS_PER_QUERY: int = 10
     HTTP_POOL_MAX_CONNECTIONS: int = 10
     HTTP_POOL_MAX_KEEPALIVE_CONNECTIONS: int = 10
+    UPSTOX_ACCESS_TOKEN: str | None = None
+    UPSTOX_BASE_URL: str = "https://api.upstox.com"
+    UPSTOX_TIMEOUT: float = 20.0
+    FINAI_QUOTA_DB: str = ".finai/quota.sqlite3"
+    FINAI_PROVIDER_REQUESTS_PER_SECOND: int = 2
+    HTTP_SESSION_ROOT: str = ".finai/http-sessions"
 
     model_config = SettingsConfigDict(
         env_file=(_REPOSITORY_ENV, ".env"),

@@ -5,8 +5,9 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Protocol
 
+from app.config import settings
 from app.core.observability import observe, run_context
-from data.news_pipeline.connectors import TinyFishSearchConnector
+from data.news_pipeline.connectors import TinyFishSearchConnector, UpstoxNewsConnector
 from data.news_pipeline.extractor import ArticleExtractor
 from data.news_pipeline.models import (
     CompanyContext,
@@ -38,9 +39,12 @@ class NewsPipelineRunner:
         min_quality_score: float = 40.0,
         pipeline_version: str = "1.0.0",
     ) -> None:
-        self.connectors = connectors or [
-            TinyFishSearchConnector(),
-        ]
+        if connectors is None:
+            self.connectors = [TinyFishSearchConnector()]
+            if settings.UPSTOX_ACCESS_TOKEN:
+                self.connectors.append(UpstoxNewsConnector())
+        else:
+            self.connectors = connectors
         self.extractor = extractor or ArticleExtractor()
         self.max_articles_per_company = max_articles_per_company
         self.min_quality_score = min_quality_score

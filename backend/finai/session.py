@@ -12,7 +12,7 @@ from pathlib import Path
 from app.config import settings
 from app.core.diagnostics import diagnostic_payload, diagnostics_enabled
 from app.core.resources import build_runtime_resources
-from app.events.models import EventFactory, ResearchEvent, RunCancelled
+from app.events.models import ResearchEvent
 from app.models.request_models import Message
 from app.observability.provider_archive import ProviderArchive
 
@@ -94,20 +94,28 @@ class FinAIRepl:
 
     async def research(self, query: str) -> None:
         print(f"\n\033[36m› research\033[0m {query}")
+        terminal_status = "interrupted"
         try:
             async for event in self.typed_stream(query):
                 if event.type == "response.delta":
                     print(event.text, end="", flush=True)
-                elif event.type in {"approval.requested", "clarification.requested"}:
+                elif event.type == "clarification.requested":
                     print(f"\n\033[33m? input required\033[0m\n{event.prompt}")
+                    terminal_status = "clarification"
+                elif event.type == "run.completed":
+                    terminal_status = event.terminal_status
+                    if event.artifact_path:
+                        print(f"\nRun artifact: {event.artifact_path}")
                 elif event.type == "run.failed":
+                    terminal_status = "failed"
                     print(
                         f"\n\033[31m× provider/pipeline failure\033[0m {event.message}"
                     )
-            print("\n\033[32m✓ response complete\033[0m")
+            if terminal_status not in {"failed", "clarification", "interrupted"}:
+                print(f"\n✓ {terminal_status.replace('_', ' ')}")
         except Exception as exc:  # noqa: BLE001 - CLI boundary renders a concise failure
             print(f"\n\033[31m× provider/pipeline failure\033[0m {exc}")
-            print("\033[90mNo report was approved. Session data is preserved.\033[0m")
+            print("\033[90mSession data is preserved for inspection.\033[0m")
 
     async def typed_stream(self, query: str) -> AsyncIterator[ResearchEvent]:
         """Run the supported AgentLoop through the terminal event boundary."""
@@ -117,36 +125,15 @@ class FinAIRepl:
     async def _agent_loop_stream(self, query: str) -> AsyncIterator[ResearchEvent]:
         """Run the production conversational loop."""
         pending = self.store.read_pending()
-        approved_tool_ids: set[str] = set()
-        if pending and pending.get("kind") in {"approval", "clarification"}:
-            answer = query.casefold().strip()
+        if pending and pending.get("kind") == "approval":
+            self.persistence.clear_pending()
+            pending = None
+        if pending and pending.get("kind") == "clarification":
             checkpoint = self.store.read_checkpoint() or {}
             raw_messages = checkpoint.get("messages", [])
             self.history = [Message.model_validate(item) for item in raw_messages]
-            if pending.get("kind") == "approval" and answer in {
-                "y",
-                "yes",
-                "approve",
-                "approved",
-                "proceed",
-            }:
-                if checkpoint.get("tool_call_id"):
-                    approved_tool_ids.add(str(checkpoint["tool_call_id"]))
-            elif pending.get("kind") == "approval" and answer in {
-                "n",
-                "no",
-                "reject",
-                "cancel",
-            }:
-                self.persistence.clear_pending()
-                cancellation_event = EventFactory(self.conversation_id).make(
-                    RunCancelled, reason="request rejected by user"
-                )
-                yield cancellation_event
-                return
-            else:
-                self.history.append(Message(role="user", content=query))
-                self.persistence.append_message(self.history[-1])
+            self.history.append(Message(role="user", content=query))
+            self.persistence.append_message(self.history[-1])
 
         if not pending:
             user_message = Message(role="user", content=query)
@@ -169,7 +156,6 @@ class FinAIRepl:
                 self.history,
                 query,
                 conversation_id=self.conversation_id,
-                approved_tool_ids=approved_tool_ids,
                 checkpoint_writer=self.persistence.write_checkpoint,
                 message_writer=persist_message,
             ):
@@ -203,6 +189,14 @@ class FinAIRepl:
                     status = "awaiting_approval"
                 elif event.type == "run.completed":
                     status = event.terminal_status
+                    event = event.model_copy(
+                        update={
+                            "artifact_path": str(
+                                self.store.session_dir / "runs" / f"{run_id}.json"
+                            )
+                        }
+                    )
+                    events[-1] = event
                 elif event.type == "run.failed":
                     status = "failed"
                 elif event.type == "run.cancelled":
@@ -218,7 +212,13 @@ class FinAIRepl:
                 persist_message(
                     Message(role="assistant", content="".join(response_text))
                 )
-            if status in {"success", "failed", "cancelled"}:
+            if status in {
+                "success",
+                "partial",
+                "insufficient_data",
+                "failed",
+                "cancelled",
+            }:
                 self.persistence.clear_pending()
         except asyncio.CancelledError:
             status = "cancelled"

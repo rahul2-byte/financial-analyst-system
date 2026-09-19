@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from datetime import datetime
+from pathlib import Path
 from typing import Any
 
+from app.config import settings
+from app.core.quota import RequestQuota
 from app.observability.provider_archive import ProviderArchive, ProviderSnapshot
 
 
@@ -23,6 +26,10 @@ class TinyFishSearchClient:
         self.client_factory = client_factory or self._default_client_factory
         self.archive = archive
         self.last_snapshot_hash: str | None = None
+        self.quota = RequestQuota(
+            Path(settings.FINAI_QUOTA_DB),
+            per_second=settings.FINAI_PROVIDER_REQUESTS_PER_SECOND,
+        )
 
     def _default_client_factory(self, timeout: float) -> Any:
         import httpx
@@ -45,6 +52,7 @@ class TinyFishSearchClient:
             "after_date": start_published_date.date().isoformat(),
         }
         async with self.client_factory(self.timeout) as client:
+            self.quota.reserve("tinyfish")
             response = await client.get(
                 self.base_url,
                 headers={"X-API-Key": self.api_key},

@@ -75,6 +75,7 @@ class ReportTools:
                 "ingested_at": "2026-09-18T00:01:00+00:00",
                 "version": "fixture-1",
                 "quality_status": "verified",
+                "source_url": "https://fixture.example",
             },
         }
 
@@ -101,7 +102,7 @@ def test_report_mode_publishes_only_after_structured_evidence_validation() -> No
         "index": 0,
         "id": "call-report",
         "type": "function",
-        "function": {"name": "data:fetch_stock_data", "arguments": "{}"},
+        "function": {"name": "data:fetch_stock_data", "arguments": '{"ticker":"ABC"}'},
     }
     report = (
         '{"executive_summary":"Verified.","key_drivers":["Demand."],'
@@ -141,13 +142,44 @@ def test_report_mode_publishes_only_after_structured_evidence_validation() -> No
     deltas = "".join(event.text for event in events if event.type == "response.delta")
     assert "123.4 provider_value" in deltas
     assert persisted[-1].content == deltas
+    assert "executive_summary" in model.calls[0][-1].content
+    assert "numeric_refs" in model.calls[0][-1].content
+    assert model.request_kwargs[1]["max_tokens"] == 8192
     assert (
         next(event for event in events if event.type == "run.completed").terminal_status
         == "success"
     )
 
 
-def test_report_mode_holds_invalid_draft_without_leaking_text() -> None:
+def test_source_events_include_the_verified_provider_url() -> None:
+    tool_call = {
+        "index": 0,
+        "id": "call-source",
+        "type": "function",
+        "function": {"name": "data:fetch_stock_data", "arguments": '{"ticker":"ABC"}'},
+    }
+    model = FakeModel(
+        [
+            [
+                {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"tool_calls": [tool_call]}}]},
+                }
+            ],
+            [{"event": "token", "data": "done"}],
+        ]
+    )
+    events = asyncio.run(
+        _collect(AgentLoop(model, ReportTools()), [Message(role="user", content="ABC")])
+    )
+
+    source_event = next(event for event in events if event.type == "sources.updated")
+    assert source_event.sources == [
+        {"name": "fixture", "url": "https://fixture.example"}
+    ]
+
+
+def test_report_mode_returns_useful_failure_response_without_leaking_draft() -> None:
     model = FakeModel([[{"event": "token", "data": "{not-json-secret-123}"}]])
     persisted: list[Message] = []
     loop = AgentLoop(
@@ -166,11 +198,55 @@ def test_report_mode_holds_invalid_draft_without_leaking_text() -> None:
 
     output = "".join(event.text for event in events if event.type == "response.delta")
     assert "secret-123" not in output
+    assert "could not verify" in output.lower()
+    assert "format" in output.lower()
     assert "secret-123" not in "".join(message.content for message in persisted)
     assert (
         next(event for event in events if event.type == "run.completed").terminal_status
-        == "needs_review"
+        == "insufficient_data"
     )
+
+
+def test_invalid_report_returns_verification_summary_with_source() -> None:
+    tool_call = {
+        "index": 0,
+        "id": "call-report",
+        "type": "function",
+        "function": {"name": "data:fetch_stock_data", "arguments": '{"ticker":"ABC"}'},
+    }
+    model = FakeModel(
+        [
+            [
+                {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"tool_calls": [tool_call]}}]},
+                }
+            ],
+            [{"event": "token", "data": "A useful partial report. " * 12}],
+            [{"event": "token", "data": "still not valid JSON"}],
+        ]
+    )
+    loop = AgentLoop(model, ReportTools(), config=AgentLoopConfig(publish_reports=True))
+
+    events = asyncio.run(_collect(loop, [Message(role="user", content="report")]))
+
+    output = "".join(event.text for event in events if event.type == "response.delta")
+    assert "prices" in output
+    assert "123.4" in output
+    assert "could not verify" in output.lower()
+    assert events[-1].terminal_status == "partial"
+
+
+def test_interrupted_report_stream_still_returns_a_response() -> None:
+    loop = AgentLoop(
+        InterruptedModel(), ReportTools(), config=AgentLoopConfig(publish_reports=True)
+    )
+
+    events = asyncio.run(_collect(loop, [Message(role="user", content="report")]))
+
+    output = "".join(event.text for event in events if event.type == "response.delta")
+    assert "could not verify" in output.lower()
+    assert events[-1].terminal_status == "partial"
 
 
 def test_loop_renders_content_from_openai_chunk_frames() -> None:
@@ -266,7 +342,10 @@ def test_loop_marks_run_partial_when_evidence_tool_fails() -> None:
         "index": 0,
         "id": "call-failed",
         "type": "function",
-        "function": {"name": "analysis:run_technical_scan", "arguments": "{}"},
+        "function": {
+            "name": "analysis:run_technical_scan",
+            "arguments": '{"ticker":"HDFCBANK.NS"}',
+        },
     }
     model = FakeModel(
         [
@@ -324,6 +403,110 @@ def test_loop_recovers_from_malformed_tool_arguments() -> None:
     assert "ticker" in model.calls[1][-1].content
 
 
+def test_recoverable_financial_tool_arguments_do_not_degrade_a_recovered_run() -> None:
+    invalid_call = {
+        "index": 0,
+        "id": "call-invalid",
+        "type": "function",
+        "function": {"name": "analysis:run_fundamental_scan", "arguments": "{}"},
+    }
+    valid_call = {
+        "index": 0,
+        "id": "call-valid",
+        "type": "function",
+        "function": {
+            "name": "analysis:run_fundamental_scan",
+            "arguments": '{"ticker":"HDFCBANK.NS"}',
+        },
+    }
+
+    class FundamentalTools:
+        def definitions(self):
+            return [
+                {
+                    "type": "function",
+                    "function": {"name": "analysis:run_fundamental_scan"},
+                }
+            ]
+
+        async def execute(self, name, arguments):
+            assert name == "analysis:run_fundamental_scan"
+            return {"success": True, "data": {"ticker": arguments["ticker"]}}
+
+    model = FakeModel(
+        [
+            [
+                {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"tool_calls": [invalid_call]}}]},
+                }
+            ],
+            [
+                {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"tool_calls": [valid_call]}}]},
+                }
+            ],
+            [{"event": "token", "data": "verified"}],
+        ]
+    )
+    events = asyncio.run(
+        _collect(
+            AgentLoop(model, FundamentalTools()),
+            [Message(role="user", content="analyse HDFC Bank")],
+        )
+    )
+
+    assert any(event.type == "tool.failed" for event in events)
+    assert any(event.type == "tool.completed" for event in events)
+    assert events[-1].terminal_status == "success"
+
+
+def test_report_mode_repairs_a_plain_text_draft_once() -> None:
+    tool_call = {
+        "index": 0,
+        "id": "call-report-repair",
+        "type": "function",
+        "function": {"name": "data:fetch_stock_data", "arguments": '{"ticker":"ABC"}'},
+    }
+    repaired_report = (
+        '{"executive_summary":"Verified.","key_drivers":["Demand."],'
+        '"detailed_analysis":"Close [[fact:prices:data.latest.close]].",'
+        '"risks":["Execution."],"final_view":"Review.","claims":['
+        '{"claim_id":"c1","text":"Close [[fact:prices:data.latest.close]].",'
+        '"importance":"major","evidence_refs":["src"],'
+        '"numeric_refs":["prices:data.latest.close"]}],'
+        '"citations":[{"citation_id":"src","source_id":"prices"}]}'
+    )
+    model = FakeModel(
+        [
+            [
+                {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"tool_calls": [tool_call]}}]},
+                }
+            ],
+            [{"event": "token", "data": "The stock looks strong."}],
+            [{"event": "token", "data": repaired_report}],
+        ]
+    )
+    events = asyncio.run(
+        _collect(
+            AgentLoop(
+                model, ReportTools(), config=AgentLoopConfig(publish_reports=True)
+            ),
+            [Message(role="user", content="report on ABC")],
+        )
+    )
+
+    assert len(model.calls) == 3
+    assert "formatting repair" in model.calls[-1][-1].content.lower()
+    assert "123.4 provider_value" in "".join(
+        event.text for event in events if event.type == "response.delta"
+    )
+    assert events[-1].terminal_status == "success"
+
+
 def test_loop_pauses_on_malformed_clarification_call() -> None:
     malformed_call = {
         "index": 0,
@@ -365,7 +548,7 @@ def test_loop_injects_selected_skill_without_persisting_it_as_user_context() -> 
     assert "fundamental-analysis" in model.calls[0][0].content
 
 
-def test_guided_loop_pauses_before_external_tool_and_writes_checkpoint() -> None:
+def test_guided_loop_runs_read_only_research_tool_without_approval() -> None:
     tool_call = {
         "index": 0,
         "id": "call-approval",
@@ -379,7 +562,8 @@ def test_guided_loop_pauses_before_external_tool_and_writes_checkpoint() -> None
                     "event": "chunk",
                     "data": {"choices": [{"delta": {"tool_calls": [tool_call]}}]},
                 }
-            ]
+            ],
+            [{"event": "token", "data": "Research complete."}],
         ]
     )
     checkpoints: list[dict] = []
@@ -393,12 +577,13 @@ def test_guided_loop_pauses_before_external_tool_and_writes_checkpoint() -> None
         )
     )
 
-    assert events[-1].type == "approval.requested"
-    assert checkpoints[0]["tool_call_id"] == "call-approval"
-    assert checkpoints[0]["status"] == "awaiting_approval"
+    assert any(event.type == "tool.completed" for event in events)
+    assert events[-1].type == "run.completed"
+    assert not any(event.type == "approval.requested" for event in events)
+    assert checkpoints == []
 
 
-def test_guided_loop_executes_approved_checkpoint_before_calling_model() -> None:
+def test_resumed_loop_executes_all_pending_read_only_tools() -> None:
     approved_call = {
         "id": "call-approved",
         "type": "function",
@@ -413,7 +598,7 @@ def test_guided_loop_executes_approved_checkpoint_before_calling_model() -> None
         Message(role="user", content="compare HDFC Bank and Infosys"),
         Message(role="assistant", content="", tool_calls=[approved_call, next_call]),
     ]
-    model = FakeModel([])
+    model = FakeModel([[{"event": "token", "data": "Both companies were checked."}]])
     checkpoints: list[dict] = []
     loop = AgentLoop(model, FakeTools())
 
@@ -426,16 +611,20 @@ def test_guided_loop_executes_approved_checkpoint_before_calling_model() -> None
         )
     )
 
-    assert not model.calls
+    assert len(model.calls) == 1
     assert any(
         event.type == "tool.completed" and event.tool_id == "call-approved"
         for event in events
     )
-    assert events[-1].type == "approval.requested"
-    assert checkpoints[-1]["tool_call_id"] == "call-next"
+    assert any(
+        event.type == "tool.completed" and event.tool_id == "call-next"
+        for event in events
+    )
+    assert events[-1].type == "run.completed"
+    assert checkpoints == []
 
 
-def test_guided_loop_does_not_repeat_completed_checkpoint_tools() -> None:
+def test_resumed_loop_does_not_repeat_completed_tools() -> None:
     first_call = {
         "id": "call-first",
         "type": "function",
@@ -464,7 +653,7 @@ def test_guided_loop_does_not_repeat_completed_checkpoint_tools() -> None:
             tool_call_id="call-first",
         ),
     ]
-    model = FakeModel([])
+    model = FakeModel([[{"event": "token", "data": "Comparison complete."}]])
     checkpoints: list[dict] = []
     tools = FakeTools()
     loop = AgentLoop(model, tools)
@@ -481,9 +670,9 @@ def test_guided_loop_does_not_repeat_completed_checkpoint_tools() -> None:
     completed_ids = [
         event.tool_id for event in events if event.type == "tool.completed"
     ]
-    assert completed_ids == ["call-approved"]
-    assert events[-1].type == "approval.requested"
-    assert checkpoints[-1]["tool_call_id"] == "call-next"
+    assert completed_ids == ["call-approved", "call-next"]
+    assert events[-1].type == "run.completed"
+    assert checkpoints == []
 
 
 def test_broad_finance_request_keeps_model_tool_catalog_bounded() -> None:
