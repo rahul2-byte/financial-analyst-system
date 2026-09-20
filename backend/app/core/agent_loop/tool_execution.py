@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+import httpx
 from app.core.agent_loop.model_events import result_payload
 from app.core.guardrails import validate_tool_arguments
+from app.core.observability import observe
+from app.observability.tracing import set_current_span_attributes
 from app.security.policy import redact_secrets
 
 
@@ -16,6 +19,7 @@ class ToolExecutor:
         self._runner = runner
         self._allowed_tools = allowed_tools
 
+    @observe("tool.execute", as_type="tool")
     async def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
         try:
             if self._allowed_tools is not None and name not in self._allowed_tools:
@@ -40,6 +44,36 @@ class ToolExecutor:
                         "retryable": True,
                         "error": f"Invalid arguments for {name}: {exc}",
                     }
-            return result_payload(await self._runner.execute(name, arguments))
-        except Exception as exc:  # noqa: BLE001 - tool boundary must not abort the run
+            payload = result_payload(await self._runner.execute(name, arguments))
+            set_current_span_attributes(
+                {
+                    "tool.name": name,
+                    "tool.status": "success" if payload.get("success") else "failed",
+                    "tool.result_count": _result_count(payload),
+                }
+            )
+            return payload
+        except (
+            TimeoutError,
+            OSError,
+            ConnectionError,
+            ValueError,
+            KeyError,
+            httpx.HTTPError,
+        ) as exc:
+            set_current_span_attributes(
+                {
+                    "tool.name": name,
+                    "tool.status": "failed",
+                    "error.type": type(exc).__name__,
+                }
+            )
             return {"success": False, "error": str(redact_secrets(str(exc)))}
+
+
+def _result_count(payload: dict[str, Any]) -> int:
+    for key in ("results", "sources", "documents", "items"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            return len(value)
+    return 0

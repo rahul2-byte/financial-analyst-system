@@ -58,6 +58,48 @@ class InterruptedModel:
         return stream()
 
 
+class EmptyFailureModel:
+    def generate_stream(self, messages: list[Message], model: str, **kwargs):
+        del messages, model, kwargs
+
+        async def stream():
+            raise TimeoutError("provider stalled before content")
+            yield  # pragma: no cover
+
+        return stream()
+
+
+class HiddenReasoningTimeoutModel:
+    def __init__(self, tool_call: dict) -> None:
+        self.tool_call = tool_call
+        self.calls = 0
+
+    def generate_stream(self, messages: list[Message], model: str, **kwargs):
+        del messages, model, kwargs
+        self.calls += 1
+
+        async def stream():
+            if self.calls == 1:
+                yield {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"tool_calls": [self.tool_call]}}]},
+                }
+                return
+            yield {
+                "event": "provider_stream_started",
+                "data": {"attempt": 1, "first_byte_ms": 10.0},
+            }
+            yield {
+                "event": "chunk",
+                "data": {
+                    "choices": [{"delta": {"reasoning_content": "hidden reasoning"}}]
+                },
+            }
+            raise TimeoutError("provider stalled")
+
+        return stream()
+
+
 class ReportTools:
     def definitions(self) -> list[dict]:
         return [{"type": "function", "function": {"name": "data:fetch_stock_data"}}]
@@ -80,6 +122,31 @@ class ReportTools:
         }
 
 
+class ValidationRepairTimeoutModel:
+    def __init__(self, tool_call: dict, invalid_report: str) -> None:
+        self.tool_call = tool_call
+        self.invalid_report = invalid_report
+        self.calls = 0
+
+    def generate_stream(self, messages, model, **kwargs):
+        del messages, model, kwargs
+        self.calls += 1
+
+        async def stream():
+            if self.calls == 1:
+                yield {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"tool_calls": [self.tool_call]}}]},
+                }
+            elif self.calls == 2:
+                yield {"event": "token", "data": self.invalid_report}
+            else:
+                yield {"event": "token", "data": self.invalid_report}
+                raise TimeoutError("repair provider stalled")
+
+        return stream()
+
+
 def test_loop_streams_answer_without_reusing_previous_response() -> None:
     model = FakeModel([[{"event": "token", "data": "first"}]])
     loop = AgentLoop(model, FakeTools())
@@ -95,6 +162,24 @@ def test_loop_streams_answer_without_reusing_previous_response() -> None:
         "run.completed",
     ]
     assert events[3].text == "first"
+
+
+def test_empty_visible_model_response_retries_with_full_budget() -> None:
+    model = FakeModel(
+        [
+            [{"event": "provider_completed", "data": {"attempts": 1}}],
+            [{"event": "token", "data": "recovered"}],
+        ]
+    )
+    loop = AgentLoop(model, FakeTools(), config=AgentLoopConfig(max_tokens=8192))
+
+    events = asyncio.run(_collect(loop, [Message(role="user", content="hello")]))
+
+    assert any(
+        event.type == "response.delta" and event.text == "recovered" for event in events
+    )
+    assert model.request_kwargs[0]["max_tokens"] == 1024
+    assert model.request_kwargs[1]["max_tokens"] == 8192
 
 
 def test_report_mode_publishes_only_after_structured_evidence_validation() -> None:
@@ -140,15 +225,40 @@ def test_report_mode_publishes_only_after_structured_evidence_validation() -> No
     )
 
     deltas = "".join(event.text for event in events if event.type == "response.delta")
-    assert "123.4 provider_value" in deltas
+    assert "123.4" in deltas
     assert persisted[-1].content == deltas
     assert "executive_summary" in model.calls[0][-1].content
     assert "numeric_refs" in model.calls[0][-1].content
-    assert model.request_kwargs[1]["max_tokens"] == 8192
+    assert model.request_kwargs[1]["max_tokens"] == 32768
     assert (
         next(event for event in events if event.type == "run.completed").terminal_status
-        == "success"
+        == "completed"
     )
+
+
+def test_hidden_reasoning_timeout_returns_partial_evidence_fallback() -> None:
+    tool_call = {
+        "index": 0,
+        "id": "call-report-timeout",
+        "type": "function",
+        "function": {"name": "data:fetch_stock_data", "arguments": '{"ticker":"ABC"}'},
+    }
+    model = HiddenReasoningTimeoutModel(tool_call)
+    loop = AgentLoop(
+        model,
+        ReportTools(),
+        config=AgentLoopConfig(mode="autonomous", publish_reports=True),
+    )
+
+    events = asyncio.run(
+        _collect(loop, [Message(role="user", content="publish a report")])
+    )
+
+    assert events[-1].type == "run.failed"
+    assert events[-1].category == "model_generation"
+    response = "".join(event.text for event in events if event.type == "response.delta")
+    assert response == ""
+    assert "hidden reasoning" not in response
 
 
 def test_source_events_include_the_verified_provider_url() -> None:
@@ -198,13 +308,9 @@ def test_report_mode_returns_useful_failure_response_without_leaking_draft() -> 
 
     output = "".join(event.text for event in events if event.type == "response.delta")
     assert "secret-123" not in output
-    assert "could not verify" in output.lower()
-    assert "format" in output.lower()
+    assert output == ""
     assert "secret-123" not in "".join(message.content for message in persisted)
-    assert (
-        next(event for event in events if event.type == "run.completed").terminal_status
-        == "insufficient_data"
-    )
+    assert events[-1].type == "run.failed"
 
 
 def test_invalid_report_returns_verification_summary_with_source() -> None:
@@ -231,10 +337,10 @@ def test_invalid_report_returns_verification_summary_with_source() -> None:
     events = asyncio.run(_collect(loop, [Message(role="user", content="report")]))
 
     output = "".join(event.text for event in events if event.type == "response.delta")
-    assert "prices" in output
-    assert "123.4" in output
-    assert "could not verify" in output.lower()
-    assert events[-1].terminal_status == "partial"
+    assert "Verified evidence" in output
+    assert "No unsupported investment conclusion" in output
+    assert events[-1].type == "run.completed"
+    assert events[-1].terminal_status == "completed_with_limited_evidence"
 
 
 def test_interrupted_report_stream_still_returns_a_response() -> None:
@@ -245,8 +351,20 @@ def test_interrupted_report_stream_still_returns_a_response() -> None:
     events = asyncio.run(_collect(loop, [Message(role="user", content="report")]))
 
     output = "".join(event.text for event in events if event.type == "response.delta")
-    assert "could not verify" in output.lower()
-    assert events[-1].terminal_status == "partial"
+    assert output == ""
+    assert events[-1].type == "run.failed"
+
+
+def test_empty_report_provider_failure_still_returns_explicit_report() -> None:
+    loop = AgentLoop(
+        EmptyFailureModel(), ReportTools(), config=AgentLoopConfig(publish_reports=True)
+    )
+
+    events = asyncio.run(_collect(loop, [Message(role="user", content="report")]))
+
+    output = "".join(event.text for event in events if event.type == "response.delta")
+    assert events[-1].type == "run.failed"
+    assert output == ""
 
 
 def test_loop_renders_content_from_openai_chunk_frames() -> None:
@@ -368,6 +486,119 @@ def test_loop_marks_run_partial_when_evidence_tool_fails() -> None:
         event.text for event in events if event.type == "response.delta"
     )
     assert len(model.calls) == 1
+
+
+def test_report_mode_renders_when_all_evidence_tools_fail() -> None:
+    tool_call = {
+        "index": 0,
+        "id": "call-report-failed",
+        "type": "function",
+        "function": {
+            "name": "analysis:run_technical_scan",
+            "arguments": '{"ticker":"HDFCBANK.NS"}',
+        },
+    }
+    model = FakeModel(
+        [
+            [
+                {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"tool_calls": [tool_call]}}]},
+                }
+            ]
+        ]
+    )
+    loop = AgentLoop(model, FailedTools(), config=AgentLoopConfig(publish_reports=True))
+
+    events = asyncio.run(_collect(loop, [Message(role="user", content="report")]))
+
+    output = "".join(event.text for event in events if event.type == "response.delta")
+    assert events[-1].type == "run.failed"
+    assert output == ""
+
+
+def test_report_mode_parses_model_content_after_optional_tool_failure() -> None:
+    tool_call = {
+        "index": 0,
+        "id": "call-news-failed",
+        "type": "function",
+        "function": {
+            "name": "news:fetch_news",
+            "arguments": '{"ticker":"ABC"}',
+        },
+    }
+    report = (
+        '{"executive_summary":"Verified.","key_drivers":["Demand."],'
+        '"detailed_analysis":"No news conclusion is made.","risks":["Execution."],'
+        '"final_view":"Review.","claims":[{"claim_id":"c1",'
+        '"text":"Demand remains relevant.","importance":"major",'
+        '"evidence_refs":["src"],"numeric_refs":[]}],'
+        '"citations":[{"citation_id":"src","source_id":"fixture"}]}'
+    )
+
+    class NewsFailedTools(ReportTools):
+        def definitions(self) -> list[dict]:
+            return [
+                {"type": "function", "function": {"name": "news:fetch_news"}},
+                {"type": "function", "function": {"name": "data:fetch_stock_data"}},
+            ]
+
+        async def execute(self, name: str, arguments: dict) -> dict:
+            if name == "news:fetch_news":
+                return {"success": False, "error": "news timeout"}
+            return await super().execute(name, arguments)
+
+    price_call = {
+        **tool_call,
+        "index": 1,
+        "id": "call-price",
+        "function": {
+            "name": "data:fetch_stock_data",
+            "arguments": '{"ticker":"ABC"}',
+        },
+    }
+    model = FakeModel(
+        [
+            [
+                {
+                    "event": "chunk",
+                    "data": {
+                        "choices": [{"delta": {"tool_calls": [tool_call, price_call]}}]
+                    },
+                }
+            ],
+            [{"event": "token", "data": report}],
+        ]
+    )
+
+    events = asyncio.run(
+        _collect(
+            AgentLoop(
+                model, NewsFailedTools(), config=AgentLoopConfig(publish_reports=True)
+            ),
+            [Message(role="user", content="report")],
+        )
+    )
+
+    assert events[-1].type == "run.completed"
+    assert events[-1].terminal_status == "completed_with_limited_evidence"
+    output = "".join(event.text for event in events if event.type == "response.delta")
+    assert "Demand remains relevant." in output
+    assert "news" in output.lower()
+
+
+def test_report_mode_converts_runtime_failure_to_explicit_report() -> None:
+    loop = AgentLoop(
+        FakeModel([]),
+        FakeTools(),
+        config=AgentLoopConfig(publish_reports=True, max_rounds=0),
+    )
+
+    events = asyncio.run(_collect(loop, [Message(role="user", content="report")]))
+
+    output = "".join(event.text for event in events if event.type == "response.delta")
+    assert events[-1].type == "run.failed"
+    assert output == ""
 
 
 def test_loop_recovers_from_malformed_tool_arguments() -> None:
@@ -501,10 +732,86 @@ def test_report_mode_repairs_a_plain_text_draft_once() -> None:
 
     assert len(model.calls) == 3
     assert "formatting repair" in model.calls[-1][-1].content.lower()
-    assert "123.4 provider_value" in "".join(
+    assert model.request_kwargs[-1]["tools"] == []
+    assert "123.4" in "".join(
         event.text for event in events if event.type == "response.delta"
     )
-    assert events[-1].terminal_status == "success"
+    assert events[-1].terminal_status == "completed"
+
+
+def test_report_mode_repairs_publication_validation_once() -> None:
+    tool_call = {
+        "index": 0,
+        "id": "call-report-validation-repair",
+        "type": "function",
+        "function": {"name": "data:fetch_stock_data", "arguments": '{"ticker":"ABC"}'},
+    }
+    base = (
+        '{"executive_summary":"Verified.","key_drivers":["Demand."],'
+        '"detailed_analysis":"Close [[fact:prices:data.latest.close]].",'
+        '"risks":["Execution."],"final_view":"Review.","claims":['
+        '{"claim_id":"c1","text":"Close [[fact:prices:data.latest.close]].",'
+        '"importance":"major","evidence_refs":["src"],'
+        '"numeric_refs":["prices:data.latest.close"]}],'
+    )
+    invalid = base + '"citations":[{"citation_id":"src","source_id":"missing"}]}'
+    valid = base + '"citations":[{"citation_id":"src","source_id":"prices"}]}'
+    model = FakeModel(
+        [
+            [
+                {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"tool_calls": [tool_call]}}]},
+                }
+            ],
+            [{"event": "token", "data": invalid}],
+            [{"event": "token", "data": valid}],
+        ]
+    )
+
+    events = asyncio.run(
+        _collect(
+            AgentLoop(
+                model, ReportTools(), config=AgentLoopConfig(publish_reports=True)
+            ),
+            [Message(role="user", content="report on ABC")],
+        )
+    )
+
+    assert events[-1].type == "run.completed"
+    assert events[-1].terminal_status == "completed"
+    assert "citation_source_missing" in model.calls[-1][-1].content
+
+
+def test_report_repair_timeout_returns_verified_evidence_fallback() -> None:
+    tool_call = {
+        "index": 0,
+        "id": "call-report-fallback",
+        "type": "function",
+        "function": {"name": "data:fetch_stock_data", "arguments": '{"ticker":"ABC"}'},
+    }
+    invalid_report = (
+        '{"executive_summary":"Unsupported.","key_drivers":["Demand."],'
+        '"detailed_analysis":"No validated claim.","risks":["Execution."],'
+        '"final_view":"Review.","claims":[{"claim_id":"c1",'
+        '"text":"Unsupported.","importance":"major",'
+        '"evidence_refs":[],"numeric_refs":[]}]}'
+    )
+    model = ValidationRepairTimeoutModel(tool_call, invalid_report)
+    events = asyncio.run(
+        _collect(
+            AgentLoop(
+                model, ReportTools(), config=AgentLoopConfig(publish_reports=True)
+            ),
+            [Message(role="user", content="report on ABC")],
+        )
+    )
+
+    output = "".join(event.text for event in events if event.type == "response.delta")
+    assert events[-1].type == "run.completed"
+    assert events[-1].terminal_status == "completed_with_limited_evidence"
+    assert "Verified evidence" in output
+    assert "No unsupported investment conclusion" in output
 
 
 def test_loop_pauses_on_malformed_clarification_call() -> None:
@@ -683,7 +990,7 @@ def test_broad_finance_request_keeps_model_tool_catalog_bounded() -> None:
 
     assert len(model.calls) == 1
     assert len(model.request_kwargs[0]["tools"]) <= 8
-    assert model.request_kwargs[0]["max_tokens"] == 512
+    assert model.request_kwargs[0]["max_tokens"] == 1024
     assert model.request_kwargs[0]["temperature"] == 0.1
 
 

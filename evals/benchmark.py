@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 from pathlib import Path
 
-from evals.run import load_jsonl
+_run_module = importlib.import_module("evals.run" if __package__ else "run")
+load_jsonl = _run_module.load_jsonl
 
 
 def validate_frozen_benchmark(tasks_path: Path, expected_cases: int) -> list[str]:
@@ -46,7 +48,32 @@ def validate_benchmark_artifacts(
             errors.append("source manifest requires a version")
         if manifest.get("status") == "seeded_fixture":
             return errors
-        for source in manifest.get("sources", []):
+        sources = manifest.get("sources")
+        if not isinstance(sources, list) or not sources:
+            errors.append("source manifest requires at least one source")
+            return errors
+        for source in sources:
+            if not isinstance(source, dict):
+                errors.append("source manifest entries must be objects")
+                continue
             if not source.get("sha256") or not source.get("retrieved_at"):
                 errors.append(f"source {source.get('id', '')} lacks hash or timestamp")
     return errors
+
+
+def classify_benchmark_artifacts(
+    tasks_path: Path,
+    results_path: Path,
+    manifest_path: Path,
+    expected_cases: int,
+) -> str:
+    """Classify a complete artifact set without claiming quality for fixtures."""
+    errors = validate_benchmark_artifacts(
+        tasks_path, results_path, manifest_path, expected_cases
+    )
+    if errors:
+        return "insufficient_evidence"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    if manifest.get("status") == "seeded_fixture":
+        return "synthetic_contract"
+    return "market_quality_measured"

@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+from datetime import UTC, datetime
+
 import pytest
 from app.core.agent_loop import FinancialToolRunner
 from app.core.resources import RuntimeResources
 from app.observability.provider_archive import ProviderArchive
+from data.news_pipeline.models import NewsPipelineRecord
 
 
 class FakeFetcher:
@@ -134,43 +137,55 @@ async def test_fundamentals_prefer_upstox_when_an_isin_is_resolved() -> None:
 
 
 @pytest.mark.asyncio
-async def test_news_prefers_upstox_and_retains_article_citations() -> None:
-    class FakeUpstox:
-        def resolve_instrument(self, ticker: str) -> list[dict]:
-            assert ticker == "ABC.NS"
-            return [{"instrument_key": "NSE_EQ|ABC"}]
+async def test_news_tool_uses_the_configured_news_pipeline() -> None:
+    class FakeNewsPipeline:
+        async def run(self, *, company, time_window_days):
+            assert company.ticker == "ABC.NS"
+            assert time_window_days == 30
+            return [
+                NewsPipelineRecord(
+                    ticker="ABC.NS",
+                    company_name="ABC.NS",
+                    market="IN",
+                    url="https://news.example/article",
+                    canonical_url="https://news.example/article",
+                    title="ABC update",
+                    author=None,
+                    snippet="ABC update",
+                    article_text="ABC update",
+                    word_count=2,
+                    publish_time=None,
+                    retrieval_time=datetime.now(UTC),
+                    source_domain="news.example",
+                    source_type="news",
+                    source_tier=3,
+                    paywall_detected=False,
+                    extraction_status="snippet_only",
+                    quality_score=42.0,
+                    relevance_check=True,
+                    is_duplicate=False,
+                    cluster_id=None,
+                    query_intent="company_news",
+                    search_provider="replay",
+                    pipeline_version="test",
+                )
+            ]
 
-        def fetch_news(self, keys: list[str], *, page_size: int) -> dict:
-            assert keys == ["NSE_EQ|ABC"]
-            assert page_size == 10
-            return {
-                "data": {
-                    "NSE_EQ|ABC": [
-                        {
-                            "heading": "ABC announces results",
-                            "article_link": "https://news.example/abc-results",
-                            "summary": "Results summary",
-                            "published_time": "2026-09-17T00:00:00+05:30",
-                        }
-                    ]
-                }
-            }
-
-    fetcher = FakeFetcher()
     tool_runner = FinancialToolRunner(
         RuntimeResources(
-            llm_service=object(), yf_fetcher=fetcher, upstox_fetcher=FakeUpstox()
+            llm_service=object(),
+            yf_fetcher=FakeFetcher(),
+            news_pipeline_runner=FakeNewsPipeline(),
         )
     )
 
     result = await tool_runner.execute("news:fetch_news", {"ticker": "ABC.NS"})
 
     assert result["success"] is True
-    assert result["provenance"]["source"] == "upstox"
+    assert result["data"][0]["title"] == "ABC update"
     assert result["sources"] == [
-        {"name": "news.example", "url": "https://news.example/abc-results"}
+        {"name": "news.example", "url": "https://news.example/article"}
     ]
-    assert fetcher.calls == []
 
 
 @pytest.mark.asyncio
@@ -184,7 +199,9 @@ async def test_cached_technical_analysis_retains_market_data_provenance() -> Non
 
     assert result["success"] is True
     assert result["provenance"]["source"] == "yfinance"
-    assert result["provenance"]["source_url"] == "https://finance.yahoo.com"
+    assert result["provenance"]["source_url"] == (
+        "https://finance.yahoo.com/quote/ABC/history/"
+    )
 
 
 @pytest.mark.asyncio

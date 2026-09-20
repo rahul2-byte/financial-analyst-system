@@ -17,7 +17,22 @@ from app.models.request_models import Message
 
 def _wants_report(query: str) -> bool:
     lowered = query.casefold().strip()
-    return lowered.startswith(("analyze ", "analyse ", "research ", "compare ")) or any(
+    for prefix in (
+        "i want you to ",
+        "i'd like you to ",
+        "i would like you to ",
+        "please ",
+        "can you ",
+        "could you ",
+        "would you ",
+        "help me ",
+    ):
+        if lowered.startswith(prefix):
+            lowered = lowered[len(prefix) :].lstrip()
+            break
+    return lowered.startswith(
+        ("analyze ", "analyse ", "analsye ", "research ", "compare ")
+    ) or any(
         marker in lowered
         for marker in (
             "report",
@@ -55,6 +70,8 @@ class ResearchRunner:
                 model=settings.HIVE_MODEL,
                 max_tokens=settings.HIVE_MAX_OUTPUT_TOKENS,
                 report_max_tokens=settings.HIVE_MAX_REPORT_TOKENS,
+                report_repair_max_tokens=settings.HIVE_MAX_REPAIR_TOKENS,
+                report_repair_timeout_seconds=settings.HIVE_REPAIR_TIMEOUT,
                 publish_reports=_wants_report(normalize_research_scope(query)),
             ),
             skill_registry=SkillRegistry.bundled(),

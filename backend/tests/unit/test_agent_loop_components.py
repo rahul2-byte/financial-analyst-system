@@ -90,6 +90,95 @@ async def test_model_streaming_converts_provider_tokens_to_assistant_message() -
 
 
 @pytest.mark.asyncio
+async def test_model_streaming_accepts_report_content_above_message_limit() -> None:
+    class Model:
+        def generate_stream(self, messages, model, **kwargs):
+            del messages, model, kwargs
+
+            async def stream():
+                yield {"event": "token", "data": "x" * 9_000}
+
+            return stream()
+
+    events = [
+        item
+        async for item in ModelStreaming(
+            Model(), "fixture", 128, list, publish_reports=True
+        ).stream([], EventFactory(uuid4()), 1)
+    ]
+
+    assert len(events[-1].content) == 9_000
+
+
+@pytest.mark.asyncio
+async def test_model_streaming_links_usage_and_run_id_to_provider_event() -> None:
+    requests = []
+
+    class Model:
+        def generate_stream(self, messages, model, **kwargs):
+            del messages, model
+            requests.append(kwargs)
+
+            async def stream():
+                yield {
+                    "event": "usage",
+                    "data": {"prompt_tokens": 4, "completion_tokens": 2},
+                }
+                yield {
+                    "event": "provider_completed",
+                    "data": {"attempts": 1, "duration_ms": 10},
+                }
+
+            return stream()
+
+    factory = EventFactory(uuid4())
+    events = [
+        item
+        async for item in ModelStreaming(Model(), "fixture", 128, list).stream(
+            [], factory, 1
+        )
+    ]
+
+    completed = next(event for event in events if event.type == "provider.completed")
+    assert requests[0]["run_id"] == str(factory.run_id)
+    assert completed.meta.run_id == factory.run_id
+    assert completed.usage.prompt_tokens == 4
+    assert completed.usage.completion_tokens == 2
+
+
+@pytest.mark.asyncio
+async def test_model_streaming_preserves_partial_provider_failure() -> None:
+    class Model:
+        def generate_stream(self, messages, model, **kwargs):
+            del messages, model, kwargs
+
+            async def stream():
+                yield {"event": "token", "data": "partial"}
+                yield {
+                    "event": "provider_failed",
+                    "data": {
+                        "phase": "transport",
+                        "message": "connection reset",
+                        "partial_output": True,
+                        "timeout": False,
+                    },
+                }
+
+            return stream()
+
+    events = [
+        item
+        async for item in ModelStreaming(Model(), "fixture", 128, list).stream(
+            [], EventFactory(uuid4()), 1
+        )
+    ]
+
+    failed = next(event for event in events if event.type == "provider.failed")
+    assert failed.partial_output is True
+    assert failed.timeout is False
+
+
+@pytest.mark.asyncio
 async def test_report_model_gets_room_after_tool_evidence() -> None:
     requests = []
 
@@ -104,7 +193,7 @@ async def test_report_model_gets_room_after_tool_evidence() -> None:
             return stream()
 
     stream = ModelStreaming(
-        Model(), "fixture", 4096, list, publish_reports=True, report_max_tokens=8192
+        Model(), "fixture", 8192, list, publish_reports=True, report_max_tokens=32768
     )
     events = [
         item
@@ -116,4 +205,70 @@ async def test_report_model_gets_room_after_tool_evidence() -> None:
     ]
 
     assert events[-1].content == "answer"
-    assert requests[0]["max_tokens"] == 8192
+    assert requests[0]["max_tokens"] == 32768
+
+
+@pytest.mark.asyncio
+async def test_report_repair_uses_bounded_token_budget() -> None:
+    requests = []
+
+    class Model:
+        def generate_stream(self, messages, model, **kwargs):
+            del model
+            requests.append(kwargs)
+
+            async def stream():
+                yield {"event": "token", "data": "repair"}
+
+            return stream()
+
+    stream = ModelStreaming(
+        Model(),
+        "fixture",
+        8192,
+        list,
+        publish_reports=True,
+        report_max_tokens=32768,
+        report_repair_max_tokens=4096,
+    )
+    messages = [
+        Message(role="system", content="Formatting repair required. Fix JSON."),
+        Message(role="assistant", content="{}"),
+    ]
+
+    _ = [item async for item in stream.stream(messages, EventFactory(uuid4()), 2)]
+
+    assert requests[0]["max_tokens"] == 4096
+    assert requests[0]["timeout_seconds"] == 120.0
+
+
+@pytest.mark.asyncio
+async def test_reasoning_frames_are_not_rendered_as_report_text() -> None:
+    class Model:
+        def generate_stream(self, messages, model, **kwargs):
+            del messages, model, kwargs
+
+            async def stream():
+                yield {
+                    "event": "chunk",
+                    "data": {
+                        "choices": [
+                            {"delta": {"reasoning_content": "hidden reasoning"}}
+                        ]
+                    },
+                }
+                yield {
+                    "event": "token",
+                    "data": "visible report",
+                }
+
+            return stream()
+
+    events = [
+        item
+        async for item in ModelStreaming(
+            Model(), "fixture", 8192, list, publish_reports=True
+        ).stream([], EventFactory(uuid4()), 1)
+    ]
+
+    assert events[-1].content == "visible report"

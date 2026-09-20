@@ -8,6 +8,15 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+_CANDIDATE_SOURCE_FIELDS = (
+    "source_id",
+    "source_url",
+    "publisher",
+    "retrieved_at",
+    "permitted_use",
+    "sha256",
+)
+
 
 def freeze_snapshot(
     root: Path,
@@ -76,6 +85,19 @@ def validate_snapshot_record(root: Path, record: dict[str, Any]) -> list[str]:
         datetime.fromisoformat(str(record.get("retrieved_at")))
     except ValueError:
         errors.append("snapshot timestamp is invalid")
+    return errors
+
+
+def validate_candidate_source_record(record: dict[str, Any]) -> list[str]:
+    """Reject candidate records that pretend to contain frozen source metadata."""
+    errors: list[str] = []
+    if record.get("status") != "pending_owner_source":
+        errors.append("candidate source must remain unresolved")
+    for field in _CANDIDATE_SOURCE_FIELDS:
+        if field not in record:
+            errors.append(f"candidate source requires {field}")
+    if any(record.get(field) not in (None, "") for field in _CANDIDATE_SOURCE_FIELDS):
+        errors.append("candidate source must remain unresolved")
     return errors
 
 

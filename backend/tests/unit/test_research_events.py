@@ -5,6 +5,8 @@ import pytest
 from app.events.models import (
     EventFactory,
     ProviderAttemptStarted,
+    ProviderCompleted,
+    ProviderFailed,
     ProviderRetrying,
     RunCompleted,
     RunStarted,
@@ -45,3 +47,34 @@ def test_provider_events_share_the_run_trace_contract() -> None:
     assert attempt.type == "provider.attempt.started"
     assert retry.status_code == 504
     assert [attempt.meta.sequence, retry.meta.sequence] == [1, 2]
+
+
+def test_provider_usage_and_failure_telemetry_are_typed() -> None:
+    factory = EventFactory(conversation_id=uuid4())
+    completed = factory.make(
+        ProviderCompleted,
+        attempts=1,
+        duration_ms=12.0,
+        model_id="model-a",
+        usage={
+            "prompt_tokens": 4,
+            "completion_tokens": 2,
+            "total_tokens": 6,
+            "verified": True,
+        },
+    )
+    failed = factory.make(
+        ProviderFailed,
+        attempts=2,
+        phase="transport",
+        message="connection reset",
+        duration_ms=20.0,
+        timeout=False,
+        partial_output=True,
+    )
+
+    assert completed.meta.run_id == failed.meta.run_id
+    assert completed.usage is not None
+    assert completed.usage.total_tokens == 6
+    assert failed.partial_output is True
+    assert failed.usage is None

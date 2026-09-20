@@ -33,18 +33,85 @@ class EvidenceAccounting:
         self.failed_evidence_tools = 0
         self.invalid_evidence = False
         self.facts: dict[str, EvidenceFact] = {}
+        self.availability: dict[str, dict[str, Any]] = {}
+        self.sources: dict[str, dict[str, str]] = {}
 
     def record_success(self, name: str, payload: dict[str, Any]) -> None:
         if name not in _EVIDENCE_TOOLS:
             return
         self.successful_evidence_tools += 1
-        self.facts.update(extract_evidence_facts(payload))
-        if name in _PROVENANCE_REQUIRED_TOOLS and not valid_provenance(payload):
+        extracted = extract_evidence_facts(payload)
+        self.facts.update(extracted)
+        source = _source_name(name)
+        source_records = payload.get("sources")
+        if isinstance(source_records, list):
+            for record in source_records:
+                if isinstance(record, dict) and record.get("url"):
+                    source_id = str(record.get("name") or source)
+                    self.sources[source_id] = {
+                        "name": source_id,
+                        "url": str(record["url"]),
+                    }
+        provenance = payload.get("provenance")
+        if isinstance(provenance, dict) and provenance.get("source"):
+            source_id = str(provenance["source"])
+            self.sources.setdefault(
+                source_id,
+                {
+                    "name": source_id,
+                    "url": str(provenance.get("source_url") or ""),
+                    "quality_status": str(provenance.get("quality_status") or ""),
+                    "observed_at": str(provenance.get("observed_at") or ""),
+                },
+            )
+        valid = name not in _PROVENANCE_REQUIRED_TOOLS or valid_provenance(payload)
+        quality_status = (
+            str(provenance.get("quality_status"))
+            if isinstance(provenance, dict)
+            else ""
+        )
+        self.availability[source] = {
+            "source": source,
+            "status": (
+                "unavailable"
+                if not valid
+                else "degraded"
+                if quality_status == "degraded"
+                else "available"
+            ),
+            "reason": (
+                "invalid provenance"
+                if not valid
+                else "provider quality degraded"
+                if quality_status == "degraded"
+                else None
+            ),
+            "evidence_count": len(extracted),
+        }
+        if not valid:
             self.invalid_evidence = True
 
     def record_failure(self, name: str, payload: dict[str, Any]) -> None:
         if name in _EVIDENCE_TOOLS and not payload.get("retryable", False):
             self.failed_evidence_tools += 1
+            source = _source_name(name)
+            self.availability[source] = {
+                "source": source,
+                "status": "unavailable",
+                "reason": str(payload.get("error") or "tool failed"),
+                "evidence_count": 0,
+            }
+
+
+def _source_name(name: str) -> str:
+    return {
+        "news:fetch_news": "news",
+        "data:fetch_stock_data": "market_data",
+        "data:fetch_fundamentals": "fundamentals",
+        "analysis:run_fundamental_scan": "fundamental_analysis",
+        "analysis:run_technical_scan": "technical_analysis",
+        "analysis:get_technical_overview": "technical_overview",
+    }.get(name, name)
 
 
 def extract_evidence_facts(payload: dict[str, Any]) -> dict[str, EvidenceFact]:

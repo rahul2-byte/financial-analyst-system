@@ -4,10 +4,11 @@ import ipaddress
 import logging
 import re
 import socket
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 
 import httpx
-from data.news_pipeline.models import ExtractionResult
+from data.news_pipeline.models import CompanyContext, ExtractionResult
+from data.news_pipeline.query_templates import derive_company_aliases
 
 logger = logging.getLogger(__name__)
 MAX_ARTICLE_BYTES = 2_000_000
@@ -17,6 +18,24 @@ PAYWALL_PATTERNS = (
     "sign in to continue",
     "this content is for subscribers",
 )
+
+
+def matches_company_aliases(text: str | None, company_name: str, ticker: str) -> bool:
+    if not text:
+        return False
+    company_ticker = ticker.split(".", 1)[0]
+    aliases = derive_company_aliases(
+        CompanyContext(
+            ticker=ticker,
+            company_name=company_name,
+            nse_symbol=company_ticker,
+        )
+    )
+    lowered = text.lower()
+    return any(
+        re.search(rf"(?<![a-z0-9]){re.escape(alias.lower())}(?![a-z0-9])", lowered)
+        for alias in aliases
+    )
 
 
 class ArticleExtractor:
@@ -110,14 +129,29 @@ class ArticleExtractor:
                     for item in addresses
                 ):
                     return None
-                response = httpx.get(current, timeout=20.0, follow_redirects=False)
-                if response.status_code in {301, 302, 303, 307, 308}:
-                    current = response.headers.get("location", "")
-                    continue
-                response.raise_for_status()
-                if len(response.content) > MAX_ARTICLE_BYTES:
-                    return None
-                return response
+                with httpx.stream(
+                    "GET", current, timeout=20.0, follow_redirects=False
+                ) as response:
+                    if response.status_code in {301, 302, 303, 307, 308}:
+                        location = response.headers.get("location")
+                        if not location:
+                            return None
+                        current = urljoin(current, location)
+                        continue
+                    response.raise_for_status()
+                    chunks: list[bytes] = []
+                    total_bytes = 0
+                    for chunk in response.iter_bytes():
+                        total_bytes += len(chunk)
+                        if total_bytes > MAX_ARTICLE_BYTES:
+                            return None
+                        chunks.append(chunk)
+                    return httpx.Response(
+                        response.status_code,
+                        headers=response.headers,
+                        content=b"".join(chunks),
+                        request=response.request,
+                    )
         except (OSError, httpx.HTTPError, ValueError) as exc:
             logger.warning("Article download failed: %s", exc)
         return None
@@ -163,7 +197,4 @@ class ArticleExtractor:
     def _relevance_check(
         self, text: str | None, company_name: str, ticker: str
     ) -> bool:
-        if not text:
-            return False
-        lowered = text.lower()
-        return company_name.lower() in lowered or ticker.lower() in lowered
+        return matches_company_aliases(text, company_name, ticker)

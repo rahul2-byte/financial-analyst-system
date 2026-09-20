@@ -25,7 +25,7 @@ class _InvalidReportModel:
         return stream()
 
 
-def test_chat_response_and_run_artifact_are_visible(tmp_path: Path, monkeypatch):
+def test_cli_response_and_run_artifact_are_visible(tmp_path: Path, monkeypatch):
     monkeypatch.setattr(
         "finai.session.build_runtime_resources",
         lambda **kwargs: RuntimeResources(llm_service=_Model(), yf_fetcher=object()),
@@ -62,7 +62,9 @@ def test_old_tool_approval_does_not_block_a_new_query(tmp_path: Path, monkeypatc
     assert repl.store.read_pending() is None
 
 
-def test_invalid_report_gives_user_response_and_artifact(tmp_path: Path, monkeypatch):
+def test_invalid_report_fails_with_artifact_and_preserves_no_draft(
+    tmp_path: Path, monkeypatch
+):
     monkeypatch.setattr(
         "finai.session.build_runtime_resources",
         lambda **kwargs: RuntimeResources(
@@ -75,13 +77,9 @@ def test_invalid_report_gives_user_response_and_artifact(tmp_path: Path, monkeyp
         return [event async for event in repl.typed_stream("Write a report on ABC.NS")]
 
     events = asyncio.run(collect())
-    output = "".join(event.text for event in events if event.type == "response.delta")
-    completed = next(event for event in events if event.type == "run.completed")
-    assert "could not verify" in output.lower()
-    assert "900%" not in output
-    assert completed.terminal_status == "insufficient_data"
-    assert completed.artifact_path is not None
-    assert Path(completed.artifact_path).exists()
+    failed = next(event for event in events if event.type == "run.failed")
+    assert failed.category == "report_parse"
+    assert not any(event.type == "response.delta" for event in events)
 
 
 def test_line_terminal_prints_artifact_location(tmp_path: Path, monkeypatch, capsys):

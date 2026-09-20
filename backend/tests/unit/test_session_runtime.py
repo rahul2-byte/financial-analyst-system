@@ -3,7 +3,19 @@ from uuid import uuid4
 import pytest
 from app.core.resources import RuntimeResources
 from app.models.request_models import Message
-from finai.session_runtime import ResearchRunner
+from finai.session_runtime import ResearchRunner, _wants_report
+
+
+def test_report_intent_accepts_polite_analysis_requests() -> None:
+    assert _wants_report("I want you to analyse HDFC Bank") is True
+    assert _wants_report("Please analyze INFY") is True
+    assert _wants_report("Could you research the banking sector?") is True
+    assert _wants_report("Analsye the HDFC BANK stock for the last 1 year") is True
+
+
+def test_report_intent_does_not_promote_ordinary_questions() -> None:
+    assert _wants_report("What is HDFC Bank's current price?") is False
+    assert _wants_report("") is False
 
 
 @pytest.mark.asyncio
@@ -64,7 +76,7 @@ async def test_cli_runner_uses_bundled_skill_registry(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_chat_query_does_not_force_structured_report(monkeypatch) -> None:
+async def test_plain_query_does_not_force_structured_report(monkeypatch) -> None:
     configs = []
 
     class FakeLoop:

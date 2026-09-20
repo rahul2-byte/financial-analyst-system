@@ -1,11 +1,108 @@
 import asyncio
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from app.events.models import EventFactory, RunCompleted, RunStarted, TextDelta
 from app.models.request_models import Message
 from finai.__main__ import FinAIRepl
 from finai.session_store import SessionStore
+
+
+def _write_saved_run(
+    root,
+    session_id: str,
+    run_id: str,
+    *,
+    created_at: str,
+    status: str,
+    text: str = "report",
+) -> None:
+    path = root / "sessions" / session_id / "runs" / f"{run_id}.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "run_id": run_id,
+                "session_id": session_id,
+                "query": "Analyse INFY",
+                "status": status,
+                "created_at": created_at,
+                "events": [
+                    {"type": "response.delta", "text": text},
+                    {"type": "run.completed", "terminal_status": status},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
+def test_latest_saved_report_selects_newest_eligible_run(tmp_path) -> None:
+    root = tmp_path / ".finai"
+    now = datetime.now(UTC)
+    _write_saved_run(
+        root,
+        "old-session",
+        "old-run",
+        created_at=(now - timedelta(minutes=1)).isoformat(),
+        status="success",
+        text="old report",
+    )
+    _write_saved_run(
+        root,
+        "new-session",
+        "new-run",
+        created_at=now.isoformat(),
+        status="partial",
+        text="new report",
+    )
+
+    report = SessionStore.latest_saved_report(root)
+
+    assert report is not None
+    assert report["run_id"] == "new-run"
+    assert report["status"] == "partial"
+    assert report["report_text"] == "new report"
+
+
+def test_latest_saved_report_ignores_failed_and_reportless_runs(tmp_path) -> None:
+    root = tmp_path / ".finai"
+    now = datetime.now(UTC)
+    _write_saved_run(
+        root,
+        "session",
+        "failed-run",
+        created_at=now.isoformat(),
+        status="failed",
+    )
+    path = root / "sessions" / "session" / "runs" / "empty-run.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "run_id": "empty-run",
+                "session_id": "session",
+                "status": "partial",
+                "created_at": (now - timedelta(minutes=1)).isoformat(),
+                "events": [{"type": "run.completed", "terminal_status": "partial"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert SessionStore.latest_saved_report(root) is None
+
+
+def test_latest_saved_report_ignores_structurally_invalid_json_artifact(
+    tmp_path,
+) -> None:
+    root = tmp_path / ".finai"
+    path = root / "sessions" / "session" / "runs" / "invalid.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[]", encoding="utf-8")
+
+    assert SessionStore.latest_saved_report(root) is None
 
 
 def test_session_store_persists_history_and_run_artifacts(tmp_path) -> None:
@@ -87,6 +184,31 @@ def test_repl_persists_typed_stream_transcript_and_run(tmp_path) -> None:
         "response.delta",
         "run.completed",
     ]
+
+
+def test_repl_does_not_duplicate_runtime_persisted_final_report(tmp_path) -> None:
+    repl = FinAIRepl(root=tmp_path / ".finai")
+
+    async def stream(history, query, conversation_id, *, message_writer, **kwargs):
+        del history, query, kwargs
+        message_writer(Message(role="assistant", content="final report"))
+        factory = EventFactory(conversation_id)
+        yield factory.make(RunStarted, query="Analyse INFY")
+        yield factory.make(TextDelta, text="final report")
+        yield factory.make(RunCompleted, terminal_status="success", duration_ms=1.0)
+
+    repl.runtime.stream = stream
+
+    async def scenario() -> None:
+        _ = [event async for event in repl.typed_stream("Analyse INFY")]
+
+    asyncio.run(scenario())
+    assistants = [
+        message.content
+        for message in repl.store.load_history()
+        if message.role == "assistant"
+    ]
+    assert assistants == ["final report"]
 
 
 def test_store_marks_abandoned_run_interrupted(tmp_path) -> None:

@@ -16,6 +16,13 @@ _USE_CONFIGURED_TOKEN = object()
 class UpstoxError(RuntimeError):
     """An Upstox request or response validation failure."""
 
+    def __init__(
+        self, message: str, *, status_code: int | None = None, path: str | None = None
+    ) -> None:
+        self.status_code = status_code
+        self.path = path
+        super().__init__(message)
+
 
 class UpstoxFetcher:
     """Provider adapter; callers receive canonical dictionaries, never raw HTTP."""
@@ -52,8 +59,14 @@ class UpstoxFetcher:
             )
             response.raise_for_status()
             payload = response.json()
+        except httpx.HTTPStatusError as exc:
+            raise UpstoxError(
+                f"Upstox request failed: {path}",
+                status_code=exc.response.status_code,
+                path=path,
+            ) from exc
         except (httpx.HTTPError, ValueError) as exc:
-            raise UpstoxError(f"Upstox request failed: {path}") from exc
+            raise UpstoxError(f"Upstox request failed: {path}", path=path) from exc
         if not isinstance(payload, dict) or payload.get("status") != "success":
             raise UpstoxError(f"Upstox returned an invalid response: {path}")
         return payload

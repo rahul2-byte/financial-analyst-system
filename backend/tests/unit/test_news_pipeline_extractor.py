@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from typing import ClassVar
+
+import httpx
 from data.news_pipeline.extractor import ArticleExtractor
 
 
@@ -79,3 +82,116 @@ def test_extractor_marks_irrelevant_when_company_not_present(monkeypatch):
     )
 
     assert result.relevance_check is False
+
+
+def test_extractor_matches_common_company_name_alias(monkeypatch):
+    extractor = ArticleExtractor()
+    article = "India's HDFC Bank reported an update for customers."
+
+    monkeypatch.setattr(extractor, "_extract_with_trafilatura", lambda url: article)
+
+    result = extractor.extract(
+        url="https://example.com/story",
+        source_domain="example.com",
+        company_name="HDFC BANK LTD",
+        ticker="HDFCBANK.NS",
+        snippet="ignored",
+        source_type="news",
+    )
+
+    assert result.relevance_check is True
+
+
+def test_safe_get_stops_after_stream_exceeds_byte_limit(monkeypatch):
+    extractor = ArticleExtractor()
+    chunks_seen = 0
+
+    class Response:
+        status_code = 200
+        headers: ClassVar[dict[str, str]] = {}
+        request = httpx.Request("GET", "https://example.com/story")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def raise_for_status(self):
+            return None
+
+        def iter_bytes(self):
+            nonlocal chunks_seen
+            for chunk in (b"1234", b"56", b"789"):
+                chunks_seen += 1
+                yield chunk
+
+    monkeypatch.setattr("data.news_pipeline.extractor.MAX_ARTICLE_BYTES", 5)
+    monkeypatch.setattr(
+        "data.news_pipeline.extractor.socket.getaddrinfo",
+        lambda *args: [(None, None, None, None, ("93.184.216.34", 443))],
+    )
+    monkeypatch.setattr(
+        "data.news_pipeline.extractor.httpx.stream", lambda *args, **kwargs: Response()
+    )
+
+    assert extractor._safe_get("https://example.com/story") is None
+    assert chunks_seen == 2
+
+
+def test_safe_get_validates_and_follows_bounded_redirects(monkeypatch):
+    extractor = ArticleExtractor()
+    urls = []
+
+    class Response:
+        def __init__(self, url, status_code, headers=None, chunks=()):
+            self.status_code = status_code
+            self.headers = headers or {}
+            self.request = httpx.Request("GET", url)
+            self._chunks = chunks
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return None
+
+        def raise_for_status(self):
+            return None
+
+        def iter_bytes(self):
+            yield from self._chunks
+
+    def stream(_method, url, **_kwargs):
+        urls.append(url)
+        if url == "https://example.com/start":
+            return Response(url, 302, {"location": "/final"})
+        return Response(url, 200, chunks=(b"article",))
+
+    monkeypatch.setattr(
+        "data.news_pipeline.extractor.socket.getaddrinfo",
+        lambda *args: [(None, None, None, None, ("93.184.216.34", 443))],
+    )
+    monkeypatch.setattr("data.news_pipeline.extractor.httpx.stream", stream)
+
+    response = extractor._safe_get("https://example.com/start")
+
+    assert response is not None
+    assert response.content == b"article"
+    assert urls == ["https://example.com/start", "https://example.com/final"]
+
+
+def test_safe_get_returns_none_for_failed_source(monkeypatch):
+    extractor = ArticleExtractor()
+    request = httpx.Request("GET", "https://example.com/story")
+
+    def stream(*args, **kwargs):
+        raise httpx.ConnectError("source unavailable", request=request)
+
+    monkeypatch.setattr(
+        "data.news_pipeline.extractor.socket.getaddrinfo",
+        lambda *args: [(None, None, None, None, ("93.184.216.34", 443))],
+    )
+    monkeypatch.setattr("data.news_pipeline.extractor.httpx.stream", stream)
+
+    assert extractor._safe_get("https://example.com/story") is None

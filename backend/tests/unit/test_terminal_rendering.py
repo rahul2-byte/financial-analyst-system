@@ -14,7 +14,9 @@ from finai.render import (
     render_context,
     render_header,
     render_response,
+    render_saved_report,
     render_sources,
+    render_status,
     render_user_message,
 )
 from finai.state import PresentationState, reduce_event
@@ -94,6 +96,35 @@ def test_response_renderer_formats_markdown_table() -> None:
     assert "Company" in output
     assert "Revenue" in output
     assert "12.4%" in output
+
+
+def test_status_renderer_names_partial_terminal_status() -> None:
+    state = PresentationState(terminal_status="partial")
+    state = reduce_event(
+        state,
+        EventFactory(__import__("uuid").uuid4()).make(
+            RunCompleted, terminal_status="partial"
+        ),
+    )
+
+    assert "partial" in render_status(state).plain
+    assert "evidence limited" in render_status(state).plain
+
+
+def test_saved_report_renderer_preserves_partial_metadata_and_body() -> None:
+    rendered = render_saved_report(
+        {
+            "status": "partial",
+            "query": "Analyse INFY",
+            "created_at": "2026-09-19T10:00:00+00:00",
+            "artifact_path": "/tmp/run-1.json",
+            "report_text": "Saved report body",
+        }
+    )
+
+    assert "Partial evidence" in rendered.markup
+    assert "Saved report body" in rendered.markup
+    assert "run-1.json" in rendered.markup
 
 
 def test_context_renderer_shows_only_known_runtime_state() -> None:

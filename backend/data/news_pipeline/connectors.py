@@ -87,6 +87,23 @@ def _source_domain(url: str) -> str:
     return domain.removeprefix("www.")
 
 
+def _retryable_search_error(exc: Exception) -> bool:
+    if isinstance(exc, (TimeoutError, OSError, ConnectionError)):
+        return True
+    return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {
+        429,
+        500,
+        502,
+        503,
+        504,
+    }
+
+
+def _provider_error_reason(exc: Exception) -> str:
+    status_code = getattr(exc, "status_code", None)
+    return f"{type(exc).__name__}:{status_code}" if status_code else type(exc).__name__
+
+
 def _looks_like_portal_page(*, title: str, text: str) -> bool:
     lowered_title = title.lower()
     lowered_text = text.lower()
@@ -140,15 +157,37 @@ class UpstoxNewsConnector:
 
     def __init__(self, fetcher: UpstoxFetcher | None = None) -> None:
         self.fetcher = fetcher or UpstoxFetcher()
+        self.last_run_stats: dict[str, Any] = {}
 
     async def fetch(
         self, company: CompanyContext, *, time_window_days: int
     ) -> list[RawSearchResult]:
         del time_window_days
-        keys = [company.nse_symbol or company.ticker]
         try:
-            payload = await asyncio.to_thread(self.fetcher.fetch_news, keys)
-        except (UpstoxError, OSError):
+            query = company.nse_symbol or company.ticker.split(".", 1)[0]
+            candidates = await asyncio.to_thread(self.fetcher.resolve_instrument, query)
+            instrument_key = next(
+                (
+                    str(item.get("instrument_key"))
+                    for item in candidates
+                    if isinstance(item, dict) and item.get("instrument_key")
+                ),
+                None,
+            )
+            if instrument_key is None:
+                self.last_run_stats = {
+                    "status": "unavailable",
+                    "reason": "instrument_not_resolved",
+                }
+                return []
+            payload = await asyncio.to_thread(
+                self.fetcher.fetch_news, [instrument_key], page_size=30
+            )
+        except (UpstoxError, OSError, ConnectionError) as exc:
+            self.last_run_stats = {
+                "status": "unavailable",
+                "reason": _provider_error_reason(exc),
+            }
             logger.warning("Upstox news unavailable", extra={"ticker": company.ticker})
             return []
         data = payload.get("data", {}) if isinstance(payload, dict) else {}
@@ -220,11 +259,17 @@ class TinyFishSearchConnector:
         self.max_results_per_query = max_results_per_query or int(
             settings.TINYFISH_MAX_RESULTS_PER_QUERY
         )
+        self.last_run_stats: dict[str, Any] = {}
 
     async def fetch(
         self, company: CompanyContext, *, time_window_days: int
     ) -> list[RawSearchResult]:
         if isinstance(self.client, TinyFishSearchClient) and not self.client.api_key:
+            self.last_run_stats = {
+                "query_count": 0,
+                "query_failures": 0,
+                "failure_reasons": ["api_key_missing"],
+            }
             logger.warning("TINYFISH_API_KEY is not configured; skipping news search")
             logger.info(
                 "TinyFish connector normalized results",
@@ -250,13 +295,42 @@ class TinyFishSearchConnector:
         portal_pages_detected = 0
         malformed_items_dropped = 0
         candidates_emitted = 0
+        query_failures = 0
+        failure_reasons: list[str] = []
 
         for query_spec in queries:
-            search_results = await self.client.search(
-                query=str(query_spec["query"]),
-                num_results=self.max_results_per_query,
-                start_published_date=start_published_date,
-            )
+            search_results: list[Any] | None = None
+            query_attempt = 0
+            while search_results is None:
+                try:
+                    search_results = await self.client.search(
+                        query=str(query_spec["query"]),
+                        num_results=self.max_results_per_query,
+                        start_published_date=start_published_date,
+                    )
+                except (TimeoutError, OSError, ConnectionError, httpx.HTTPError) as exc:
+                    if query_attempt < int(
+                        settings.TINYFISH_MAX_RETRIES
+                    ) and _retryable_search_error(exc):
+                        query_attempt += 1
+                        await asyncio.sleep(
+                            float(settings.TINYFISH_BACKOFF_SECONDS) * query_attempt
+                        )
+                        continue
+                    query_failures += 1
+                    failure_reasons.append(_provider_error_reason(exc))
+                    logger.warning(
+                        "TinyFish query failed; continuing",
+                        extra={
+                            "ticker": company.ticker,
+                            "intent": query_spec["intent"],
+                            "error_type": type(exc).__name__,
+                            "attempt": query_attempt + 1,
+                        },
+                    )
+                    break
+            if search_results is None:
+                continue
             for item in search_results:
                 raw_items_seen += 1
                 title = str(_item_value(item, "title") or "").strip()
@@ -329,6 +403,13 @@ class TinyFishSearchConnector:
                             publish_time=candidate_publish_time,
                         )
                     )
+        self.last_run_stats = {
+            "query_count": len(queries),
+            "query_failures": query_failures,
+            "failure_reasons": failure_reasons,
+            "raw_items_seen": raw_items_seen,
+            "candidates_emitted": candidates_emitted,
+        }
         logger.info(
             "TinyFish connector normalized results",
             extra={

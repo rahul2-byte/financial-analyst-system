@@ -1,9 +1,13 @@
 """Run offline benchmark artifact integrity checks without providers."""
 
+import importlib
 import sys
 from pathlib import Path
 
-from evals.benchmark import validate_benchmark_artifacts
+_benchmark_module = importlib.import_module(
+    "evals.benchmark" if __package__ else "benchmark"
+)
+validate_benchmark_artifacts = _benchmark_module.validate_benchmark_artifacts
 
 
 def main() -> int:

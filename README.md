@@ -2,7 +2,7 @@
 
 FIN-AI is a CLI-first, human-in-the-loop financial research workflow for NSE/BSE equities. It combines deterministic Python quant analysis with Hive GLM-5.3-Flash, YFinance market data, TinyFish web search, source extraction, citation checks, counter-thesis review, and fail-closed validation.
 
-It produces research artifacts for review. It does not place trades, provide personalized advice, predict returns, or claim investment performance.
+It produces research artifacts for review. It does not place trades, provide personalized advice, or make trading recommendations.
 
 Offline experiment and shadow-evaluation components live separately under
 `backend/experiments/`. They use frozen, hashed datasets, causal features,
@@ -25,7 +25,7 @@ CLI / FastAPI
   SessionStore ──► transcript, checkpoints, trace, run artifacts
 ```
 
-AgentLoop is the production runtime used by both CLI and HTTP. Model streaming, tool execution, evidence accounting, and terminal-state decisions are separate runtime components. Provider snapshots are content-addressed under `.finai/provider-snapshots/`; the CLI can replay a complete archived model/data run without constructing live providers. The interactive UI is Textual + Rich over asyncio; one-shot/plain output remains available for automation. There is no Docker, PostgreSQL, vector database, embedding model, local inference server, or third-party telemetry SDK.
+AgentLoop is the shared runtime used by both CLI and HTTP. Model streaming, tool execution, evidence accounting, and terminal-state decisions are separate runtime components. Provider snapshots are content-addressed under `.finai/provider-snapshots/`; the CLI can replay a complete archived model/data run without constructing live providers. The interactive UI is Textual + Rich over asyncio; one-shot/plain output remains available for automation. There is no Docker, PostgreSQL, vector database, embedding model, or local inference server. Phoenix tracing is optional and disabled by default.
 
 ## Setup
 
@@ -34,7 +34,22 @@ uv sync
 cp .env.example .env
 ```
 
-Set `HIVE_API_KEY` and `TINYFISH_API_KEY` in `.env`. If the FastAPI HTTP surface is exposed, also set `HTTP_API_TOKEN` and optionally `HTTP_API_OWNER`; requests must send `Authorization: Bearer <HTTP_API_TOKEN>`. The Hive adapter uses the OpenAI-compatible chat-completions endpoint and streams usage metadata when provided by the provider.
+Set `HIVE_API_KEY` and `TINYFISH_API_KEY` in `.env`. The Hive adapter uses the OpenAI-compatible model endpoint and streams usage metadata when provided by the provider.
+
+### Local Phoenix tracing
+
+Install the optional tracing group and start Phoenix in a separate terminal:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv sync --group observability
+PHOENIX_WORKING_DIR=.finai/phoenix PHOENIX_DEFAULT_RETENTION_POLICY_DAYS=30 \
+  uvx --from arize-phoenix==20.14.0 phoenix serve
+```
+
+Set `FINAI_OBSERVABILITY_ENABLED=true` in `.env`, run FIN-AI, then open
+`http://127.0.0.1:6006`. Traces use the `fin-ai-local` project by default.
+Set `FINAI_TRACE_CONTENT=metadata` to omit prompt and response content.
+Phoenix is best effort: an unavailable collector never stops a research run.
 
 ## Run
 
@@ -60,13 +75,17 @@ Pytest is the regression suite, but live provider calls and the full suite are i
 
 ## Evaluation evidence
 
-Evaluation fixtures and runners are in [`evals/`](evals/). Scores are only
-reported when generated from a versioned local gold set and recorded run
-metadata. No benchmark result is claimed in this README until it exists.
+Evaluation fixtures and runners are in [`evals/`](evals/). The current tracked
+gold set is a synthetic contract fixture, not market evidence. The artifact-
+derived status, baseline metrics, unavailable ablations, and unverified
+latency measurements are recorded in the [technical evaluation report](docs/evaluation-report.md).
+The offline runner and telemetry tools remain separate from live-provider
+evaluation.
 
 ## Known limitations
 
 - TinyFish and YFinance are live providers and can fail, rate-limit, or return incomplete data.
 - Company-name resolution is not guessed; the user must confirm a ticker-shaped candidate.
 - Qualitative evidence is limited to sources found and extracted during the current run.
-- The benchmark currently needs populated frozen source snapshots and human-authored risk/citation labels before measured quality claims are valid.
+- The benchmark currently needs permitted frozen source snapshots, source-use records, and human-authored risk/citation labels before quality claims are valid.
+- No tracked latency or provider-usage artifact is available for a p50/p95 or cost result.

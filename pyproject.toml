@@ -6,6 +6,7 @@ requires-python = ">=3.11,<3.15"
 dependencies = [
     "fastapi",
     "httpx",
+    "opentelemetry-api>=1.28,<2",
     "numpy",
     "pandas",
     "pydantic>=2.0.0",
@@ -29,6 +30,11 @@ dev = [
     "pytest-asyncio",
     "pytest-cov",
     "ruff",
+]
+observability = [
+    "arize-phoenix-otel==0.17.1",
+    "opentelemetry-instrumentation-fastapi>=0.49b0,<1",
+    "opentelemetry-instrumentation-httpx>=0.49b0,<1",
 ]
 
 [tool.pytest.ini_options]

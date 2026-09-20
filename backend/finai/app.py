@@ -27,6 +27,7 @@ from .render import (
     render_context,
     render_header,
     render_response,
+    render_saved_report,
     render_sources,
     render_status,
     render_user_message,
@@ -286,6 +287,25 @@ class FinAIApp(CommandDispatchMixin, App[None]):
             return
         if message.button.id == "nav-trace":
             await self._command("trace", [])
+            return
+        if message.button.id == "nav-reports":
+            conversation = self.query_one("#conversation", VerticalScroll)
+            if self.session_store is None:
+                await conversation.mount(
+                    Static("No saved report is available.", classes="activity")
+                )
+                return
+            report = SessionStore.latest_saved_report(self.session_store.root)
+            if report is None:
+                await conversation.mount(
+                    Static("No saved report is available.", classes="activity")
+                )
+                return
+            await conversation.mount(
+                AssistantMessage(
+                    render_saved_report(report), classes="message assistant-message"
+                )
+            )
             return
         if message.button.id != "send":
             return

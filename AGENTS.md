@@ -13,7 +13,7 @@ You are an agent operating within **FIN-AI**, a production-grade Financial Intel
 - **`backend/`**: FastAPI (3.11+), Quant Engine, Multi-agent Orchestration, and CLI runtime.
   - `agents/`: Single-responsibility agents (Fundamental, Technical, Risk, etc.).
   - `quant/`: Deterministic logic for financial indicators and scanners.
-  - `app/`: Core services, routes (`/api/chat`, `/api/health`), and Pydantic config.
+  - `app/`: Core services, the health route, and Pydantic config.
   - `.finai/`: Local run artifacts; provider results remain in current graph state.
 - **`AGENTS.md`**: Repository engineering and compliance guidance.
 
@@ -142,3 +142,17 @@ These rules represent the core interaction principles for all agents and MUST be
 - Strong success criteria enable independent looping.
 
 **End of Protocol.**
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs live in GitHub Issues; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This is a single-context repo using root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.

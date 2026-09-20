@@ -13,25 +13,25 @@ class EnvSettings(BaseSettings):
     API_TITLE: str = "Financial Intelligence Platform API"
     API_VERSION: str = "v1"
     DEBUG: bool = False
-    HTTP_API_TOKEN: str | None = None
-    HTTP_API_OWNER: str = "local-api"
 
     DEFAULT_LLM_MODEL: str = "zai-org/glm-5.3-flash"
     HIVE_API_KEY: str | None = None
     HIVE_BASE_URL: str = "https://api-cdn.thehive.ai/api/v3"
     HIVE_MODEL: str = "zai-org/glm-5.3-flash"
-    HIVE_TIMEOUT: float = 120.0
+    HIVE_TIMEOUT: float = 600.0
     HIVE_CONNECT_TIMEOUT: float = 5.0
     HIVE_POOL_TIMEOUT: float = 2.0
     HIVE_WRITE_TIMEOUT: float = 10.0
-    HIVE_READ_TIMEOUT: float = 20.0
+    HIVE_READ_TIMEOUT: float = 60.0
     HIVE_MAX_RETRIES: int = 2
     HIVE_BACKOFF_BASE: float = 0.5
     HIVE_BACKOFF_CAP: float = 4.0
     HIVE_CIRCUIT_FAILURE_THRESHOLD: int = 3
     HIVE_CIRCUIT_RECOVERY_TIMEOUT: float = 30.0
-    HIVE_MAX_OUTPUT_TOKENS: int = 4096
-    HIVE_MAX_REPORT_TOKENS: int = 8192
+    HIVE_MAX_OUTPUT_TOKENS: int = 8192
+    HIVE_MAX_REPORT_TOKENS: int = 32768
+    HIVE_MAX_REPAIR_TOKENS: int = 8192
+    HIVE_REPAIR_TIMEOUT: float = 120.0
     FINAI_CONTEXT_MAX_TOKENS: int = 250_000
     FINAI_CONTEXT_COMPACTION_RATIO: float = 0.9
     MIN_QUALITY_SCORE: float = 40.0
@@ -43,6 +43,8 @@ class EnvSettings(BaseSettings):
     TINYFISH_SEARCH_URL: str = "https://api.search.tinyfish.ai"
     TINYFISH_SEARCH_TIMEOUT: float = 20.0
     TINYFISH_MAX_RESULTS_PER_QUERY: int = 10
+    TINYFISH_MAX_RETRIES: int = 1
+    TINYFISH_BACKOFF_SECONDS: float = 0.5
     HTTP_POOL_MAX_CONNECTIONS: int = 10
     HTTP_POOL_MAX_KEEPALIVE_CONNECTIONS: int = 10
     UPSTOX_ACCESS_TOKEN: str | None = None
@@ -50,7 +52,12 @@ class EnvSettings(BaseSettings):
     UPSTOX_TIMEOUT: float = 20.0
     FINAI_QUOTA_DB: str = ".finai/quota.sqlite3"
     FINAI_PROVIDER_REQUESTS_PER_SECOND: int = 2
-    HTTP_SESSION_ROOT: str = ".finai/http-sessions"
+    FINAI_OBSERVABILITY_ENABLED: bool = False
+    FINAI_PHOENIX_ENDPOINT: str = "http://127.0.0.1:6006/v1/traces"
+    FINAI_PHOENIX_PROJECT: str = "fin-ai-local"
+    FINAI_TRACE_CONTENT: str = "redacted_full"
+    FINAI_TRACE_MAX_CONTENT_BYTES: int = 1_000_000
+    FINAI_TRACE_SAMPLE_RATE: float = 1.0
 
     model_config = SettingsConfigDict(
         env_file=(_REPOSITORY_ENV, ".env"),

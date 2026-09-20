@@ -14,9 +14,15 @@ import httpx
 from app.config import settings
 from app.core.circuit_breaker import CircuitBreaker
 from app.core.model_stream import get_public_token_sink
+from app.core.observability import observe
 from app.models.request_models import Message
 from app.observability.provider_archive import ProviderArchive, ProviderSnapshot
 from app.observability.provider_metrics import ProviderMetrics
+from app.observability.tracing import (
+    add_current_span_event,
+    set_current_span_attributes,
+    trace_content,
+)
 from app.services.llm_interface import LLMServiceInterface
 
 logger = logging.getLogger(__name__)
@@ -159,6 +165,7 @@ class HiveService(LLMServiceInterface):
     def _model(self, model: str) -> str:
         return self.default_model if model == "reasoning" else model
 
+    @observe("llm.hive", as_type="llm", provider="hive")
     async def _stream_request(
         self, messages: list[Message], model: str, **kwargs: Any
     ) -> AsyncGenerator[dict[str, Any], None]:
@@ -176,24 +183,59 @@ class HiveService(LLMServiceInterface):
             "max_tokens": kwargs.get("max_tokens", settings.HIVE_MAX_OUTPUT_TOKENS),
             "temperature": kwargs.get("temperature", 0.7),
         }
+        prompt_content, prompt_truncated, prompt_size = trace_content(
+            payload["messages"]
+        )
+        set_current_span_attributes(
+            {
+                "llm.invocation_parameters": json.dumps(
+                    {
+                        "temperature": payload["temperature"],
+                        "max_tokens": payload["max_tokens"],
+                    },
+                    sort_keys=True,
+                ),
+                "llm.input.messages": prompt_content,
+                "llm.input.truncated": prompt_truncated,
+                "llm.input.bytes": prompt_size,
+            }
+        )
+        run_id = kwargs.get("run_id")
         if kwargs.get("tools"):
             payload["tools"] = kwargs["tools"]
+            tools_content, tools_truncated, tools_size = trace_content(payload["tools"])
+            set_current_span_attributes(
+                {
+                    "llm.tool_definitions": tools_content,
+                    "llm.tools.truncated": tools_truncated,
+                    "llm.tools.bytes": tools_size,
+                }
+            )
         retries = 0
-        request_deadline = started + self.retry_policy.total_budget_seconds
+        request_deadline = started + float(
+            kwargs.get("timeout_seconds") or self.retry_policy.total_budget_seconds
+        )
         streamed_token_count = 0
         reasoning_chunk_count = 0
         reasoning_chars = 0
         public_token_chars = 0
+        public_text: list[str] = []
         emitted_tool_call = False
+        finish_reason: str | None = None
+        stream_started = False
         raw_events: list[dict[str, Any]] = []
         while True:
             first_token_at: float | None = None
-            usage: dict[str, Any] = {}
+            usage: dict[str, Any] | None = None
             attempt = retries + 1
             attempt_event = {
                 "event": "provider_attempt_started",
                 "data": {"attempt": attempt, "provider": "hive"},
             }
+            add_current_span_event("llm.attempt", {"retry.attempt": attempt})
+            set_current_span_attributes(
+                {"llm.provider": "hive", "llm.model_name": self._model(model)}
+            )
             yield attempt_event
             try:
                 remaining = request_deadline - time.perf_counter()
@@ -239,6 +281,14 @@ class HiveService(LLMServiceInterface):
                                     },
                                 }
                                 raw_events.append(retry_event)
+                                add_current_span_event(
+                                    "retry.scheduled",
+                                    {
+                                        "retry.attempt": attempt,
+                                        "retry.reason": f"HTTP {response.status_code}",
+                                        "retry.backoff_ms": round(delay * 1000, 2),
+                                    },
+                                )
                                 yield retry_event
                                 await asyncio.sleep(delay)
                                 continue
@@ -249,6 +299,10 @@ class HiveService(LLMServiceInterface):
                                     "phase": "http",
                                     "status_code": response.status_code,
                                     "message": f"Hive HTTP {response.status_code}",
+                                    "model_id": self._model(model),
+                                    "timeout": response.status_code == 408,
+                                    "partial_output": False,
+                                    "usage": usage,
                                 },
                             }
                             raise HiveProviderError(
@@ -267,6 +321,7 @@ class HiveService(LLMServiceInterface):
                                 break
                             if not stream_started_emitted:
                                 stream_started_emitted = True
+                                stream_started = True
                                 stream_event = {
                                     "event": "provider_stream_started",
                                     "data": {
@@ -283,12 +338,26 @@ class HiveService(LLMServiceInterface):
                                 continue
                             if parsed["event"] == "usage":
                                 usage = parsed["data"]
+                                set_current_span_attributes(
+                                    {
+                                        "llm.token_count.prompt": usage.get(
+                                            "prompt_tokens", 0
+                                        ),
+                                        "llm.token_count.completion": usage.get(
+                                            "completion_tokens", 0
+                                        ),
+                                        "llm.token_count.total": usage.get(
+                                            "total_tokens", 0
+                                        ),
+                                    }
+                                )
                                 raw_events.append(parsed)
                                 yield parsed
                             elif parsed["event"] == "token":
                                 first_token_at = first_token_at or time.perf_counter()
                                 streamed_token_count += 1
                                 public_token_chars += len(str(parsed["data"]))
+                                public_text.append(str(parsed["data"]))
                                 logger.debug(
                                     "Hive SSE token chunk received",
                                     extra={
@@ -314,6 +383,8 @@ class HiveService(LLMServiceInterface):
                                     usage = parsed["usage"]
                                 choices = parsed["data"].get("choices", [])
                                 delta = choices[0].get("delta", {}) if choices else {}
+                                if choices and choices[0].get("finish_reason"):
+                                    finish_reason = str(choices[0]["finish_reason"])
                                 if isinstance(delta, dict) and delta.get(
                                     "reasoning_content"
                                 ):
@@ -329,6 +400,7 @@ class HiveService(LLMServiceInterface):
                             raise HiveProviderError("incomplete Hive SSE stream")
                 self.last_telemetry = {
                     "model_id": self._model(model),
+                    "run_id": run_id,
                     "request_latency_ms": round(
                         (time.perf_counter() - started) * 1000, 2
                     ),
@@ -345,6 +417,18 @@ class HiveService(LLMServiceInterface):
                     "reasoning_chars": reasoning_chars,
                     "usage": usage,
                 }
+                if finish_reason:
+                    set_current_span_attributes({"llm.finish_reason": finish_reason})
+                output_content, output_truncated, output_size = trace_content(
+                    "".join(public_text)
+                )
+                set_current_span_attributes(
+                    {
+                        "llm.output": output_content,
+                        "llm.output.truncated": output_truncated,
+                        "llm.output.bytes": output_size,
+                    }
+                )
                 if self.provider_archive is not None:
                     snapshot = self.provider_archive.store(
                         ProviderSnapshot(
@@ -365,9 +449,11 @@ class HiveService(LLMServiceInterface):
                 yield {
                     "event": "provider_completed",
                     "data": {
+                        "model_id": self.last_telemetry["model_id"],
                         "attempts": attempt,
                         "duration_ms": self.last_telemetry["request_latency_ms"],
                         "first_token_ms": self.last_telemetry["first_token_latency_ms"],
+                        "usage": usage,
                     },
                 }
                 return
@@ -375,10 +461,12 @@ class HiveService(LLMServiceInterface):
                 latency_ms = round((time.perf_counter() - started) * 1000, 2)
                 self.last_telemetry = {
                     "model_id": self._model(model),
+                    "run_id": run_id,
                     "request_latency_ms": latency_ms,
                     "provider_status": "failed",
                     "timeout": isinstance(exc, (TimeoutError, httpx.TimeoutException)),
                     "partial_output": bool(streamed_token_count or emitted_tool_call),
+                    "usage": usage,
                 }
                 self.metrics.record(
                     status="failed",
@@ -386,15 +474,45 @@ class HiveService(LLMServiceInterface):
                     timeout=self.last_telemetry["timeout"],
                     partial=self.last_telemetry["partial_output"],
                 )
-                if streamed_token_count or emitted_tool_call:
+                partial_output = (
+                    stream_started or streamed_token_count > 0 or emitted_tool_call
+                )
+                if partial_output:
+                    yield {
+                        "event": "provider_failed",
+                        "data": {
+                            "attempts": attempt,
+                            "phase": "transport",
+                            "message": type(exc).__name__,
+                            "model_id": self.last_telemetry["model_id"],
+                            "duration_ms": latency_ms,
+                            "timeout": self.last_telemetry["timeout"],
+                            "partial_output": partial_output,
+                            "usage": usage,
+                        },
+                    }
                     raise HiveProviderError(
-                        "Hive transport failed after the response had started"
+                        f"Hive transport failed after the response had started: "
+                        f"{type(exc).__name__}"
                     ) from exc
                 if retries < self.retry_policy.max_retries:
                     delay = _retry_delay(retries, None, self.retry_policy)
                     if time.perf_counter() + delay >= request_deadline:
+                        yield {
+                            "event": "provider_failed",
+                            "data": {
+                                "attempts": attempt,
+                                "phase": "transport",
+                                "message": type(exc).__name__,
+                                "model_id": self.last_telemetry["model_id"],
+                                "duration_ms": latency_ms,
+                                "timeout": self.last_telemetry["timeout"],
+                                "partial_output": partial_output,
+                                "usage": usage,
+                            },
+                        }
                         raise HiveProviderError(
-                            f"Hive transport failure: {exc}"
+                            f"Hive transport failure: {type(exc).__name__}"
                         ) from exc
                     retries += 1
                     yield {
@@ -413,6 +531,11 @@ class HiveService(LLMServiceInterface):
                         "attempts": attempt,
                         "phase": "transport",
                         "message": type(exc).__name__,
+                        "model_id": self.last_telemetry["model_id"],
+                        "duration_ms": latency_ms,
+                        "timeout": self.last_telemetry["timeout"],
+                        "partial_output": self.last_telemetry["partial_output"],
+                        "usage": usage,
                     },
                 }
                 raise HiveProviderError(f"Hive transport failure: {exc}") from exc
@@ -420,10 +543,12 @@ class HiveService(LLMServiceInterface):
                 latency_ms = round((time.perf_counter() - started) * 1000, 2)
                 self.last_telemetry = {
                     "model_id": self._model(model),
+                    "run_id": run_id,
                     "request_latency_ms": latency_ms,
                     "provider_status": "failed",
                     "timeout": "timeout" in str(exc).lower(),
                     "partial_output": bool(streamed_token_count or emitted_tool_call),
+                    "usage": usage,
                 }
                 self.metrics.record(
                     status="failed",

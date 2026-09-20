@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from app.core.observability import observe
 from app.models.request_models import Message
 
 from .session_store import SessionStore
@@ -23,9 +24,11 @@ class SessionPersistence:
     def load_history(self) -> list[Message]:
         return self.store.load_history()
 
+    @observe("persistence.append_message", as_type="persistence")
     def append_message(self, message: Message) -> None:
         self.store.append_message(message)
 
+    @observe("persistence.write_checkpoint", as_type="persistence")
     def write_checkpoint(self, payload: dict[str, Any]) -> None:
         self.store.write_checkpoint(payload)
 
@@ -35,6 +38,7 @@ class SessionPersistence:
     def clear_pending(self) -> None:
         self.store.clear_pending()
 
+    @observe("persistence.write_run", as_type="persistence")
     def write_run(
         self,
         *,

@@ -9,6 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from app.core.observability import observe
 from app.events.ledger import TraceLedger
 from app.models.request_models import Message
 
@@ -71,6 +72,7 @@ class SessionStore:
         )
         return record
 
+    @observe("persistence.write_run", as_type="persistence")
     def write_run(
         self,
         *,
@@ -95,6 +97,81 @@ class SessionStore:
         )
         self.append_events(events)
         return target
+
+    @staticmethod
+    def latest_saved_report(root: Path) -> dict[str, Any] | None:
+        """Return the newest saved report without rerunning a provider."""
+        candidates: list[tuple[datetime, dict[str, Any], Path]] = []
+        sessions_dir = root / "sessions"
+        if not sessions_dir.exists():
+            return None
+        for path in sessions_dir.glob("*/runs/*.json"):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                if not isinstance(payload, dict):
+                    continue
+                created_at = datetime.fromisoformat(str(payload["created_at"]))
+            except (OSError, KeyError, TypeError, ValueError, json.JSONDecodeError):
+                continue
+            if payload.get("status") not in {
+                "success",
+                "partial",
+                "completed",
+                "completed_with_limited_evidence",
+            }:
+                continue
+            events = payload.get("events")
+            if not isinstance(events, list):
+                continue
+            completed = next(
+                (
+                    event
+                    for event in reversed(events)
+                    if isinstance(event, dict) and event.get("type") == "run.completed"
+                ),
+                None,
+            )
+            if not completed or completed.get("terminal_status") != payload["status"]:
+                continue
+            report_text = "".join(
+                str(event.get("text", ""))
+                for event in events
+                if isinstance(event, dict) and event.get("type") == "response.delta"
+            )
+            if not report_text:
+                continue
+            if created_at.tzinfo is None:
+                created_at = created_at.replace(tzinfo=UTC)
+            candidates.append((created_at, payload, path))
+        if not candidates:
+            return None
+        _, payload, path = max(candidates, key=lambda item: item[0])
+        events = payload["events"]
+        source_events = [
+            event.get("sources", [])
+            for event in events
+            if isinstance(event, dict) and event.get("type") == "sources.updated"
+        ]
+        return {
+            "session_id": payload.get("session_id"),
+            "run_id": payload.get("run_id"),
+            "query": payload.get("query", ""),
+            "status": payload["status"],
+            "created_at": payload["created_at"],
+            "report_text": "".join(
+                str(event.get("text", ""))
+                for event in events
+                if isinstance(event, dict) and event.get("type") == "response.delta"
+            ),
+            "artifact_path": str(path),
+            "sources": source_events[-1] if source_events else [],
+            "failures": [
+                event
+                for event in events
+                if isinstance(event, dict)
+                and event.get("type") in {"tool.failed", "provider.failed"}
+            ],
+        }
 
     def begin_run(self, *, query: str, run_id: str) -> Path:
         """Persist the accepted run before downstream work can be interrupted."""

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
@@ -7,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from data.news_pipeline.connectors import (
     TinyFishSearchConnector,
+    UpstoxNewsConnector,
     _matches_company_terms,
 )
 from data.news_pipeline.models import CompanyContext
@@ -73,6 +75,63 @@ async def test_tinyfish_search_connector_builds_detailed_queries_and_maps_result
     assert results[0].search_provider == "tinyfish"
     assert client.calls[0]["num_results"] == 20
     assert any("HDFC BANK" in call["query"] for call in client.calls)
+
+
+@pytest.mark.asyncio
+async def test_tinyfish_query_failure_does_not_discard_other_results():
+    company = CompanyContext(ticker="TCS.NS", company_name="Tata Consultancy Services")
+    published = datetime.now(UTC) - timedelta(days=1)
+
+    class _Client:
+        def __init__(self):
+            self.calls = 0
+
+        async def search(self, *, query, num_results, start_published_date):
+            del query, num_results, start_published_date
+            self.calls += 1
+            if self.calls == 1:
+                raise TimeoutError("search timeout")
+            return [
+                _TinyFishResult(
+                    title="TCS announces results",
+                    text="Tata Consultancy Services announced quarterly results.",
+                    url="https://example.com/tcs-results",
+                    id="https://example.com/tcs-results",
+                    published_date=published.isoformat(),
+                )
+            ]
+
+    results = await TinyFishSearchConnector(client=_Client()).fetch(
+        company, time_window_days=30
+    )
+
+    assert results
+    assert results[0].title == "TCS announces results"
+
+
+@pytest.mark.asyncio
+async def test_upstox_news_connector_resolves_instrument_key(monkeypatch):
+    company = CompanyContext(
+        ticker="TCS.NS", company_name="Tata Consultancy Services", nse_symbol="TCS"
+    )
+
+    class _Fetcher:
+        def resolve_instrument(self, query):
+            assert query == "TCS"
+            return [{"instrument_key": "NSE_EQ|TCS"}]
+
+        def fetch_news(self, keys, *, page_size):
+            assert keys == ["NSE_EQ|TCS"]
+            assert page_size == 30
+            return {"data": {}}
+
+    async def _to_thread(function, *args, **kwargs):
+        return function(*args, **kwargs)
+
+    monkeypatch.setattr(asyncio, "to_thread", _to_thread)
+    assert (
+        await UpstoxNewsConnector(_Fetcher()).fetch(company, time_window_days=30) == []
+    )
 
 
 @pytest.mark.asyncio

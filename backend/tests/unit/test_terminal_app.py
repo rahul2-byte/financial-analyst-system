@@ -1,4 +1,5 @@
 import asyncio
+import json
 from uuid import uuid4
 
 from app.events.models import (
@@ -10,7 +11,7 @@ from app.events.models import (
     TextDelta,
 )
 from finai.app import Composer, FinAIApp
-from textual.widgets import Static
+from textual.widgets import Button, Static
 
 
 def test_textual_app_uses_external_stylesheet() -> None:
@@ -273,6 +274,53 @@ def test_trace_command_shows_live_ledger_path_and_recent_events(tmp_path) -> Non
             rendered = "\n".join(str(widget.render()) for widget in app.query("Static"))
             assert "Trace" in rendered
             assert "events.v1.jsonl" in rendered
+
+    asyncio.run(scenario())
+
+
+def test_reports_button_renders_latest_partial_saved_report(tmp_path) -> None:
+    from finai.session_store import SessionStore
+
+    store = SessionStore(tmp_path / ".finai", "session")
+    run_path = store.session_dir / "runs" / "run-1.json"
+    run_path.parent.mkdir(parents=True, exist_ok=True)
+    run_path.write_text(
+        json.dumps(
+            {
+                "run_id": "run-1",
+                "session_id": "session",
+                "query": "Analyse INFY",
+                "status": "partial",
+                "created_at": "2026-09-19T10:00:00+00:00",
+                "events": [
+                    {"type": "response.delta", "text": "Saved report body"},
+                    {"type": "run.completed", "terminal_status": "partial"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    async def scenario() -> None:
+        app = FinAIApp(session_store=store)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await app.on_button_pressed(Button.Pressed(app.query_one("#nav-reports")))
+            await pilot.pause(0.05)
+            assert len(list(app.query(".assistant-message"))) == 1
+
+    asyncio.run(scenario())
+
+
+def test_reports_button_shows_empty_state_without_saved_report(tmp_path) -> None:
+    from finai.session_store import SessionStore
+
+    async def scenario() -> None:
+        app = FinAIApp(session_store=SessionStore(tmp_path / ".finai", "session"))
+        async with app.run_test(size=(80, 24)) as pilot:
+            await app.on_button_pressed(Button.Pressed(app.query_one("#nav-reports")))
+            await pilot.pause(0.05)
+            rendered = "\n".join(str(widget.render()) for widget in app.query("Static"))
+            assert "No saved report is available" in rendered
 
     asyncio.run(scenario())
 

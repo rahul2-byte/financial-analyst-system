@@ -146,10 +146,14 @@ class FinAIRepl:
         response_text: list[str] = []
         status = "interrupted"
         run_id: str | None = None
+        persisted_final_response = False
 
         def persist_message(message: Message) -> None:
+            nonlocal persisted_final_response
             self.history.append(message)
             self.persistence.append_message(message)
+            if message.role == "assistant" and not message.tool_calls:
+                persisted_final_response = True
 
         try:
             async for event in self.runtime.stream(
@@ -202,11 +206,7 @@ class FinAIRepl:
                 elif event.type == "run.cancelled":
                     status = "cancelled"
                 yield event
-            if response_text and not any(
-                message.role == "assistant"
-                and message.content == "".join(response_text)
-                for message in self.history[-2:]
-            ):
+            if response_text and not persisted_final_response:
                 # The runtime already persisted the complete assistant message;
                 # deltas only drive the live renderer.
                 persist_message(
@@ -216,6 +216,8 @@ class FinAIRepl:
                 "success",
                 "partial",
                 "insufficient_data",
+                "completed",
+                "completed_with_limited_evidence",
                 "failed",
                 "cancelled",
             }:

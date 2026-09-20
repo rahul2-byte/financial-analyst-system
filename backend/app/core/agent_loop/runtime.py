@@ -16,6 +16,7 @@ from app.core.agent_loop.evidence import EvidenceAccounting
 from app.core.agent_loop.model_streaming import ModelStreaming
 from app.core.agent_loop.publication import (
     PublicationError,
+    ReportParseError,
     parse_report_draft,
     publish_report,
     report_repair_instruction,
@@ -24,6 +25,7 @@ from app.core.agent_loop.publication import (
 from app.core.agent_loop.terminal_state import terminal_status
 from app.core.agent_loop.tool_execution import ToolExecutor
 from app.core.diagnostics import diagnostic_payload, diagnostics_enabled
+from app.core.observability import observe
 from app.core.skills import SkillPackage, SkillRegistry
 from app.events.models import (
     ClarificationRequested,
@@ -50,6 +52,7 @@ from app.events.models import (
     ToolStarted,
 )
 from app.models.request_models import Message
+from app.observability.tracing import set_current_span_attributes, span
 from app.security.policy import redact_secrets
 
 logger = logging.getLogger(__name__)
@@ -86,6 +89,10 @@ class ToolRunner(Protocol):
 class AgentLoopError(RuntimeError):
     """A controlled runtime failure suitable for user-facing rendering."""
 
+    def __init__(self, message: str, *, category: str = "runtime") -> None:
+        super().__init__(message)
+        self.category = category
+
 
 @dataclass(frozen=True)
 class AgentLoopConfig:
@@ -93,8 +100,10 @@ class AgentLoopConfig:
     max_tool_calls: int = 24
     model: str = "reasoning"
     mode: str = "guided"
-    max_tokens: int = 2048
-    report_max_tokens: int = 8192
+    max_tokens: int = 8192
+    report_max_tokens: int = 32768
+    report_repair_max_tokens: int = 8192
+    report_repair_timeout_seconds: float = 120.0
     publish_reports: bool = False
 
 
@@ -114,6 +123,7 @@ class AgentLoop:
         self.config = config or AgentLoopConfig()
         self.skill_registry = skill_registry
 
+    @observe("workflow.report_generation", as_type="workflow")
     async def run(
         self,
         messages: list[Message],
@@ -146,7 +156,13 @@ class AgentLoop:
                         "must reference a citation_id. Each citation source_id must match "
                         "a verified tool source_id. "
                         "For every numeric statement, use a marker exactly like [[fact:DATASET:data.path]] "
-                        "and list that fact ID in numeric_refs. Do not write other digits in report prose."
+                        "and list that fact ID in numeric_refs. Do not write other digits in report prose. "
+                        "Treat missing or degraded evidence as unavailable, never as negative evidence. "
+                        "If verified fundamental facts are unavailable or degraded, do not make positive "
+                        "profitability or valuation conclusions; state the limitation explicitly. "
+                        "If news is unavailable, state that recent news and catalysts could not be verified. "
+                        "Use technical observations as observations; comparative claims require a cited benchmark. "
+                        "Do not use the internal unit name provider_value in prose."
                     ),
                 )
             )
@@ -155,9 +171,20 @@ class AgentLoop:
         successful_tools = 0
         evidence = EvidenceAccounting()
         evidence_warning_added = False
-        report_repair_attempted = False
+        report_parse_repair_attempts = 0
+        report_validation_repair_attempts = 0
+        model_generation_retry_attempts = 0
+        availability_context_snapshot: str | None = None
         tool_executor = ToolExecutor(
             self.tool_runner, self._allowed_tool_names(selected_skills)
+        )
+        set_current_span_attributes(
+            {
+                "workflow.name": "report_generation",
+                "app.conversation_id": str(conversation_id),
+                "app.publish_reports": self.config.publish_reports,
+                "app.model": self.config.model,
+            }
         )
         completed_tool_ids = {
             message.tool_call_id
@@ -181,6 +208,7 @@ class AgentLoop:
             if approved
             else None
         )
+        set_current_span_attributes({"app.run_id": str(factory.run_id)})
         yield factory.make(RunStarted, query=_last_user_query(history))
         for skill in selected_skills:
             yield factory.make(
@@ -203,14 +231,51 @@ class AgentLoop:
                     )
                 self._drain_input_queue(history, input_queue)
                 assistant = resumed_assistant
+                stream_error: Exception | None = None
                 resumed_assistant = None
                 if assistant is None:
+                    if self.config.publish_reports and evidence.availability:
+                        availability_snapshot = json.dumps(
+                            {
+                                "available": [
+                                    key
+                                    for key, value in evidence.availability.items()
+                                    if value["status"] == "available"
+                                ],
+                                "missing": [
+                                    value
+                                    for value in evidence.availability.values()
+                                    if value["status"] in {"unavailable", "degraded"}
+                                ],
+                            },
+                            sort_keys=True,
+                        )
+                    else:
+                        availability_snapshot = None
+                    if (
+                        self.config.publish_reports
+                        and evidence.availability
+                        and availability_snapshot != availability_context_snapshot
+                    ):
+                        assert availability_snapshot is not None
+                        availability_context_snapshot = availability_snapshot
+                        history.append(
+                            Message(
+                                role="system",
+                                content=(
+                                    "Evidence availability context for this report: "
+                                    + availability_snapshot
+                                    + ". Use available evidence only; never treat missing evidence as negative evidence."
+                                ),
+                            )
+                        )
                     yield factory.make(
                         ModelRequestStarted,
                         model=self.config.model,
                         round=round_number,
                     )
                     streamed_text: list[str] = []
+                    provider_stream_started = False
                     try:
                         async for item in self._stream_model(
                             history, factory, round_number, selected_skills
@@ -224,17 +289,31 @@ class AgentLoop:
                                 (
                                     ProviderAttemptStarted,
                                     ProviderRetrying,
-                                    ProviderStreamStarted,
                                     ProviderCompleted,
                                     ProviderFailed,
                                 ),
                             ):
                                 yield item
+                            elif isinstance(item, ProviderStreamStarted):
+                                provider_stream_started = True
+                                yield item
                             else:
                                 assistant = item
                     except Exception as exc:
+                        stream_error = exc
                         partial_text = "".join(streamed_text)
-                        if len(partial_text.strip()) < _PARTIAL_RESPONSE_MIN_CHARS:
+                        set_current_span_attributes(
+                            {
+                                "provider.error_type": type(exc).__name__,
+                                "provider.partial_output": bool(partial_text),
+                                "provider.partial_output_chars": len(partial_text),
+                            }
+                        )
+                        if (
+                            len(partial_text.strip()) < _PARTIAL_RESPONSE_MIN_CHARS
+                            and not (provider_stream_started and evidence.facts)
+                            and not self.config.publish_reports
+                        ):
                             raise
                         logger.warning(
                             "Provider stream ended after substantive output; preserving partial response",
@@ -251,8 +330,34 @@ class AgentLoop:
                             name="partial_provider_response",
                             content=partial_text,
                         )
+                    if assistant is None and self.config.publish_reports:
+                        assistant = Message(
+                            role="assistant",
+                            name="partial_provider_response",
+                            content="",
+                        )
                     if assistant is None:
                         raise AgentLoopError("model stream ended without a response")
+                    if not assistant.tool_calls and not assistant.content.strip():
+                        if (
+                            not self.config.publish_reports
+                            and model_generation_retry_attempts < 1
+                        ):
+                            model_generation_retry_attempts += 1
+                            history.append(
+                                Message(
+                                    role="system",
+                                    content=(
+                                        "The previous model response contained no visible answer. "
+                                        "Respond with a concise user-facing answer or call the appropriate research tool."
+                                    ),
+                                )
+                            )
+                            continue
+                        raise AgentLoopError(
+                            "model generation returned empty content",
+                            category="model_generation",
+                        )
                     history.append(assistant)
                     if message_writer and (
                         not self.config.publish_reports or assistant.tool_calls
@@ -265,47 +370,170 @@ class AgentLoop:
                     )
 
                 if not assistant.tool_calls:
+                    partial_provider_response = (
+                        assistant.name == "partial_provider_response"
+                        and bool(assistant.content.strip())
+                    )
                     status = terminal_status(
                         failed_tools=failed_tools,
                         successful_tools=successful_tools,
-                        requires_evidence=_requires_evidence(selected_skills),
+                        requires_evidence=(
+                            (
+                                self.config.publish_reports
+                                and not partial_provider_response
+                            )
+                            or _requires_evidence(selected_skills)
+                        ),
                         successful_evidence_tools=evidence.successful_evidence_tools,
                         invalid_evidence=evidence.invalid_evidence,
-                        partial_provider_response=assistant.name
-                        == "partial_provider_response",
+                        partial_provider_response=partial_provider_response,
                     )
                     if self.config.publish_reports:
-                        if status == "success":
-                            try:
-                                published = publish_report(
-                                    parse_report_draft(assistant.content),
-                                    evidence.facts,
+                        if not assistant.content.strip():
+                            if model_generation_retry_attempts < 1:
+                                model_generation_retry_attempts += 1
+                                history.append(
+                                    Message(
+                                        role="system",
+                                        content=(
+                                            "The previous report generation returned no usable content. "
+                                            "Generate the required report JSON now, using only available evidence."
+                                        ),
+                                    )
                                 )
-                            except PublicationError as exc:
-                                logger.warning(
-                                    "report publication validation failed: %s", exc
+                                continue
+                            raise AgentLoopError(
+                                "model generation returned empty report",
+                                category="model_generation",
+                            )
+                        try:
+                            published = publish_report(
+                                parse_report_draft(assistant.content),
+                                evidence.facts,
+                                evidence.sources,
+                                evidence.availability,
+                            )
+                            status = (
+                                "completed_with_limited_evidence"
+                                if evidence.availability
+                                and any(
+                                    item["status"] in {"unavailable", "degraded"}
+                                    for item in evidence.availability.values()
                                 )
-                                if evidence.facts and not report_repair_attempted:
+                                or partial_provider_response
+                                else "completed"
+                            )
+                        except ReportParseError as exc:
+                            logger.warning(
+                                "report parsing failed run_id=%s error=%s",
+                                factory.run_id,
+                                exc.detail,
+                            )
+                            if report_parse_repair_attempts < 1:
+                                report_parse_repair_attempts += 1
+                                with span(
+                                    "report.repair",
+                                    {
+                                        "repair.reason": "parse_failure",
+                                        "report.parse_error": exc.detail,
+                                        "repair.attempt": report_parse_repair_attempts,
+                                    },
+                                ) as repair_span:
+                                    repair_span.add_event(
+                                        "repair.requested", {"error": exc.detail}
+                                    )
                                     history.append(
                                         Message(
                                             role="system",
                                             content=report_repair_instruction(
-                                                evidence.facts, exc.reasons
+                                                evidence.facts,
+                                                exc.reasons,
+                                                parse_error=exc.detail,
+                                                sources=evidence.sources,
                                             ),
                                         )
                                     )
-                                    report_repair_attempted = True
-                                    continue
+                                continue
+                            if evidence.facts:
                                 published = report_validation_fallback(
-                                    evidence.facts, exc.reasons
+                                    evidence.facts,
+                                    (*exc.reasons, "runtime_failure"),
                                 )
-                                status = (
-                                    "partial" if evidence.facts else "insufficient_data"
+                                status = "completed_with_limited_evidence"
+                                set_current_span_attributes(
+                                    {
+                                        "fallback.used": True,
+                                        "fallback.reason": "report_parse_repair_failure",
+                                    }
                                 )
-                        else:
-                            published = report_validation_fallback(
-                                evidence.facts, ("provider_response_partial",)
+                                logger.error(
+                                    "using evidence fallback after report repair failure "
+                                    "run_id=%s stream_error=%s parse_error=%s",
+                                    factory.run_id,
+                                    type(stream_error).__name__
+                                    if stream_error
+                                    else None,
+                                    exc.detail,
+                                )
+                            else:
+                                raise AgentLoopError(
+                                    f"report parsing failed after repair: {exc.detail}",
+                                    category="report_parse",
+                                ) from exc
+                        except PublicationError as exc:
+                            logger.warning(
+                                "report publication validation failed run_id=%s reasons=%s",
+                                factory.run_id,
+                                exc.reasons,
                             )
+                            if report_validation_repair_attempts < 1:
+                                report_validation_repair_attempts += 1
+                                with span(
+                                    "report.repair",
+                                    {
+                                        "repair.reason": "publication_validation_failure",
+                                        "report.validation_error": str(exc),
+                                        "repair.attempt": report_validation_repair_attempts,
+                                    },
+                                ):
+                                    history.append(
+                                        Message(
+                                            role="system",
+                                            content=report_repair_instruction(
+                                                evidence.facts,
+                                                exc.reasons,
+                                                sources=evidence.sources,
+                                            ),
+                                        )
+                                    )
+                                continue
+                            if evidence.facts:
+                                published = report_validation_fallback(
+                                    evidence.facts,
+                                    (*exc.reasons, "runtime_failure"),
+                                )
+                                status = "completed_with_limited_evidence"
+                                set_current_span_attributes(
+                                    {
+                                        "fallback.used": True,
+                                        "fallback.reason": "publication_repair_failure",
+                                    }
+                                )
+                                logger.error(
+                                    "using evidence fallback after publication repair failure "
+                                    "run_id=%s stream_error=%s reasons=%s",
+                                    factory.run_id,
+                                    type(stream_error).__name__
+                                    if stream_error
+                                    else None,
+                                    exc.reasons,
+                                )
+                            else:
+                                raise AgentLoopError(
+                                    "report publication validation failed after repair: "
+                                    + "; ".join(exc.reasons),
+                                    category="report_validation",
+                                ) from exc
                         if message_writer:
                             message_writer(Message(role="assistant", content=published))
                         for offset in range(0, len(published), 64):
@@ -316,6 +544,15 @@ class AgentLoop:
                         RunCompleted,
                         terminal_status=status,
                         duration_ms=round((time.perf_counter() - started) * 1000, 2),
+                        evidence_status=(
+                            "limited"
+                            if any(
+                                item["status"] in {"unavailable", "degraded"}
+                                for item in evidence.availability.values()
+                            )
+                            else "complete"
+                        ),
+                        evidence_availability=list(evidence.availability.values()),
                     )
                     return
 
@@ -449,6 +686,23 @@ class AgentLoop:
                             evidence_warning_added = True
                             if message_writer:
                                 message_writer(history[-1])
+                        if self.config.publish_reports and name in _EVIDENCE_TOOLS:
+                            history.append(
+                                Message(
+                                    role="system",
+                                    content=(
+                                        "Evidence availability for report generation: "
+                                        + json.dumps(
+                                            evidence.availability,
+                                            sort_keys=True,
+                                        )
+                                        + ". Use available evidence only; explicitly disclose unavailable sources "
+                                        "and never treat missing evidence as negative evidence."
+                                    ),
+                                )
+                            )
+                            if message_writer:
+                                message_writer(history[-1])
                         history.append(
                             Message(
                                 role="tool",
@@ -497,7 +751,8 @@ class AgentLoop:
                             yield factory.make(SourcesUpdated, sources=sources)
                     self._drain_input_queue(history, input_queue)
                 if (
-                    evidence.failed_evidence_tools
+                    not self.config.publish_reports
+                    and evidence.failed_evidence_tools
                     and not evidence.successful_evidence_tools
                 ):
                     message = (
@@ -518,7 +773,11 @@ class AgentLoop:
             yield factory.make(RunCancelled, reason="cancelled by user")
         except Exception as exc:
             logger.exception("Agent loop failed")
-            yield factory.make(RunFailed, message=str(exc), category="runtime")
+            yield factory.make(
+                RunFailed,
+                message=str(exc),
+                category=getattr(exc, "category", "runtime"),
+            )
 
     def _select_skills(self, messages: list[Message]) -> list[SkillPackage]:
         if self.skill_registry is None:
@@ -568,13 +827,19 @@ class AgentLoop:
         | ProviderCompleted
         | ProviderFailed
     ]:
+        is_repair = any(
+            message.role == "system" and "Formatting repair required" in message.content
+            for message in messages
+        )
         streamer = ModelStreaming(
             self.model_client,
             self.config.model,
             self.config.max_tokens,
-            lambda: self._tool_definitions(skills),
+            lambda: [] if is_repair else self._tool_definitions(skills),
             publish_reports=self.config.publish_reports,
             report_max_tokens=self.config.report_max_tokens,
+            report_repair_max_tokens=self.config.report_repair_max_tokens,
+            report_repair_timeout_seconds=self.config.report_repair_timeout_seconds,
         )
         async for item in streamer.stream(messages, factory, round_number):
             yield item

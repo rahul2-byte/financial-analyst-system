@@ -31,6 +31,8 @@ class RunCompleted(BaseModel):
     terminal_status: str
     duration_ms: float | None = None
     artifact_path: str | None = None
+    evidence_status: str | None = None
+    evidence_availability: list[dict[str, object]] = Field(default_factory=list)
 
 
 class RunFailed(BaseModel):
@@ -139,6 +141,13 @@ class ProviderStreamStarted(BaseModel):
     first_byte_ms: float
 
 
+class TokenUsage(BaseModel):
+    prompt_tokens: int | None = Field(default=None, ge=0)
+    completion_tokens: int | None = Field(default=None, ge=0)
+    total_tokens: int | None = Field(default=None, ge=0)
+    verified: bool = False
+
+
 class ProviderCompleted(BaseModel):
     type: Literal["provider.completed"] = "provider.completed"
     meta: EventMeta
@@ -146,6 +155,8 @@ class ProviderCompleted(BaseModel):
     attempts: int
     duration_ms: float
     first_token_ms: float | None = None
+    model_id: str | None = None
+    usage: TokenUsage | None = None
 
 
 class ProviderFailed(BaseModel):
@@ -156,6 +167,11 @@ class ProviderFailed(BaseModel):
     phase: str
     message: str
     status_code: int | None = None
+    duration_ms: float | None = None
+    timeout: bool | None = None
+    partial_output: bool | None = None
+    model_id: str | None = None
+    usage: TokenUsage | None = None
 
 
 class ToolProgress(BaseModel):

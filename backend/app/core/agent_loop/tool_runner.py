@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlparse
 
 import pandas as pd
 from app.config import settings
 from app.core.research_schemas import EvidenceProvenance
 from app.core.resources import RuntimeResources
 from app.observability.provider_archive import ProviderSnapshot
+from data.news_pipeline.models import CompanyContext
 from data.providers.upstox import UpstoxError
 from data.quality import compare_vendor_values, utc_now, validate_market_records
 from quant.fundamentals import FundamentalScanner
@@ -501,69 +502,62 @@ class FinancialToolRunner:
         elif name == "news:fetch_news":
             ticker = str(arguments.get("ticker", "")).strip()
             limit = int(arguments.get("limit", 10))
-            source = "yfinance"
-            sources: list[dict[str, str]] = []
-            if self.resources.upstox_fetcher is not None:
-                try:
-                    matches = self.resources.upstox_fetcher.resolve_instrument(ticker)
-                    instrument_key = next(
-                        (
-                            item.get("instrument_key")
-                            for item in matches
-                            if item.get("instrument_key")
-                        ),
-                        None,
-                    )
-                    if not instrument_key:
-                        raise UpstoxError("No Upstox instrument matched the ticker")
-                    payload = self.resources.upstox_fetcher.fetch_news(
-                        [str(instrument_key)], page_size=limit
-                    )
-                    data = payload.get("data", {}) if isinstance(payload, dict) else {}
-                    items = (
-                        [item for group in data.values() for item in group]
-                        if isinstance(data, dict)
-                        else []
-                    )
-                    value = []
-                    for item in items:
-                        if not isinstance(item, dict):
-                            continue
-                        url = str(item.get("article_link") or "").strip()
-                        title = str(item.get("heading") or "").strip()
-                        if not url or not title:
-                            continue
-                        value.append(
-                            {
-                                "title": title,
-                                "url": url,
-                                "summary": str(item.get("summary") or ""),
-                                "published_time": item.get("published_time"),
-                                "source": "upstox",
-                            }
-                        )
-                        sources.append(
-                            {"name": urlparse(url).netloc or "upstox", "url": url}
-                        )
-                    if not value:
-                        raise UpstoxError("Upstox returned no usable news articles")
-                    source = "upstox"
-                except UpstoxError:
-                    articles = self.resources.yf_fetcher.fetch_news(ticker, limit)
-                    value = [
-                        article.model_dump(mode="json")
-                        if hasattr(article, "model_dump")
-                        else dict(article)
-                        for article in articles
-                    ]
-            else:
-                articles = self.resources.yf_fetcher.fetch_news(ticker, limit)
-                value = [
-                    article.model_dump(mode="json")
-                    if hasattr(article, "model_dump")
-                    else dict(article)
-                    for article in articles
-                ]
+            pipeline = self.resources.news_pipeline_runner
+            if pipeline is None:
+                return {
+                    "success": False,
+                    "error": "News pipeline unavailable",
+                    "evidence": {
+                        "source": "news",
+                        "status": "unavailable",
+                        "reason": "pipeline unavailable",
+                        "evidence_count": 0,
+                    },
+                }
+            try:
+                records = await pipeline.run(
+                    company=CompanyContext(
+                        ticker=ticker,
+                        company_name=ticker,
+                        nse_symbol=ticker.split(".", 1)[0],
+                    ),
+                    time_window_days=30,
+                )
+            except (TimeoutError, OSError, ConnectionError, RuntimeError) as exc:
+                return {
+                    "success": False,
+                    "error": f"News source unavailable: {type(exc).__name__}",
+                    "evidence": {
+                        "source": "news",
+                        "status": "unavailable",
+                        "reason": type(exc).__name__,
+                        "evidence_count": 0,
+                    },
+                }
+            records = records[:limit]
+            pipeline_stats = getattr(pipeline, "last_run_stats", {})
+            value = [
+                {
+                    "title": record.title,
+                    "url": record.url,
+                    "summary": record.snippet,
+                    "published_time": (
+                        record.publish_time.isoformat()
+                        if record.publish_time is not None
+                        else None
+                    ),
+                    "source": record.search_provider,
+                    "source_domain": record.source_domain,
+                    "quality_score": record.quality_score,
+                    "source_tier": record.source_tier,
+                    "extraction_status": record.extraction_status,
+                }
+                for record in records
+            ]
+            sources = [
+                {"name": record.source_domain, "url": record.url} for record in records
+            ]
+            source = "news_pipeline"
         else:
             return {"success": False, "error": f"Unknown tool: {name}"}
         dataset = (
@@ -576,18 +570,35 @@ class FinancialToolRunner:
             str(arguments.get("ticker", "")),
             _news_timestamp(value),
             (
-                "verified"
+                "degraded"
+                if name == "news:fetch_news"
+                and (
+                    pipeline_stats.get("query_failures", 0)
+                    or pipeline_stats.get("connector_failures", 0)
+                )
+                else "verified"
                 if source == "upstox"
                 else "degraded"
                 if name == "data:fetch_fundamentals"
                 else "verified"
             ),
             source=source,
-            version="upstox-v2" if source == "upstox" else "yfinance-live-v1",
-            source_url=(
-                "https://api.upstox.com"
+            version=(
+                "news-pipeline-v1"
+                if source == "news_pipeline"
+                else "upstox-v2"
                 if source == "upstox"
-                else "https://finance.yahoo.com"
+                else "yfinance-live-v1"
+            ),
+            source_url=(
+                sources[0]["url"]
+                if name == "news:fetch_news" and sources
+                else "https://api.upstox.com"
+                if source == "upstox"
+                else (
+                    f"https://finance.yahoo.com/quote/{arguments.get('ticker', '')}/"
+                    f"{'history/' if dataset == 'historical_prices' else ''}"
+                )
             ),
         )
         if name == "data:fetch_fundamentals" and isinstance(value, dict):
@@ -598,10 +609,38 @@ class FinancialToolRunner:
             name.removeprefix("data:").removeprefix("news:"), value, provenance
         )
         if not value:
-            return {"success": False, "error": f"No evidence returned for {name}"}
+            pipeline_stats = getattr(pipeline, "last_run_stats", {})
+            return {
+                "success": False,
+                "error": f"No usable evidence returned for {name}",
+                "evidence": {
+                    "source": "news" if name == "news:fetch_news" else name,
+                    "status": "unavailable",
+                    "reason": (
+                        "no usable documents"
+                        if name == "news:fetch_news"
+                        else "empty result"
+                    ),
+                    "evidence_count": 0,
+                    "pipeline_stats": pipeline_stats,
+                },
+            }
         result = {"success": True, "data": value, "provenance": provenance}
+        if name == "news:fetch_news":
+            result["pipeline_stats"] = pipeline_stats
         if name == "news:fetch_news" and sources:
             result["sources"] = sources
+        if name == "news:fetch_news":
+            result["summary"] = json.dumps(
+                {
+                    "news_quality": dict(
+                        getattr(
+                            self.resources.news_pipeline_runner, "last_run_stats", {}
+                        )
+                    )
+                },
+                sort_keys=True,
+            )
         return result
 
     def _archive(
@@ -629,9 +668,13 @@ def _provider_provenance(
     *,
     source: str = "yfinance",
     version: str = "yfinance-live-v1",
-    source_url: str = "https://finance.yahoo.com",
+    source_url: str | None = None,
 ) -> dict[str, Any]:
     observed = observed_at or datetime.now(UTC)
+    resolved_source_url = source_url or (
+        f"https://finance.yahoo.com/quote/{instrument}/"
+        f"{'history/' if dataset == 'historical_prices' else ''}"
+    )
     return EvidenceProvenance(
         source=source,
         dataset=dataset,
@@ -644,7 +687,7 @@ def _provider_provenance(
         timezone="Asia/Kolkata" if instrument.endswith((".NS", ".BO")) else "UTC",
         adjustment="unadjusted" if dataset == "historical_prices" else None,
         as_of=observed,
-        source_url=source_url,
+        source_url=resolved_source_url,
     ).model_dump(mode="json")
 
 

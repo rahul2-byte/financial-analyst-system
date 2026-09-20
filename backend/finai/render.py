@@ -190,14 +190,36 @@ def render_response(state: PresentationState, *, streaming: bool = False) -> Mar
     prefix = "**FIN-AI**\n\n"
     if streaming:
         prefix = "**FIN-AI** · streaming\n\n"
-    elif state.terminal_status in {"partial", "insufficient_data"}:
+    elif state.terminal_status in {
+        "partial",
+        "insufficient_data",
+        "completed_with_limited_evidence",
+    }:
         label = (
             "Partial evidence"
-            if state.terminal_status == "partial"
+            if state.terminal_status in {"partial", "completed_with_limited_evidence"}
             else "Insufficient evidence"
         )
         prefix = f"**FIN-AI** · {label}\n\n> This report is limited to verified data returned by the available tools.\n\n"
     return Markdown(prefix + text, code_theme="ansi_dark", style="finai.body")
+
+
+def render_saved_report(report: dict[str, object]) -> Markdown:
+    status = str(report.get("status", "unknown"))
+    prefix = "**FIN-AI · Saved report**\n\n"
+    if status in {"partial", "completed_with_limited_evidence"}:
+        prefix += "> Partial evidence: this saved report is limited to verified data returned by the available tools.\n\n"
+    metadata = (
+        f"**Status:** {sanitize_terminal_text(status)}  \n"
+        f"**Request:** {sanitize_terminal_text(str(report.get('query', '')))}  \n"
+        f"**Created:** {sanitize_terminal_text(str(report.get('created_at', '')))}  \n"
+        f"**Artifact:** `{sanitize_terminal_text(str(report.get('artifact_path', '')))}`\n\n"
+    )
+    return Markdown(
+        prefix + metadata + sanitize_terminal_text(str(report.get("report_text", ""))),
+        code_theme="ansi_dark",
+        style="finai.body",
+    )
 
 
 def render_status(
@@ -207,6 +229,14 @@ def render_status(
     elapsed_s: float | None = None,
 ) -> Text:
     label = state.phase.value.replace("_", " ")
+    if state.phase.value == "complete" and state.terminal_status:
+        label = {
+            "success": "complete",
+            "completed": "complete",
+            "completed_with_limited_evidence": "limited evidence",
+            "partial": "partial",
+            "insufficient_data": "insufficient evidence",
+        }.get(state.terminal_status, state.terminal_status.replace("_", " "))
     if spinner and state.phase.value not in {"complete", "failed", "cancelled"}:
         label = f"{spinner} {label}"
     if state.current_operation and state.phase.value not in {
@@ -219,7 +249,11 @@ def render_status(
         label += f" · {elapsed_s:.1f}s"
     if state.phase.value == "complete" and state.sources:
         label += f" · {len(state.sources)} sources"
-    if state.terminal_status in {"partial", "insufficient_data"}:
+    if state.terminal_status in {
+        "partial",
+        "insufficient_data",
+        "completed_with_limited_evidence",
+    }:
         label += " · evidence limited"
     return Text(f"FIN-AI · {label}", style="dim")
 

@@ -8,6 +8,8 @@ import time
 from contextvars import ContextVar
 from typing import Any
 
+from app.observability.tracing import mark_success, record_exception, span
+
 _metrics: ContextVar[tuple[dict[str, Any], ...]] = ContextVar(
     "finai_metrics", default=()
 )
@@ -54,14 +56,46 @@ def observe(name: str | None = None, as_type: str = "span", **metadata: Any):
             async def async_generator_wrapper(*args, **kwargs):
                 started = time.perf_counter()
                 error: Exception | None = None
-                try:
-                    async for item in function(*args, **kwargs):
-                        yield item
-                except Exception as exc:
-                    error = exc
-                    raise
-                finally:
-                    _finish(metric_name, as_type, started, error)
+                with span(metric_name, metadata) as trace_span:
+                    try:
+                        async for item in function(*args, **kwargs):
+                            event_type = getattr(item, "type", None)
+                            if event_type:
+                                trace_span.add_event(
+                                    "research.event", {"event.type": event_type}
+                                )
+                                if event_type == "run.completed":
+                                    terminal_status = getattr(
+                                        item, "terminal_status", "COMPLETED"
+                                    )
+                                    availability = getattr(
+                                        item, "evidence_availability", []
+                                    )
+                                    trace_span.set_attributes(
+                                        {
+                                            "app.execution_status": terminal_status.upper(),
+                                            "app.evidence_status": getattr(
+                                                item, "evidence_status", None
+                                            )
+                                            or "unknown",
+                                            "app.evidence_sources": len(availability),
+                                            "app.evidence_limited": terminal_status
+                                            == "completed_with_limited_evidence",
+                                        }
+                                    )
+                                elif event_type == "run.failed":
+                                    trace_span.set_attribute(
+                                        "app.execution_status", "FAILED"
+                                    )
+                            yield item
+                    except Exception as exc:
+                        error = exc
+                        record_exception(trace_span, exc)
+                        raise
+                    else:
+                        mark_success(trace_span)
+                    finally:
+                        _finish(metric_name, as_type, started, error)
 
             return async_generator_wrapper
 
@@ -71,13 +105,18 @@ def observe(name: str | None = None, as_type: str = "span", **metadata: Any):
             async def async_wrapper(*args, **kwargs):
                 started = time.perf_counter()
                 error: Exception | None = None
-                try:
-                    return await function(*args, **kwargs)
-                except Exception as exc:
-                    error = exc
-                    raise
-                finally:
-                    _finish(metric_name, as_type, started, error)
+                with span(metric_name, metadata) as trace_span:
+                    try:
+                        result = await function(*args, **kwargs)
+                    except Exception as exc:
+                        error = exc
+                        record_exception(trace_span, exc)
+                        raise
+                    else:
+                        mark_success(trace_span)
+                        return result
+                    finally:
+                        _finish(metric_name, as_type, started, error)
 
             return async_wrapper
 
@@ -85,13 +124,18 @@ def observe(name: str | None = None, as_type: str = "span", **metadata: Any):
         def sync_wrapper(*args, **kwargs):
             started = time.perf_counter()
             error: Exception | None = None
-            try:
-                return function(*args, **kwargs)
-            except Exception as exc:
-                error = exc
-                raise
-            finally:
-                _finish(metric_name, as_type, started, error)
+            with span(metric_name, metadata) as trace_span:
+                try:
+                    result = function(*args, **kwargs)
+                except Exception as exc:
+                    error = exc
+                    record_exception(trace_span, exc)
+                    raise
+                else:
+                    mark_success(trace_span)
+                    return result
+                finally:
+                    _finish(metric_name, as_type, started, error)
 
         return sync_wrapper
 

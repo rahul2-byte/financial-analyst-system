@@ -11,6 +11,8 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from app.observability.tracing import initialize_tracing
+
 from .app import FinAIApp
 from .plain import render_json, render_plain
 from .session import FinAIRepl
@@ -114,6 +116,7 @@ async def run_interactive(repl: FinAIRepl) -> None:
 def main() -> None:
     args = parse_arguments()
     try:
+        tracing = initialize_tracing()
         if args.debug_payloads:
             os.environ["FINAI_DIAGNOSTICS"] = "payloads"
         elif args.debug:
@@ -137,10 +140,12 @@ def main() -> None:
         repl.mode = args.mode
         if args.query:
             asyncio.run(run_one_shot(repl, " ".join(args.query), as_json=args.json))
+            tracing.shutdown()
             return
         if sys.stdin.isatty() and sys.stdout.isatty():
             asyncio.run(run_interactive(repl))
         else:
             asyncio.run(run_plain_terminal(repl))
+        tracing.shutdown()
     except KeyboardInterrupt:
         sys.exit(130)

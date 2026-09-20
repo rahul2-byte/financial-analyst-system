@@ -7,6 +7,7 @@ from collections.abc import AsyncIterator, Callable
 from typing import Any
 
 from app.core.agent_loop.model_events import merge_chunk_tool_calls, sanitize_tool_calls
+from app.core.observability import observe
 from app.events.models import (
     EventFactory,
     ProviderAttemptStarted,
@@ -15,6 +16,7 @@ from app.events.models import (
     ProviderRetrying,
     ProviderStreamStarted,
     TextDelta,
+    TokenUsage,
 )
 from app.models.request_models import Message
 
@@ -30,7 +32,9 @@ class ModelStreaming:
         tool_definitions: Callable[[], list[dict[str, Any]]],
         *,
         publish_reports: bool = False,
-        report_max_tokens: int = 8192,
+        report_max_tokens: int = 32768,
+        report_repair_max_tokens: int = 8192,
+        report_repair_timeout_seconds: float = 120.0,
     ) -> None:
         self._client = client
         self._model = model
@@ -38,26 +42,48 @@ class ModelStreaming:
         self._tool_definitions = tool_definitions
         self._publish_reports = publish_reports
         self._report_max_tokens = report_max_tokens
+        self._report_repair_max_tokens = report_repair_max_tokens
+        self._report_repair_timeout_seconds = report_repair_timeout_seconds
 
+    @observe("llm.round", as_type="llm_round")
     async def stream(
         self, messages: list[Message], factory: EventFactory, round_number: int
     ) -> AsyncIterator[Any]:
-        del round_number
         text: list[str] = []
         calls: dict[int, dict[str, Any]] = {}
+        usage: TokenUsage | None = None
+        is_repair = self._publish_reports and any(
+            message.role == "system" and "Formatting repair required" in message.content
+            for message in messages
+        )
         async for event in self._client.generate_stream(
             messages,
             self._model,
             tools=self._tool_definitions(),
             max_tokens=(
-                self._report_max_tokens
+                self._report_repair_max_tokens
+                if self._publish_reports
+                and any(
+                    message.role == "system"
+                    and "Formatting repair required" in message.content
+                    for message in messages
+                )
+                else self._report_max_tokens
                 if self._publish_reports
                 and any(message.role == "tool" for message in messages)
                 else self._max_tokens
                 if any(message.role == "tool" for message in messages)
-                else min(self._max_tokens, 512)
+                else self._report_max_tokens
+                if self._publish_reports and round_number > 1
+                else self._max_tokens
+                if round_number > 1
+                else min(self._max_tokens, 1024)
             ),
             temperature=0.1,
+            run_id=str(factory.run_id),
+            timeout_seconds=(
+                self._report_repair_timeout_seconds if is_repair else None
+            ),
         ):
             event_name = event.get("event")
             if event_name == "provider_attempt_started":
@@ -88,6 +114,8 @@ class ModelStreaming:
                     attempts=int(data.get("attempts", 1)),
                     duration_ms=float(data.get("duration_ms", 0)),
                     first_token_ms=data.get("first_token_ms"),
+                    model_id=data.get("model_id"),
+                    usage=usage or _parse_usage(data.get("usage")),
                 )
             elif event_name == "provider_failed":
                 data = event.get("data", {})
@@ -97,14 +125,23 @@ class ModelStreaming:
                     phase=str(data.get("phase", "unknown")),
                     status_code=data.get("status_code"),
                     message=str(data.get("message", "Hive provider failed")),
+                    duration_ms=data.get("duration_ms"),
+                    timeout=data.get("timeout"),
+                    partial_output=data.get("partial_output"),
+                    model_id=data.get("model_id"),
+                    usage=usage or _parse_usage(data.get("usage")),
                 )
+            elif event_name == "usage":
+                usage = _parse_usage(event.get("data"))
             elif event_name == "token":
+                usage = _parse_usage(event.get("usage")) or usage
                 async for output in self._emit_text(
                     str(event.get("data", "")), factory, text
                 ):
                     yield output
                 merge_chunk_tool_calls(calls, event.get("chunk"))
             elif event_name == "chunk":
+                usage = _parse_usage(event.get("usage")) or usage
                 payload = event.get("data")
                 if isinstance(payload, dict):
                     choices = payload.get("choices", [])
@@ -131,3 +168,12 @@ class ModelStreaming:
             text.append(part)
             yield factory.make(TextDelta, text=part)
             await asyncio.sleep(0)
+
+
+def _parse_usage(value: Any) -> TokenUsage | None:
+    if not isinstance(value, dict) or not value:
+        return None
+    try:
+        return TokenUsage.model_validate({**value, "verified": True})
+    except ValueError:
+        return None

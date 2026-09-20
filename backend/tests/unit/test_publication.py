@@ -21,6 +21,7 @@ def _evidence() -> dict[str, EvidenceFact]:
             instrument="ABC.NS",
             observed_at=datetime(2026, 9, 18, tzinfo=UTC),
             quality_status="verified",
+            source_url="https://example.test/price",
         )
     }
 
@@ -52,6 +53,139 @@ def test_publish_report_renders_only_verified_numeric_facts() -> None:
 
     assert "123.4 INR" in result
     assert "[[fact:" not in result
+
+
+def test_publish_report_formats_provider_values_by_metric() -> None:
+    evidence = {
+        "historical_prices:data.period_return_pct": EvidenceFact(
+            fact_id="historical_prices:data.period_return_pct",
+            value=-25.1715,
+            unit="provider_value",
+            source_id="source:yfinance",
+            instrument="ABC.NS",
+            observed_at=datetime(2026, 9, 18, tzinfo=UTC),
+            quality_status="verified",
+            source_url="https://example.test/history",
+        ),
+        "historical_prices:data.Volume": EvidenceFact(
+            fact_id="historical_prices:data.Volume",
+            value=39400710,
+            unit="provider_value",
+            source_id="source:yfinance",
+            instrument="ABC.NS",
+            observed_at=datetime(2026, 9, 18, tzinfo=UTC),
+            quality_status="verified",
+            source_url="https://example.test/history",
+        ),
+    }
+    draft = _draft(
+        detailed_analysis=(
+            "Return [[fact:historical_prices:data.period_return_pct]] with volume "
+            "[[fact:historical_prices:data.Volume]]."
+        ),
+        claims=[
+            {
+                "claim_id": "claim-1",
+                "text": "Return [[fact:historical_prices:data.period_return_pct]].",
+                "importance": "major",
+                "evidence_refs": ["citation-1"],
+                "numeric_refs": ["historical_prices:data.period_return_pct"],
+            }
+        ],
+    )
+
+    result = publish_report(draft, evidence)
+
+    assert "-25.17%" in result
+    assert "39,400,710" in result
+    assert "provider_value" not in result
+
+
+def test_publish_report_discloses_limited_evidence_and_price_basis() -> None:
+    result = publish_report(
+        _draft(),
+        _evidence(),
+        availability={
+            "news": {
+                "source": "news",
+                "status": "unavailable",
+                "reason": "provider timeout",
+                "evidence_count": 0,
+            }
+        },
+    )
+
+    assert "Evidence status: LIMITED" in result
+    assert "News evidence was unavailable" in result
+
+
+def test_publish_report_renders_claim_references_and_sources() -> None:
+    result = publish_report(_draft(), _evidence())
+
+    assert "## Claims and references" in result
+    assert "The latest price is 123.4 INR." in result
+    assert "citation-1" in result
+    assert "## Sources" in result
+    assert "source:yfinance" in result
+    assert "https://example.test/price" in result
+    assert "2026-09-18T00:00:00+00:00" in result
+
+
+def test_publish_report_accepts_verified_qualitative_source_records() -> None:
+    draft = _draft(
+        detailed_analysis="The article supports the qualitative claim.",
+        claims=[
+            {
+                "claim_id": "claim-1",
+                "text": "The article supports the qualitative claim.",
+                "importance": "major",
+                "evidence_refs": ["citation-news"],
+                "numeric_refs": [],
+            }
+        ],
+        citations=[{"citation_id": "citation-news", "source_id": "news:example.com"}],
+    )
+
+    result = publish_report(
+        draft,
+        {},
+        {
+            "news:example.com": {
+                "name": "example.com",
+                "url": "https://example.com/news",
+            }
+        },
+    )
+
+    assert "https://example.com/news" in result
+
+
+def test_publish_report_rejects_major_claim_from_degraded_source() -> None:
+    draft = _draft(
+        citations=[{"citation_id": "citation-1", "source_id": "fundamentals"}],
+        claims=[
+            {
+                "claim_id": "claim-1",
+                "text": "Profitability is constructive.",
+                "importance": "major",
+                "evidence_refs": ["citation-1"],
+            }
+        ],
+        detailed_analysis="Profitability is constructive.",
+    )
+
+    with pytest.raises(PublicationError, match="degraded_source_claim"):
+        publish_report(
+            draft,
+            {},
+            {
+                "fundamentals": {
+                    "name": "fundamentals",
+                    "url": "https://example.test/fundamentals",
+                    "quality_status": "degraded",
+                }
+            },
+        )
 
 
 def test_publish_report_rejects_unsupported_major_claim() -> None:
@@ -95,6 +229,47 @@ def test_publish_report_rejects_unknown_source() -> None:
         publish_report(draft, _evidence())
 
 
+def test_publish_report_rejects_duplicate_citation_ids() -> None:
+    draft = _draft(
+        citations=[
+            {"citation_id": "citation-1", "source_id": "source:yfinance"},
+            {"citation_id": "citation-1", "source_id": "source:yfinance"},
+        ]
+    )
+
+    with pytest.raises(PublicationError, match="duplicate_citation_id"):
+        publish_report(draft, _evidence())
+
+
+def test_publish_report_rejects_citation_without_source_url() -> None:
+    evidence = {
+        fact_id: fact.model_copy(update={"source_url": None})
+        for fact_id, fact in _evidence().items()
+    }
+
+    with pytest.raises(PublicationError, match="citation_source_url_missing"):
+        publish_report(_draft(), evidence)
+
+
+def test_publish_report_rejects_numeric_fact_with_unresolved_source() -> None:
+    other_fact = EvidenceFact(
+        fact_id="other.latest",
+        value=99.0,
+        unit="INR",
+        source_id="source:other",
+        instrument="ABC.NS",
+        observed_at=datetime(2026, 9, 18, tzinfo=UTC),
+        quality_status="verified",
+        source_url="https://example.test/other",
+    )
+    draft = _draft(
+        citations=[{"citation_id": "citation-1", "source_id": "source:other"}]
+    )
+
+    with pytest.raises(PublicationError, match="numeric_fact_source_missing"):
+        publish_report(draft, {**_evidence(), "other.latest": other_fact})
+
+
 def test_parse_report_draft_rejects_non_json() -> None:
     with pytest.raises(PublicationError, match="structured_report_invalid"):
         parse_report_draft("plain text report")
@@ -103,6 +278,38 @@ def test_parse_report_draft_rejects_non_json() -> None:
 def test_report_validation_fallback_renders_evidence_and_limitations() -> None:
     result = report_validation_fallback(_evidence(), ("structured_report_invalid",))
 
+    assert "Research report" in result
     assert "Verified evidence" in result
     assert "Data limitations" in result
     assert "123.4" in result
+
+
+def test_report_validation_fallback_uses_professional_evidence_rendering() -> None:
+    evidence = {
+        "historical_prices:data.period_return_pct": EvidenceFact(
+            fact_id="historical_prices:data.period_return_pct",
+            value=-25.1715,
+            unit="provider_value",
+            source_id="source:yfinance",
+            instrument="ABC.NS",
+            observed_at=datetime(2026, 9, 18, tzinfo=UTC),
+            quality_status="verified",
+            source_url="https://finance.yahoo.com/quote/ABC.NS/history/",
+        )
+    }
+
+    result = report_validation_fallback(evidence, ("structured_report_invalid",))
+
+    assert "provider_value" not in result
+    assert "-25.17%" in result
+    assert "https://finance.yahoo.com/quote/ABC.NS/history/" in result
+    assert "2026-09-18T00:00:00+00:00" in result
+
+
+def test_report_validation_fallback_is_report_shaped_without_evidence() -> None:
+    result = report_validation_fallback({}, ("evidence_unavailable",))
+
+    assert "Research report" in result
+    assert "No verified evidence was returned" in result
+    assert "evidence was unavailable" in result
+    assert "No financial conclusion" in result

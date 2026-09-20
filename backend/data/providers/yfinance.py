@@ -320,7 +320,7 @@ class YFinanceFetcher(IDataFetcher):
                 else "UTC",
                 "adjustment": "unadjusted",
                 "as_of": observed_at.isoformat(),
-                "source_url": "https://finance.yahoo.com",
+                "source_url": f"https://finance.yahoo.com/quote/{formatted_ticker}/history/",
             },
             "quality_issues": [
                 issue.model_dump(mode="json") for issue in quality_issues

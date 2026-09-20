@@ -25,6 +25,8 @@ from functools import wraps
 from pathlib import Path
 from typing import Any
 
+from app.observability.tracing import current_trace_ids
+
 # ============================================================================
 # Logging Configuration
 # ============================================================================
@@ -67,6 +69,19 @@ class RepeatedWarningFilter(logging.Filter):
             return True
 
 
+class TraceContextFilter(logging.Filter):
+    """Add active OpenTelemetry IDs to log records without requiring telemetry."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        for key, value in current_trace_ids().items():
+            setattr(record, key, value)
+        if not hasattr(record, "trace_id"):
+            record.trace_id = "-"
+        if not hasattr(record, "span_id"):
+            record.span_id = "-"
+        return True
+
+
 def setup_logging(log_level: str = "INFO") -> None:
     """
     Configures structured logging for the application.
@@ -76,7 +91,7 @@ def setup_logging(log_level: str = "INFO") -> None:
     """
     logging.basicConfig(
         level=getattr(logging, log_level.upper(), logging.INFO),
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        format="%(asctime)s - %(name)s - %(levelname)s - trace_id=%(trace_id)s span_id=%(span_id)s - %(message)s",
         handlers=[logging.StreamHandler(sys.stdout)],
     )
 
@@ -84,6 +99,8 @@ def setup_logging(log_level: str = "INFO") -> None:
     for handler in logging.getLogger().handlers:
         if not any(isinstance(item, RepeatedWarningFilter) for item in handler.filters):
             handler.addFilter(repeated_warning_filter)
+        if not any(isinstance(item, TraceContextFilter) for item in handler.filters):
+            handler.addFilter(TraceContextFilter())
 
     # Silence overly verbose loggers
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
