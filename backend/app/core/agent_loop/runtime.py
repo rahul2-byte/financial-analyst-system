@@ -38,6 +38,7 @@ from app.events.models import (
     ProviderRetrying,
     ProviderStreamStarted,
     ResearchEvent,
+    RouteDecisionMade,
     RunCancelled,
     RunCompleted,
     RunFailed,
@@ -52,6 +53,7 @@ from app.events.models import (
     ToolStarted,
 )
 from app.models.request_models import Message
+from app.models.routing import RoutePlan
 from app.observability.tracing import set_current_span_attributes, span
 from app.security.policy import redact_secrets
 
@@ -105,6 +107,8 @@ class AgentLoopConfig:
     report_repair_max_tokens: int = 8192
     report_repair_timeout_seconds: float = 120.0
     publish_reports: bool = False
+    allowed_tools: frozenset[str] | None = None
+    route_plan: RoutePlan | None = None
 
 
 class AgentLoop:
@@ -210,6 +214,20 @@ class AgentLoop:
         )
         set_current_span_attributes({"app.run_id": str(factory.run_id)})
         yield factory.make(RunStarted, query=_last_user_query(history))
+        if self.config.route_plan is not None:
+            route = self.config.route_plan
+            yield factory.make(
+                RouteDecisionMade,
+                intent=route.intent,
+                execution_mode=route.execution_mode.value,
+                model_tier=route.model_tier.value,
+                confidence=route.confidence,
+                reason_codes=route.reason_codes,
+                required_tools=route.required_tools,
+                reason=route.reason,
+                selected_provider=route.selected_provider,
+                selected_model=route.selected_model,
+            )
         for skill in selected_skills:
             yield factory.make(
                 SkillSelected,
@@ -796,10 +814,22 @@ class AgentLoop:
             "interaction:ask_user",
         }
         if not skills:
+            allowed: set[str] | None = None
+        else:
+            allowed = {
+                tool for skill in skills for tool in skill.manifest.allowed_tools
+            }
+            if not allowed:
+                allowed = base_tools
+        if self.config.allowed_tools is not None:
+            if allowed is None:
+                allowed = {
+                    str(definition.get("function", {}).get("name", ""))
+                    for definition in definitions
+                }
+            allowed &= set(self.config.allowed_tools)
+        if allowed is None:
             return definitions
-        allowed = {tool for skill in skills for tool in skill.manifest.allowed_tools}
-        if not allowed:
-            allowed = base_tools
         return [
             definition
             for definition in definitions

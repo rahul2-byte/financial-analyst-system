@@ -90,13 +90,18 @@ class HiveService(LLMServiceInterface):
         self,
         client: httpx.AsyncClient | None = None,
         *,
+        provider_name: str = "hive",
+        base_url: str | None = None,
+        api_key: str | None = None,
+        default_model: str | None = None,
         retry_policy: HiveRetryPolicy | None = None,
         circuit_breaker: CircuitBreaker | None = None,
         provider_archive: ProviderArchive | None = None,
     ) -> None:
-        self.base_url = str(settings.HIVE_BASE_URL).rstrip("/")
-        self.api_key = settings.HIVE_API_KEY
-        self.default_model = str(settings.HIVE_MODEL)
+        self.provider_name = provider_name
+        self.base_url = str(base_url or settings.HIVE_BASE_URL).rstrip("/")
+        self.api_key = api_key if api_key is not None else settings.HIVE_API_KEY
+        self.default_model = str(default_model or settings.HIVE_MODEL)
         self.last_telemetry: dict[str, Any] = {}
         self.provider_archive = provider_archive
         self.metrics = ProviderMetrics()
@@ -119,7 +124,7 @@ class HiveService(LLMServiceInterface):
             ),
         )
         self._circuit = circuit_breaker or CircuitBreaker(
-            "hive",
+            self.provider_name,
             failure_threshold=settings.HIVE_CIRCUIT_FAILURE_THRESHOLD,
             recovery_timeout=settings.HIVE_CIRCUIT_RECOVERY_TIMEOUT,
         )
@@ -170,11 +175,13 @@ class HiveService(LLMServiceInterface):
         self, messages: list[Message], model: str, **kwargs: Any
     ) -> AsyncGenerator[dict[str, Any], None]:
         if not self.api_key:
-            raise HiveProviderError("HIVE_API_KEY is not configured")
+            raise HiveProviderError(
+                f"{self.provider_name.upper()}_API_KEY is not configured"
+            )
         if not self._circuit.can_execute():
             from app.core.circuit_breaker import CircuitBreakerOpen
 
-            raise CircuitBreakerOpen("Circuit 'hive' is open")
+            raise CircuitBreakerOpen(f"Circuit '{self.provider_name}' is open")
         started = time.perf_counter()
         payload: dict[str, Any] = {
             "model": self._model(model),
@@ -230,11 +237,14 @@ class HiveService(LLMServiceInterface):
             attempt = retries + 1
             attempt_event = {
                 "event": "provider_attempt_started",
-                "data": {"attempt": attempt, "provider": "hive"},
+                "data": {"attempt": attempt, "provider": self.provider_name},
             }
             add_current_span_event("llm.attempt", {"retry.attempt": attempt})
             set_current_span_attributes(
-                {"llm.provider": "hive", "llm.model_name": self._model(model)}
+                {
+                    "llm.provider": self.provider_name,
+                    "llm.model_name": self._model(model),
+                }
             )
             yield attempt_event
             try:
@@ -432,7 +442,7 @@ class HiveService(LLMServiceInterface):
                 if self.provider_archive is not None:
                     snapshot = self.provider_archive.store(
                         ProviderSnapshot(
-                            provider="hive",
+                            provider=self.provider_name,
                             operation="model_stream",
                             payload=raw_events,
                             fetched_at=datetime.now(UTC),

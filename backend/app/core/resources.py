@@ -7,7 +7,10 @@ from pathlib import Path
 from typing import Any
 
 from app.config import settings
+from app.models.routing import ModelTier
 from app.observability.provider_archive import ProviderArchive
+from app.services.model_router import ModelBinding, ModelRouter, ProviderCapabilities
+from app.services.routing_policy import RoutingPolicy
 
 
 @dataclass
@@ -19,6 +22,8 @@ class RuntimeResources:
     provider_archive: ProviderArchive | None = None
     upstox_fetcher: Any | None = None
     news_pipeline_runner: Any | None = None
+    model_router: ModelRouter | None = None
+    routing_policy: RoutingPolicy | None = None
 
 
 def build_runtime_resources(
@@ -59,6 +64,8 @@ def build_runtime_resources(
                 replay_snapshots,
                 source_quality_filtering=source_quality_filtering,
             ),
+            model_router=None,
+            routing_policy=RoutingPolicy(jev=None),
         )
     if llm_service is None:
         from app.services.hive_service import HiveService
@@ -76,13 +83,109 @@ def build_runtime_resources(
         upstox_fetcher = None
     from data.news_pipeline.runner import NewsPipelineRunner
 
+    jev = None
+    if settings.FINAI_ROUTER_ENABLED:
+        from app.services.jev_service import JevService
+
+        jev = JevService(
+            api_key=settings.TYPESAFE_API_KEY,
+            base_url=settings.TYPESAFE_BASE_URL,
+            model=settings.TYPESAFE_MODEL,
+            timeout_seconds=settings.FINAI_ROUTER_TIMEOUT_SECONDS,
+            max_retries=settings.FINAI_ROUTER_MAX_RETRIES,
+        )
+    model_router = ModelRouter(_model_bindings(llm_service, archive))
+
     return RuntimeResources(
         llm_service=llm_service,
         yf_fetcher=yf_fetcher,
         provider_archive=archive,
         upstox_fetcher=upstox_fetcher,
         news_pipeline_runner=NewsPipelineRunner(),
+        model_router=model_router,
+        routing_policy=RoutingPolicy(
+            jev=jev, min_confidence=settings.FINAI_ROUTER_MIN_CONFIDENCE
+        ),
     )
+
+
+def _model_bindings(
+    llm_service: Any, archive: ProviderArchive
+) -> dict[ModelTier, ModelBinding]:
+    bindings: dict[ModelTier, ModelBinding] = {
+        ModelTier.MAIN: ModelBinding(
+            provider="hive",
+            model=str(settings.HIVE_MODEL),
+            service=llm_service,
+            capabilities=ProviderCapabilities(
+                streaming=True,
+                tool_calls=True,
+                structured_output=True,
+                max_context_tokens=settings.FINAI_CONTEXT_MAX_TOKENS,
+                reasoning=True,
+            ),
+        )
+    }
+    from app.services.openai_compatible_service import OpenAICompatibleService
+
+    if settings.OPENAI_API_KEY:
+        service = OpenAICompatibleService(
+            provider_name="openai",
+            base_url=settings.OPENAI_BASE_URL,
+            api_key=settings.OPENAI_API_KEY,
+            model=settings.OPENAI_MODEL,
+            provider_archive=archive,
+        )
+        bindings[ModelTier.MID] = ModelBinding(
+            provider="openai",
+            model=settings.OPENAI_MODEL,
+            service=service,
+            capabilities=ProviderCapabilities(
+                streaming=True,
+                tool_calls=True,
+                structured_output=True,
+                max_context_tokens=settings.FINAI_CONTEXT_MAX_TOKENS,
+            ),
+        )
+    elif settings.ANTHROPIC_API_KEY:
+        from app.services.anthropic_service import AnthropicService
+
+        service = AnthropicService(
+            api_key=settings.ANTHROPIC_API_KEY,
+            base_url=settings.ANTHROPIC_BASE_URL,
+            model=settings.ANTHROPIC_MODEL,
+        )
+        bindings[ModelTier.MID] = ModelBinding(
+            provider="anthropic",
+            model=settings.ANTHROPIC_MODEL,
+            service=service,
+            capabilities=ProviderCapabilities(
+                streaming=True,
+                tool_calls=False,
+                structured_output=False,
+                max_context_tokens=settings.FINAI_CONTEXT_MAX_TOKENS,
+            ),
+        )
+    if settings.LOCAL_MODEL_BASE_URL:
+        service = OpenAICompatibleService(
+            provider_name="local_model",
+            base_url=settings.LOCAL_MODEL_BASE_URL,
+            api_key=settings.LOCAL_MODEL_API_KEY,
+            model=settings.LOCAL_MODEL,
+            provider_archive=archive,
+        )
+        bindings[ModelTier.SMALL] = ModelBinding(
+            provider="local_model",
+            model=settings.LOCAL_MODEL,
+            service=service,
+            capabilities=ProviderCapabilities(
+                streaming=True,
+                tool_calls=True,
+                structured_output=True,
+                max_context_tokens=settings.FINAI_CONTEXT_MAX_TOKENS,
+            ),
+        )
+    return bindings
 
 
 def _build_replay_news_runner(

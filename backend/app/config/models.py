@@ -15,6 +15,22 @@ class EnvSettings(BaseSettings):
     DEBUG: bool = False
 
     DEFAULT_LLM_MODEL: str = "zai-org/glm-5.3-flash"
+    FINAI_ROUTER_ENABLED: bool = True
+    FINAI_ROUTER_TIMEOUT_SECONDS: float = 0.75
+    FINAI_ROUTER_MAX_RETRIES: int = 1
+    FINAI_ROUTER_MIN_CONFIDENCE: float = 0.60
+    TYPESAFE_API_KEY: str | None = None
+    TYPESAFE_BASE_URL: str = "https://api.typesafe.ai"
+    TYPESAFE_MODEL: str = "jev-latest"
+    OPENAI_API_KEY: str | None = None
+    OPENAI_BASE_URL: str = "https://api.openai.com/v1"
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    LOCAL_MODEL_API_KEY: str | None = None
+    LOCAL_MODEL_BASE_URL: str | None = None
+    LOCAL_MODEL: str = "local"
+    ANTHROPIC_API_KEY: str | None = None
+    ANTHROPIC_BASE_URL: str = "https://api.anthropic.com"
+    ANTHROPIC_MODEL: str = "claude-3-5-haiku-latest"
     HIVE_API_KEY: str | None = None
     HIVE_BASE_URL: str = "https://api-cdn.thehive.ai/api/v3"
     HIVE_MODEL: str = "zai-org/glm-5.3-flash"

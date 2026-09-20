@@ -12,6 +12,7 @@ from typing import Any
 from app.core.observability import observe
 from app.events.ledger import TraceLedger
 from app.models.request_models import Message
+from app.observability.feedback import summarize_run
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,7 @@ class SessionStore:
                 "status": status,
                 "created_at": datetime.now(UTC).isoformat(),
                 "events": events,
+                "feedback": summarize_run(events),
             },
         )
         self.append_events(events)

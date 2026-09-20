@@ -1,8 +1,10 @@
+import asyncio
 from uuid import uuid4
 
 import pytest
 from app.core.resources import RuntimeResources
 from app.models.request_models import Message
+from app.models.routing import ExecutionMode, ModelTier, RoutePlan
 from finai.session_runtime import ResearchRunner, _wants_report
 
 
@@ -125,3 +127,54 @@ async def test_analysis_query_uses_report_validation(monkeypatch) -> None:
     ):
         pass
     assert configs[0].publish_reports is True
+
+
+def test_runner_executes_direct_market_route_without_model_call() -> None:
+    class Model:
+        def generate_stream(self, *args, **kwargs):
+            raise AssertionError("model should not run for a direct route")
+
+    class Fetcher:
+        def fetch_stock_price(self, ticker, period, interval):
+            return {
+                "ticker": ticker,
+                "period": period,
+                "interval": interval,
+                "data": [
+                    {"date": "2026-01-01", "close": 100},
+                    {"date": "2026-01-02", "close": 110},
+                ],
+                "provenance": {"source": "test"},
+            }
+
+    class Policy:
+        async def decide(self, *args, **kwargs):
+            return RoutePlan(
+                intent="market_lookup",
+                execution_mode=ExecutionMode.TOOL_ONLY,
+                required_tools=["data:fetch_stock_data"],
+                allowed_tools={"data:fetch_stock_data"},
+                model_tier=ModelTier.NONE,
+                confidence=1.0,
+            )
+
+    async def scenario():
+        resources = RuntimeResources(
+            llm_service=Model(), yf_fetcher=Fetcher(), routing_policy=Policy()
+        )
+        runner = ResearchRunner(resources, "guided")
+        return [
+            event
+            async for event in runner.stream(
+                [Message(role="user", content="What is the current price of TCS?")],
+                "What is the current price of TCS?",
+                uuid4(),
+            )
+        ]
+
+    events = asyncio.run(scenario())
+
+    assert any(
+        event.type == "response.delta" and "TCS" in event.text for event in events
+    )
+    assert events[-1].type == "run.completed"

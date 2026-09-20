@@ -222,6 +222,20 @@ class ClarificationRequested(BaseModel):
     prompt: str
 
 
+class RouteDecisionMade(BaseModel):
+    type: Literal["route.decision.made"] = "route.decision.made"
+    meta: EventMeta
+    intent: str
+    execution_mode: str
+    model_tier: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    reason_codes: list[str] = Field(default_factory=list)
+    required_tools: list[str] = Field(default_factory=list)
+    reason: str = ""
+    selected_provider: str | None = None
+    selected_model: str | None = None
+
+
 ResearchEvent = Annotated[
     RunStarted
     | RunCompleted
@@ -247,7 +261,8 @@ ResearchEvent = Annotated[
     | SourcesUpdated
     | ApprovalRequested
     | ApprovalResolved
-    | ClarificationRequested,
+    | ClarificationRequested
+    | RouteDecisionMade,
     Field(discriminator="type"),
 ]
 
