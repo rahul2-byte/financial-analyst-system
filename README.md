@@ -34,7 +34,7 @@ uv sync
 cp .env.example .env
 ```
 
-Set `HIVE_API_KEY` and `TINYFISH_API_KEY` in `.env`. The Hive adapter uses the OpenAI-compatible model endpoint and streams usage metadata when provided by the provider.
+Set `OPENROUTER_API_KEY`, `HIVE_API_KEY`, and `TINYFISH_API_KEY` in `.env`. OpenRouter Jev makes typed routing decisions; Hive GLM-5.3-Flash performs model generation. ChatGPT subscriptions are not an external API provider and are not used by FIN-AI.
 
 ### Local Phoenix tracing
 

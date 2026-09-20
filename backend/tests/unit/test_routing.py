@@ -59,10 +59,10 @@ def test_route_plan_rejects_unknown_tools() -> None:
 
 def test_jev_choice_is_mapped_to_a_validated_route() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
-        assert request.url.path == "/v1/systemone"
+        assert request.url.path == "/api/alpha/decisions"
         assert request.headers["authorization"] == "Bearer test-key"
         body = json.loads(request.content)
-        assert body["model"] == "jev-latest"
+        assert body["model"] == "~typesafe/jev-latest"
         assert "available_tools" in body["state"]
         return httpx.Response(
             200,

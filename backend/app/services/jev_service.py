@@ -39,13 +39,13 @@ _ROUTES: dict[str, tuple[str, ExecutionMode, ModelTier, list[str]]] = {
     "small_answer": (
         "general_question",
         ExecutionMode.MODEL_ANSWER,
-        ModelTier.SMALL,
+        ModelTier.MAIN,
         [],
     ),
     "mid_repair": (
         "repair",
         ExecutionMode.REPAIR,
-        ModelTier.MID,
+        ModelTier.MAIN,
         [],
     ),
     "report": (
@@ -64,14 +64,14 @@ _ROUTES: dict[str, tuple[str, ExecutionMode, ModelTier, list[str]]] = {
 
 
 class JevService:
-    """Direct TypeSafe Jev client for typed route decisions."""
+    """OpenRouter Jev client for typed route decisions."""
 
     def __init__(
         self,
         *,
         api_key: str | None,
-        base_url: str = "https://api.typesafe.ai",
-        model: str = "jev-latest",
+        base_url: str = "https://openrouter.ai/api/alpha/decisions",
+        model: str = "~typesafe/jev-latest",
         timeout_seconds: float = 0.75,
         max_retries: int = 1,
         client: httpx.AsyncClient | None = None,
@@ -85,7 +85,7 @@ class JevService:
 
     async def decide(self, context: dict[str, Any]) -> RoutePlan:
         if not self.api_key:
-            raise JevProviderError("TYPESAFE_API_KEY is not configured")
+            raise JevProviderError("OPENROUTER_API_KEY is not configured")
         payload = {
             "model": self.model,
             "state": _minimize_context(context),
@@ -112,7 +112,7 @@ class JevService:
         for attempt in range(self.max_retries + 1):
             try:
                 response = await self._client.post(
-                    f"{self.base_url}/v1/systemone",
+                    self.base_url,
                     headers={
                         "Authorization": f"Bearer {self.api_key}",
                         "Content-Type": "application/json",

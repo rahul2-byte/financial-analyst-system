@@ -8,9 +8,6 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class ModelTier(StrEnum):
     NONE = "none"
-    ROUTER = "router"
-    SMALL = "small"
-    MID = "mid"
     MAIN = "main"
 
 

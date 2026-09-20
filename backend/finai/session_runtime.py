@@ -62,7 +62,7 @@ class ResearchRunner:
     """Construct and run one bounded AgentLoop with explicit dependencies."""
 
     def __init__(self, resources: RuntimeResources, mode: str) -> None:
-        self.model_service = resources.model_router or resources.llm_service
+        self.model_service = resources.llm_service
         self.routing_policy = resources.routing_policy
         self.mode = mode
         self.tool_runner = FinancialToolRunner(resources)
@@ -90,38 +90,13 @@ class ResearchRunner:
                 available_skills={skill.manifest.id for skill in selected_skills},
             )
         model_service = self.model_service
-        if (
-            route is not None
-            and route.model_tier.value != "none"
-            and hasattr(model_service, "set_route")
-        ):
-            try:
-                model_service.set_route(route)
-            except ValueError:
-                if hasattr(model_service, "reset_main"):
-                    model_service.reset_main()
-                route = route.model_copy(
-                    update={
-                        "model_tier": ModelTier.MAIN,
-                        "requires_main_model": True,
-                        "reason": (
-                            "The requested model tier is unavailable; "
-                            "the main model is the bounded fallback."
-                        ),
-                        "reason_codes": [
-                            *route.reason_codes,
-                            "provider_unavailable",
-                        ],
-                    }
-                )
-            selection = getattr(model_service, "last_selection", {})
-            if selection:
-                route = route.model_copy(
-                    update={
-                        "selected_provider": selection.get("provider"),
-                        "selected_model": selection.get("model"),
-                    }
-                )
+        if route is not None and route.model_tier is ModelTier.MAIN:
+            route = route.model_copy(
+                update={
+                    "selected_provider": "hive",
+                    "selected_model": settings.HIVE_MODEL,
+                }
+            )
         if route is not None and route.execution_mode is ExecutionMode.TOOL_ONLY:
             direct_arguments = _direct_tool_arguments(route, query)
             if direct_arguments is not None:
