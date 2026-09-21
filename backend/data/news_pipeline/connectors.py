@@ -6,7 +6,7 @@ import re
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
 from pathlib import Path
-from time import struct_time
+from time import monotonic, struct_time
 from typing import Any
 from urllib.parse import urlparse
 
@@ -23,6 +23,10 @@ from data.news_pipeline.tinyfish_client import TinyFishSearchClient
 from data.providers.upstox import UpstoxError, UpstoxFetcher
 
 logger = logging.getLogger(__name__)
+
+
+class _ProviderSearchError(Exception):
+    """A timeout or transport error raised by the search provider."""
 
 
 def _httpx_limits() -> httpx.Limits:
@@ -45,6 +49,14 @@ def _parse_datetime(value: Any) -> datetime | None:
         stripped = value.strip()
         if not stripped:
             return None
+        relative = re.fullmatch(
+            r"(\d+)\s+(minutes?|hours?|days?|weeks?)\s+ago",
+            stripped.lower(),
+        )
+        if relative:
+            count = int(relative.group(1))
+            unit = relative.group(2).rstrip("s")
+            return datetime.now(UTC) - timedelta(**{f"{unit}s": count})
         for parser in (datetime.fromisoformat, parsedate_to_datetime):
             try:
                 parsed = parser(stripped)
@@ -88,7 +100,7 @@ def _source_domain(url: str) -> str:
 
 
 def _retryable_search_error(exc: Exception) -> bool:
-    if isinstance(exc, (TimeoutError, OSError, ConnectionError)):
+    if isinstance(exc, (_ProviderSearchError, TimeoutError, OSError, ConnectionError)):
         return True
     return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {
         429,
@@ -162,7 +174,7 @@ class UpstoxNewsConnector:
     async def fetch(
         self, company: CompanyContext, *, time_window_days: int
     ) -> list[RawSearchResult]:
-        del time_window_days
+        started = monotonic()
         try:
             query = company.nse_symbol or company.ticker.split(".", 1)[0]
             candidates = await asyncio.to_thread(self.fetcher.resolve_instrument, query)
@@ -178,6 +190,7 @@ class UpstoxNewsConnector:
                 self.last_run_stats = {
                     "status": "unavailable",
                     "reason": "instrument_not_resolved",
+                    "elapsed_ms": round((monotonic() - started) * 1000, 2),
                 }
                 return []
             payload = await asyncio.to_thread(
@@ -187,6 +200,7 @@ class UpstoxNewsConnector:
             self.last_run_stats = {
                 "status": "unavailable",
                 "reason": _provider_error_reason(exc),
+                "elapsed_ms": round((monotonic() - started) * 1000, 2),
             }
             logger.warning("Upstox news unavailable", extra={"ticker": company.ticker})
             return []
@@ -204,6 +218,9 @@ class UpstoxNewsConnector:
             title = str(item.get("heading") or "").strip()
             if not url or not title:
                 continue
+            publish_time = _parse_datetime(item.get("published_time"))
+            if not _within_window(publish_time, time_window_days):
+                continue
             results.append(
                 RawSearchResult(
                     ticker=company.ticker,
@@ -217,9 +234,14 @@ class UpstoxNewsConnector:
                     search_provider="upstox",
                     snippet=str(item.get("summary") or ""),
                     author=str(item.get("author") or "") or None,
-                    publish_time=_parse_datetime(item.get("published_time")),
+                    publish_time=publish_time,
                 )
             )
+        self.last_run_stats = {
+            "status": "available" if results else "empty",
+            "result_count": len(results),
+            "elapsed_ms": round((monotonic() - started) * 1000, 2),
+        }
         return results
 
 
@@ -248,6 +270,7 @@ class TinyFishSearchConnector:
         *,
         client: TinyFishSearchClient | Any | None = None,
         max_results_per_query: int | None = None,
+        max_queries_per_run: int | None = None,
         archive: ProviderArchive | None = None,
     ) -> None:
         self.client = client or TinyFishSearchClient(
@@ -258,6 +281,9 @@ class TinyFishSearchConnector:
         )
         self.max_results_per_query = max_results_per_query or int(
             settings.TINYFISH_MAX_RESULTS_PER_QUERY
+        )
+        self.max_queries_per_run = max_queries_per_run or int(
+            settings.TINYFISH_MAX_QUERIES_PER_RUN
         )
         self.last_run_stats: dict[str, Any] = {}
 
@@ -288,6 +314,8 @@ class TinyFishSearchConnector:
             intents=list(QueryTemplateLibrary.keys()),
             time_window_days=time_window_days,
         )
+        queries = queries[: self.max_queries_per_run]
+        deadline = monotonic() + float(settings.TINYFISH_SEARCH_TIMEOUT)
         start_published_date = datetime.now(UTC) - timedelta(days=time_window_days)
         results: list[RawSearchResult] = []
         seen_result_keys: set[str] = set()
@@ -299,16 +327,51 @@ class TinyFishSearchConnector:
         failure_reasons: list[str] = []
 
         for query_spec in queries:
+            remaining = deadline - monotonic()
+            if remaining <= 0:
+                query_failures += 1
+                failure_reasons.append("timeout")
+                break
             search_results: list[Any] | None = None
+            timed_out = False
             query_attempt = 0
             while search_results is None:
+                remaining = deadline - monotonic()
+                if remaining <= 0:
+                    query_failures += 1
+                    failure_reasons.append("timeout")
+                    timed_out = True
+                    break
                 try:
-                    search_results = await self.client.search(
-                        query=str(query_spec["query"]),
-                        num_results=self.max_results_per_query,
-                        start_published_date=start_published_date,
+
+                    async def provider_search(
+                        query: str = str(query_spec["query"]),
+                        start_date: datetime = start_published_date,
+                    ) -> list[Any]:
+                        try:
+                            return await self.client.search(
+                                query=query,
+                                num_results=self.max_results_per_query,
+                                start_published_date=start_date,
+                            )
+                        except TimeoutError as exc:
+                            raise _ProviderSearchError from exc
+
+                    search_results = await asyncio.wait_for(
+                        provider_search(),
+                        timeout=min(remaining, float(settings.TINYFISH_QUERY_TIMEOUT)),
                     )
-                except (TimeoutError, OSError, ConnectionError, httpx.HTTPError) as exc:
+                except TimeoutError:
+                    query_failures += 1
+                    failure_reasons.append("timeout")
+                    timed_out = True
+                    break
+                except (
+                    _ProviderSearchError,
+                    OSError,
+                    ConnectionError,
+                    httpx.HTTPError,
+                ) as exc:
                     if query_attempt < int(
                         settings.TINYFISH_MAX_RETRIES
                     ) and _retryable_search_error(exc):
@@ -330,6 +393,8 @@ class TinyFishSearchConnector:
                     )
                     break
             if search_results is None:
+                if timed_out:
+                    break
                 continue
             for item in search_results:
                 raw_items_seen += 1
@@ -359,6 +424,7 @@ class TinyFishSearchConnector:
                 publish_time = _parse_datetime(
                     _item_value(item, "published_date")
                     or _item_value(item, "publishedDate")
+                    or _item_value(item, "date")
                 )
                 if candidate_entries == [(title, snippet)] and not _within_window(
                     publish_time, time_window_days

@@ -4,11 +4,22 @@ import asyncio
 from typing import Any
 
 import httpx
-from app.models.routing import ExecutionMode, ModelTier, RoutePlan
+from app.core.logging import get_logger
+from app.core.prompts import PromptRegistry
+from app.models.routing import (
+    ExecutionMode,
+    ModelTier,
+    NextAction,
+    PromptInjectionRisk,
+    RoutePlan,
+)
 
 
 class JevProviderError(RuntimeError):
     """A bounded failure from the Jev decision provider."""
+
+
+logger = get_logger(__name__)
 
 
 _ROUTES: dict[str, tuple[str, ExecutionMode, ModelTier, list[str]]] = {
@@ -39,7 +50,7 @@ _ROUTES: dict[str, tuple[str, ExecutionMode, ModelTier, list[str]]] = {
     "small_answer": (
         "general_question",
         ExecutionMode.MODEL_ANSWER,
-        ModelTier.MAIN,
+        ModelTier.SMALL,
         [],
     ),
     "mid_repair": (
@@ -60,6 +71,12 @@ _ROUTES: dict[str, tuple[str, ExecutionMode, ModelTier, list[str]]] = {
         ModelTier.NONE,
         ["interaction:ask_user"],
     ),
+    "deny": (
+        "unsafe_request",
+        ExecutionMode.DENY,
+        ModelTier.NONE,
+        [],
+    ),
 }
 
 
@@ -72,9 +89,10 @@ class JevService:
         api_key: str | None,
         base_url: str = "https://openrouter.ai/api/alpha/decisions",
         model: str = "~typesafe/jev-latest",
-        timeout_seconds: float = 0.75,
+        timeout_seconds: float = 10.0,
         max_retries: int = 1,
         client: httpx.AsyncClient | None = None,
+        prompts: PromptRegistry | None = None,
     ) -> None:
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
@@ -82,6 +100,7 @@ class JevService:
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
         self._client = client or httpx.AsyncClient()
+        self.prompts = prompts or PromptRegistry.bundled()
 
     async def decide(self, context: dict[str, Any]) -> RoutePlan:
         if not self.api_key:
@@ -92,19 +111,10 @@ class JevService:
             "questions": {
                 "route": {
                     "type": "choice",
-                    "instructions": (
-                        "Choose the narrowest safe FIN-AI execution route. "
-                        "Use report only when verified evidence must be synthesized."
-                    ),
+                    "instructions": self.prompts.get("jev.route.instructions"),
                     "criteria": {
-                        "tool_market": "A direct current or historical market lookup is sufficient.",
-                        "tool_fundamentals": "A direct fundamentals lookup is sufficient.",
-                        "tool_technical": "A direct technical overview lookup is sufficient.",
-                        "tool_news": "A direct recent news lookup is sufficient.",
-                        "small_answer": "A short non-report answer needs a small model.",
-                        "mid_repair": "A structured repair or compact transformation is needed.",
-                        "report": "Multiple verified sources require a full research report.",
-                        "clarify": "The request lacks information needed to act safely.",
+                        key: self.prompts.get(f"jev.route.criteria.{key}")
+                        for key in ("tool_market", "tool_fundamentals", "tool_technical", "tool_news", "small_answer", "mid_repair", "report", "clarify", "deny")
                     },
                 }
             },
@@ -124,7 +134,7 @@ class JevService:
                     await asyncio.sleep(min(0.1 * (2**attempt), 0.5))
                     continue
                 response.raise_for_status()
-                return _route_from_response(response.json(), context)
+                return _route_from_response(response.json(), context, model=self.model)
             except (httpx.TimeoutException, httpx.NetworkError) as exc:
                 if attempt < self.max_retries:
                     continue
@@ -138,6 +148,45 @@ class JevService:
             except (KeyError, TypeError, ValueError) as exc:
                 raise JevProviderError(f"Jev response invalid: {exc}") from exc
         raise JevProviderError("Jev retry budget exhausted")
+
+    async def review_output(self, context: dict[str, Any]) -> NextAction:
+        if not self.api_key:
+            raise JevProviderError("OPENROUTER_API_KEY is not configured")
+        payload = {
+            "model": self.model,
+            "state": _minimize_context({**context, "phase": "output_review"}),
+            "questions": {
+                "review": {
+                    "type": "choice",
+                    "instructions": self.prompts.get("jev.review.instructions"),
+                    "criteria": {
+                        key: self.prompts.get(f"jev.review.criteria.{key}")
+                        for key in ("accept", "repair_output", "escalate_model", "deny")
+                    },
+                }
+            },
+        }
+        response = await self._client.post(
+            self.base_url,
+            headers={
+                "Authorization": f"Bearer {self.api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+            timeout=self.timeout_seconds,
+        )
+        response.raise_for_status()
+        choice = str(
+            response.json().get("answers", {}).get("review", {}).get("choice", "")
+        )
+        if choice == "accept":
+            return NextAction.GENERATE_TEXT
+        try:
+            return NextAction(choice)
+        except ValueError as exc:
+            raise JevProviderError(
+                f"unknown Jev review: {choice or '<missing>'}"
+            ) from exc
 
 
 def _minimize_context(context: dict[str, Any]) -> dict[str, Any]:
@@ -153,10 +202,44 @@ def _minimize_context(context: dict[str, Any]) -> dict[str, Any]:
         "evidence_status": dict(context.get("evidence_status") or {}),
         "prior_failures": list(context.get("prior_failures") or [])[-8:],
         "provider_health": dict(context.get("provider_health") or {}),
+        "phase": str(context.get("phase", "input")),
+        "prompt_injection_risk": str(
+            context.get("prompt_injection_risk", PromptInjectionRisk.LOW)
+        ),
+        "risk_flags": [str(item) for item in context.get("risk_flags", [])],
+        "conversation_context": _bounded_conversation_context(
+            context.get("conversation_context")
+        ),
+        "evidence_sufficient": context.get("evidence_sufficient"),
+        "output": str(context.get("output", ""))[:4000],
     }
 
 
-def _route_from_response(payload: dict[str, Any], context: dict[str, Any]) -> RoutePlan:
+def _bounded_conversation_context(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    recent = value.get("recent_messages")
+    messages = recent if isinstance(recent, list) else []
+    return {
+        "is_follow_up": bool(value.get("is_follow_up", False)),
+        "resolved_entities": [
+            str(item)[:120] for item in value.get("resolved_entities", [])
+        ][:16],
+        "recent_messages": [
+            {
+                "role": str(item.get("role", "")),
+                "content": str(item.get("content", ""))[:2_000],
+            }
+            for item in messages[-12:]
+            if isinstance(item, dict)
+        ],
+        "estimated_tokens": int(value.get("estimated_tokens", 0)),
+    }
+
+
+def _route_from_response(
+    payload: dict[str, Any], context: dict[str, Any], *, model: str
+) -> RoutePlan:
     answer = payload.get("answers", {}).get("route", {})
     choice = str(answer.get("choice", ""))
     if choice not in _ROUTES:
@@ -175,6 +258,15 @@ def _route_from_response(payload: dict[str, Any], context: dict[str, Any]) -> Ro
         if execution_mode is ExecutionMode.REPORT_SYNTHESIS
         else set(required_tools)
     )
+    next_action = {
+        ExecutionMode.TOOL_ONLY: NextAction.TOOL_ONLY,
+        ExecutionMode.REPORT_SYNTHESIS: NextAction.GENERATE_TEXT,
+        ExecutionMode.MODEL_ANSWER: NextAction.GENERATE_TEXT,
+        ExecutionMode.REPAIR: NextAction.REPAIR_OUTPUT,
+        ExecutionMode.ESCALATE: NextAction.ESCALATE_MODEL,
+        ExecutionMode.DETERMINISTIC: NextAction.ASK_CLARIFICATION,
+        ExecutionMode.DENY: NextAction.DENY,
+    }[execution_mode]
     return RoutePlan(
         intent=intent,
         execution_mode=execution_mode,
@@ -182,12 +274,16 @@ def _route_from_response(payload: dict[str, Any], context: dict[str, Any]) -> Ro
         allowed_tools=route_tools,
         allowed_skills={str(item) for item in context.get("available_skills", [])},
         model_tier=tier,
-        selected_provider=str(payload.get("provider"))
-        if payload.get("provider")
-        else None,
-        selected_model=str(payload.get("model")) if payload.get("model") else None,
+        selected_provider="openrouter",
+        selected_model=model,
         reason=f"Jev selected {choice}.",
         reason_codes=["jev_route"],
         confidence=float(confidence),
         requires_main_model=tier is ModelTier.MAIN,
+        next_action=next_action,
+        prompt_injection_risk=PromptInjectionRisk(
+            str(context.get("prompt_injection_risk", PromptInjectionRisk.LOW))
+        ),
+        risk_flags=[str(item) for item in context.get("risk_flags", [])],
+        evidence_sufficient=context.get("evidence_sufficient"),
     )

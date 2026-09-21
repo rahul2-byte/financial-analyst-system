@@ -10,6 +10,4 @@ scripts: []
 references: []
 ---
 
-Distinguish observed facts, deterministic findings, and interpretation. Every material claim must map to returned evidence and every number must use the publication contract's fact marker. Preserve disagreements in period, unit, currency, source, or data quality; do not silently select a preferred value. If evidence is missing or the structured answer fails validation, state the limitation and allow the deterministic fallback to speak for itself.
-
-Do not claim that publication validation proves qualitative truth, and do not present technical or fundamental findings as guaranteed returns or personalized execution advice.
+LLM instructions are maintained in `backend/app/core/prompts/prompts.yaml`.

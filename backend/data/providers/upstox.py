@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 from app.config import settings
-from app.core.quota import RequestQuota
+from app.core.quota import QuotaExceeded, RequestQuota
 
 _USE_CONFIGURED_TOKEN = object()
 
@@ -39,8 +39,11 @@ class UpstoxFetcher:
         self.timeout = settings.UPSTOX_TIMEOUT
         self.quota = RequestQuota(
             Path(settings.FINAI_QUOTA_DB),
-            per_second=settings.FINAI_PROVIDER_REQUESTS_PER_SECOND,
+            per_second=settings.UPSTOX_REQUESTS_PER_SECOND,
+            per_minute=settings.UPSTOX_REQUESTS_PER_MINUTE,
+            per_30_minutes=settings.UPSTOX_REQUESTS_PER_30_MINUTES,
         )
+        self._instrument_cache: dict[str, list[dict[str, Any]]] = {}
 
     def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
         if not self.access_token:
@@ -50,7 +53,12 @@ class UpstoxFetcher:
             "Authorization": f"Bearer {self.access_token}",
         }
         try:
-            self.quota.reserve("upstox")
+            try:
+                self.quota.reserve("upstox")
+            except QuotaExceeded as exc:
+                raise UpstoxError(
+                    "Upstox local request budget exhausted", path=path
+                ) from exc
             response = httpx.get(
                 f"{self.base_url}{path}",
                 headers=headers,
@@ -72,11 +80,30 @@ class UpstoxFetcher:
         return payload
 
     def resolve_instrument(self, query: str) -> list[dict[str, Any]]:
+        symbol = query.split(".", 1)[0].upper()
+        if symbol in self._instrument_cache:
+            return list(self._instrument_cache[symbol])
         payload = self._get(
-            "/v2/instruments/search", {"query": query, "page_number": 1, "records": 30}
+            "/v2/instruments/search",
+            {
+                "query": symbol,
+                "exchanges": "NSE",
+                "segments": "EQ",
+                "page_number": 1,
+                "records": 30,
+            },
         )
         data = payload.get("data", [])
-        return [item for item in data if isinstance(item, dict)]
+        candidates = [item for item in data if isinstance(item, dict)]
+        resolved = sorted(
+            candidates,
+            key=lambda item: (
+                item.get("trading_symbol", "").upper() != symbol,
+                item.get("segment") != "NSE_EQ",
+            ),
+        )
+        self._instrument_cache[symbol] = resolved
+        return list(resolved)
 
     def fetch_candles(
         self,
@@ -196,6 +223,21 @@ class UpstoxFetcher:
             query = {**params, "data_type": data_type}
             result[name] = self._get(path, query).get("data")
         return result
+
+    def fetch_market_status(self, exchange: str) -> dict[str, Any]:
+        """Return the provider's current status for one exchange."""
+        value = self._get(f"/v2/market/status/{exchange.upper()}").get("data")
+        if not isinstance(value, dict) or not value.get("status"):
+            raise UpstoxError("Upstox returned an invalid market status")
+        return value
+
+    def fetch_market_holidays(self, date: str | None = None) -> list[dict[str, Any]]:
+        """Return exchange holiday records, optionally filtered to one date."""
+        params = {"date": date} if date else None
+        value = self._get("/v2/market/holidays", params).get("data")
+        if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+            raise UpstoxError("Upstox returned invalid market holidays")
+        return value
 
     def fetch_derivatives(
         self, underlying_key: str, expiry: str = "current_month"

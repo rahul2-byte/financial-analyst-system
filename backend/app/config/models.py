@@ -16,7 +16,7 @@ class EnvSettings(BaseSettings):
 
     DEFAULT_LLM_MODEL: str = "zai-org/glm-5.3-flash"
     FINAI_ROUTER_ENABLED: bool = True
-    FINAI_ROUTER_TIMEOUT_SECONDS: float = 0.75
+    FINAI_ROUTER_TIMEOUT_SECONDS: float = 10.0
     FINAI_ROUTER_MAX_RETRIES: int = 1
     FINAI_ROUTER_MIN_CONFIDENCE: float = 0.60
     OPENROUTER_API_KEY: str | None = None
@@ -38,7 +38,28 @@ class EnvSettings(BaseSettings):
     HIVE_MAX_OUTPUT_TOKENS: int = 8192
     HIVE_MAX_REPORT_TOKENS: int = 32768
     HIVE_MAX_REPAIR_TOKENS: int = 8192
+    HIVE_MAX_REPORT_REPAIRS: int = 2
     HIVE_REPAIR_TIMEOUT: float = 120.0
+    FINAI_AGENT_MAX_RUN_SECONDS: float = 300.0
+    FINAI_AGENT_EMERGENCY_MAX_TOOL_CALLS: int = 128
+    FINAI_AGENT_MAX_INPUT_TOKENS: int = 32_000
+    FINAI_AGENT_DUPLICATE_REUSE_LIMIT: int = 1
+    FINAI_CHATGPT_CODEX_ENABLED: bool = False
+    FINAI_CHATGPT_CODEX_PRIMARY: bool = True
+    FINAI_CHATGPT_CODEX_CLIENT_ID: str = "app_EMoamEEZ73f0CkXaXp7hrann"
+    FINAI_CHATGPT_CODEX_ISSUER: str = "https://auth.openai.com"
+    FINAI_CHATGPT_CODEX_API_ENDPOINT: str = (
+        "https://chatgpt.com/backend-api/codex/responses"
+    )
+    FINAI_CHATGPT_CODEX_LUNA_MODEL: str = "gpt-5.6-luna"
+    FINAI_CHATGPT_CODEX_TERRA_MODEL: str = "gpt-5.6-terra"
+    FINAI_CHATGPT_CODEX_SOL_MODEL: str = "gpt-5.6-sol"
+    FINAI_CHATGPT_CODEX_ASTRA_MODEL: str = "gpt-6-astra"
+    FINAI_CHATGPT_CODEX_ASTRA_ENABLED: bool = False
+    FINAI_CHATGPT_CODEX_REDIRECT_HOST: str = "localhost"
+    FINAI_CHATGPT_CODEX_REDIRECT_PORT: int = 1455
+    FINAI_CHATGPT_CODEX_TIMEOUT_SECONDS: float = 60.0
+    FINAI_CHATGPT_CODEX_CREDENTIAL_PATH: str = "~/.config/finai/chatgpt-codex.json"
     FINAI_CONTEXT_MAX_TOKENS: int = 250_000
     FINAI_CONTEXT_COMPACTION_RATIO: float = 0.9
     MIN_QUALITY_SCORE: float = 40.0
@@ -48,15 +69,23 @@ class EnvSettings(BaseSettings):
     PIPELINE_VERSION: str = "1.0.0"
     TINYFISH_API_KEY: str | None = None
     TINYFISH_SEARCH_URL: str = "https://api.search.tinyfish.ai"
-    TINYFISH_SEARCH_TIMEOUT: float = 20.0
+    TINYFISH_SEARCH_TIMEOUT: float = 45.0
+    TINYFISH_QUERY_TIMEOUT: float = 8.0
     TINYFISH_MAX_RESULTS_PER_QUERY: int = 10
+    TINYFISH_MAX_QUERIES_PER_RUN: int = 3
     TINYFISH_MAX_RETRIES: int = 1
     TINYFISH_BACKOFF_SECONDS: float = 0.5
+    NEWS_PIPELINE_TOTAL_TIMEOUT: float = 60.0
+    NEWS_EXTRACTION_TIMEOUT: float = 8.0
+    NEWS_MAX_EXTRACTIONS: int = 12
     HTTP_POOL_MAX_CONNECTIONS: int = 10
     HTTP_POOL_MAX_KEEPALIVE_CONNECTIONS: int = 10
     UPSTOX_ACCESS_TOKEN: str | None = None
     UPSTOX_BASE_URL: str = "https://api.upstox.com"
     UPSTOX_TIMEOUT: float = 20.0
+    UPSTOX_REQUESTS_PER_SECOND: int = 50
+    UPSTOX_REQUESTS_PER_MINUTE: int = 500
+    UPSTOX_REQUESTS_PER_30_MINUTES: int = 2000
     FINAI_QUOTA_DB: str = ".finai/quota.sqlite3"
     FINAI_PROVIDER_REQUESTS_PER_SECOND: int = 2
     FINAI_OBSERVABILITY_ENABLED: bool = False

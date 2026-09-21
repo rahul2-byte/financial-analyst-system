@@ -29,6 +29,18 @@ jobs:
       - name: Benchmark integrity
         run: PYTHONPATH=. uv run python -m evals.validate
 
+      - name: Adversarial manifest integrity
+        run: PYTHONPATH=backend:. uv run python -m evals.adversarial
+
+      - name: Evaluation support checks
+        run: >-
+          PYTHONPATH=backend:. uv run pytest
+          backend/tests/unit/test_eval_numeric.py
+          backend/tests/unit/test_eval_support.py
+          backend/tests/unit/test_eval_stage_metrics.py
+          backend/tests/unit/test_adversarial_assertions.py
+          --no-cov
+
       - name: CLI smoke
         run: PYTHONPATH=backend uv run python -m finai --help
 

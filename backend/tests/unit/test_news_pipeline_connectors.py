@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from app.config import settings
 from data.news_pipeline.connectors import (
     TinyFishSearchConnector,
     UpstoxNewsConnector,
@@ -75,6 +76,79 @@ async def test_tinyfish_search_connector_builds_detailed_queries_and_maps_result
     assert results[0].search_provider == "tinyfish"
     assert client.calls[0]["num_results"] == 20
     assert any("HDFC BANK" in call["query"] for call in client.calls)
+
+
+@pytest.mark.asyncio
+async def test_tinyfish_uses_actual_relative_date_field_to_reject_stale_news():
+    company = CompanyContext(ticker="HDFCBANK.NS", company_name="HDFC Bank")
+
+    class Client:
+        async def search(self, **kwargs):
+            return [
+                {
+                    "title": "HDFC Bank announces a change",
+                    "url": "https://example.com/current",
+                    "snippet": "HDFC Bank announced a change.",
+                    "date": "2 days ago",
+                },
+                {
+                    "title": "HDFC Bank older announcement",
+                    "url": "https://example.com/old",
+                    "snippet": "HDFC Bank made an announcement.",
+                    "date": "5 weeks ago",
+                },
+            ]
+
+    records = await TinyFishSearchConnector(
+        client=Client(), max_queries_per_run=1
+    ).fetch(company, time_window_days=30)
+    assert len(records) == 1
+    assert records[0].title == "HDFC Bank announces a change"
+    assert records[0].publish_time is not None
+    assert 1 < (datetime.now(UTC) - records[0].publish_time).days < 3
+
+
+@pytest.mark.asyncio
+async def test_tinyfish_search_connector_enforces_query_budget():
+    company = CompanyContext(
+        ticker="HDFCBANK", company_name="HDFC BANK LTD", nse_symbol="HDFCBANK"
+    )
+
+    class _Client:
+        def __init__(self):
+            self.calls = []
+
+        async def search(self, *, query, num_results, start_published_date):
+            del num_results, start_published_date
+            self.calls.append(query)
+            return []
+
+    client = _Client()
+    connector = TinyFishSearchConnector(client=client, max_queries_per_run=2)
+
+    await connector.fetch(company, time_window_days=30)
+
+    assert len(client.calls) == 2
+
+
+@pytest.mark.asyncio
+async def test_tinyfish_search_connector_enforces_total_timeout(monkeypatch):
+    company = CompanyContext(
+        ticker="HDFCBANK", company_name="HDFC BANK LTD", nse_symbol="HDFCBANK"
+    )
+    monkeypatch.setattr(settings, "TINYFISH_SEARCH_TIMEOUT", 0.01)
+
+    class _Client:
+        async def search(self, *, query, num_results, start_published_date):
+            del query, num_results, start_published_date
+            await asyncio.sleep(0.05)
+            return []
+
+    connector = TinyFishSearchConnector(client=_Client(), max_queries_per_run=2)
+
+    assert await connector.fetch(company, time_window_days=30) == []
+    assert connector.last_run_stats["query_failures"] == 1
+    assert connector.last_run_stats["failure_reasons"] == ["timeout"]
 
 
 @pytest.mark.asyncio

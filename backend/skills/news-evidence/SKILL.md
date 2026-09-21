@@ -10,4 +10,4 @@ scripts: []
 references: []
 ---
 
-Use news:fetch_news and preserve each article title, URL, date, and source. Separate what an article states from any interpretation. Headline tone is not a validated price signal; do not invent sentiment scores, article text, or facts absent from the returned records. Mark stale, sparse, duplicate, or unavailable coverage and hand the evidence to report-synthesis.
+LLM instructions are maintained in `backend/app/core/prompts/prompts.yaml`.

@@ -10,4 +10,4 @@ scripts: []
 references: []
 ---
 
-Fetch or reuse the requested OHLCV dataset, then use the deterministic technical tool. State the interval, row count, status, warnings, and provenance. Interpret measurements as evidence about observed price and volume behavior; do not calculate indicators in prose, infer unavailable values, or turn one indicator into a guaranteed forecast. Treat partial or insufficient history as a conclusion limitation.
+LLM instructions are maintained in `backend/app/core/prompts/prompts.yaml`.

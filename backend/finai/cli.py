@@ -11,7 +11,9 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+from app.config import settings
 from app.observability.tracing import initialize_tracing
+from app.services.chatgpt_codex_service import ChatGPTCodexService, CodexCredentialStore
 
 from .app import FinAIApp
 from .plain import render_json, render_plain
@@ -58,6 +60,14 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode", choices=("guided", "review", "autonomous"), default="guided"
+    )
+    parser.add_argument(
+        "--chatgpt-login", action="store_true", help="Log in with ChatGPT in a browser"
+    )
+    parser.add_argument(
+        "--chatgpt-logout",
+        action="store_true",
+        help="Remove the local ChatGPT credential",
     )
     parser.add_argument("query", nargs="*", help="One-shot research query")
     return parser.parse_args(argv)
@@ -116,6 +126,28 @@ async def run_interactive(repl: FinAIRepl) -> None:
 def main() -> None:
     args = parse_arguments()
     try:
+        if args.chatgpt_login or args.chatgpt_logout:
+            service = ChatGPTCodexService(
+                credential_store=CodexCredentialStore(
+                    Path(settings.FINAI_CHATGPT_CODEX_CREDENTIAL_PATH).expanduser()
+                ),
+                client_id=settings.FINAI_CHATGPT_CODEX_CLIENT_ID,
+                issuer=settings.FINAI_CHATGPT_CODEX_ISSUER,
+                endpoint=settings.FINAI_CHATGPT_CODEX_API_ENDPOINT,
+                timeout_seconds=settings.FINAI_CHATGPT_CODEX_TIMEOUT_SECONDS,
+            )
+            if args.chatgpt_logout:
+                service.credential_store.delete()
+                print("ChatGPT credential removed.")
+            else:
+                asyncio.run(
+                    service.login(
+                        settings.FINAI_CHATGPT_CODEX_REDIRECT_HOST,
+                        settings.FINAI_CHATGPT_CODEX_REDIRECT_PORT,
+                    )
+                )
+                print("ChatGPT login complete.")
+            return
         tracing = initialize_tracing()
         if args.debug_payloads:
             os.environ["FINAI_DIAGNOSTICS"] = "payloads"

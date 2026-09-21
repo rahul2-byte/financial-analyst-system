@@ -10,6 +10,4 @@ scripts: []
 references: []
 ---
 
-Resolve the company, market, timeframe, and requested dimensions before gathering evidence. Ask one concise clarification only when the missing detail changes the analysis. Use the specialist tools that match the question, report unavailable dimensions explicitly, and never treat a tool result as a recommendation by itself.
-
-Do not use this skill for order execution, unsupported macro or filing retrieval, or claims that require data not returned by the registered tools. Hand verified findings to report-synthesis.
+LLM instructions are maintained in `backend/app/core/prompts/prompts.yaml`.

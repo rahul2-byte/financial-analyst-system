@@ -123,10 +123,24 @@ class TechnicalEngine:
             ]
         )
         # Pandas TA Classic owns complementary indicators; keep its output isolated.
-        kc = pta.kc(data["high"], data["low"], data["close"], length=20)
-        cmf = pta.cmf(
-            data["high"], data["low"], data["close"], data["volume"], length=20
-        )
+        # pandas-ta mutates an internal EMA seed for short input and can raise
+        # instead of returning an unavailable indicator.
+        kc = None
+        cmf = None
+        if len(data) >= 20:
+            try:
+                kc = pta.kc(data["high"], data["low"], data["close"], length=20)
+                cmf = pta.cmf(
+                    data["high"],
+                    data["low"],
+                    data["close"],
+                    data["volume"],
+                    length=20,
+                )
+            except (IndexError, ValueError):
+                # Optional indicators are unavailable when pandas-ta rejects
+                # a provider's short or irregular series.
+                pass
         measurements.extend(
             [
                 _measurement(

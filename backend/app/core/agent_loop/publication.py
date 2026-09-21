@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Literal
 
 from app.core.observability import observe
+from app.core.prompts import PromptRegistry
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
 
@@ -83,6 +84,10 @@ class ReportParseError(PublicationError):
 
 _FACT_MARKER = re.compile(r"\[\[fact:([a-zA-Z0-9_.:-]+)\]\]")
 _NUMBER = re.compile(r"(?<![A-Za-z])[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:%|\b)")
+_UNSAFE_GUARANTEE = re.compile(
+    r"\b(?:guaranteed?\s+(?:return|profit|gain)|cannot\s+lose|risk[- ]free)\b",
+    re.IGNORECASE,
+)
 
 
 @observe("report.parse", as_type="report_parse")
@@ -130,10 +135,14 @@ def publish_report(
             draft.detailed_analysis,
             *draft.risks,
             draft.final_view,
+            *(claim.text for claim in draft.claims),
         ]
     )
     marker_ids = set(_FACT_MARKER.findall(all_text))
+    if _UNSAFE_GUARANTEE.search(all_text):
+        reasons.append("unsafe_guarantee_claim")
     for claim in draft.claims:
+        claim_markers = set(_FACT_MARKER.findall(claim.text))
         if not claim.evidence_refs:
             reasons.append("claim_unsupported")
             if claim.importance == "major":
@@ -154,7 +163,7 @@ def publish_report(
             fact = evidence.get(fact_id)
             if fact is None:
                 reasons.append("numeric_fact_missing")
-            elif fact_id not in marker_ids:
+            elif fact_id not in claim_markers:
                 reasons.append("numeric_fact_not_rendered")
             elif fact.source_id not in claim_source_ids:
                 reasons.append("numeric_fact_source_missing")
@@ -203,7 +212,9 @@ def _source_records(evidence: dict[str, EvidenceFact]) -> dict[str, EvidenceFact
 
 
 def report_validation_fallback(
-    evidence: dict[str, EvidenceFact], reasons: tuple[str, ...] = ()
+    evidence: dict[str, EvidenceFact],
+    reasons: tuple[str, ...] = (),
+    availability: dict[str, dict[str, object]] | None = None,
 ) -> str:
     """Give the user a safe result when a model draft fails publication checks."""
     explanation = " ".join(
@@ -242,6 +253,12 @@ def report_validation_fallback(
         for fact in facts
         if fact.source_url
     )
+    limitation_lines = "\n".join(
+        f"- {source.replace('_', ' ').title()} {details.get('status')}: "
+        f"{details.get('reason') or 'evidence unavailable'!s}"
+        for source, details in (availability or {}).items()
+        if details.get("status") in {"unavailable", "degraded"}
+    )
     return (
         "## Research report\n"
         "### Executive Summary\n"
@@ -259,7 +276,8 @@ def report_validation_fallback(
         + "\n\n"
         + observations
         + "\n\n## Data limitations\n"
-        "- Some requested data or source evidence was unavailable.\n"
+        + (limitation_lines + "\n" if limitation_lines else "")
+        + "- Some requested data or source evidence was unavailable.\n"
         "- No unsupported investment conclusion was inferred.\n"
         "- Missing evidence and provider failures should be resolved before relying on the report."
     )
@@ -271,6 +289,7 @@ def report_repair_instruction(
     *,
     parse_error: str | None = None,
     sources: dict[str, dict[str, str]] | None = None,
+    prompts: PromptRegistry | None = None,
 ) -> str:
     """Return one bounded correction request after a report-format failure."""
     facts = list(evidence.values())[:80]
@@ -278,17 +297,15 @@ def report_repair_instruction(
     source_ids = {fact.source_id for fact in facts}
     source_ids.update(sources or {})
     source_list = ", ".join(sorted(source_ids)) or "none"
-    detail = f" Exact parser or validation error: {parse_error}." if parse_error else ""
-    return (
-        "Formatting repair required. Your preceding response cannot be published: "
-        + ", ".join(reasons)
-        + detail
-        + ". Return only the required report JSON now; do not call tools. Use only "
-        "these evidence fact IDs for numeric_refs and [[fact:...]] markers: "
-        + fact_catalog
-        + ". Citation source_id values must be one of: "
-        + source_list
-        + ". Do not state a conclusion that lacks a claim citation."
+    # Parser details can echo model output; keep them out of the next system message.
+    detail = " A parser or validation error occurred." if parse_error else ""
+    registry = prompts or PromptRegistry.bundled()
+    return registry.render(
+        "publication.report_repair",
+        reasons=", ".join(reasons),
+        parse_error_detail=detail,
+        fact_catalog=fact_catalog,
+        source_list=source_list,
     )
 
 
@@ -328,7 +345,7 @@ def _render(
     )
     cited_source_ids = {citation.source_id for citation in draft.citations}
     limited = any(
-        item.get("status") in {"unavailable", "empty"}
+        item.get("status") in {"unavailable", "empty", "degraded"}
         for item in (availability or {}).values()
     )
     metadata = [
@@ -344,7 +361,7 @@ def _render(
         "historical_prices:data.period_return_pct" == fact.fact_id
         for fact in evidence.values()
     ):
-        metadata.append("Price return basis: unadjusted close")
+        metadata.append("Price return basis: see provider adjustment metadata")
     if not any(fact.source_id.startswith("fundamentals") for fact in evidence.values()):
         metadata.append("Coverage: technical analysis with limited company evidence")
     sections = [

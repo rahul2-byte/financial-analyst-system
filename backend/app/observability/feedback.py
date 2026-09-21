@@ -26,6 +26,11 @@ def summarize_run(events: list[dict[str, Any]]) -> dict[str, Any]:
                     "reason",
                     "selected_provider",
                     "selected_model",
+                    "next_action",
+                    "prompt_injection_risk",
+                    "risk_flags",
+                    "evidence_sufficient",
+                    "escalation_reason",
                 )
             }
         elif event_type == "model.request.started":

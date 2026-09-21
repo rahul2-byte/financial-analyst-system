@@ -38,10 +38,9 @@ def normalize_research_scope(query: str) -> str:
     if not (has_broad_marker and has_one_year_window and not has_explicit_dimensions):
         return normalized
 
-    return (
-        f"{normalized}\n\n"
-        "Normalized research scope:\n"
-        "- Time horizon: 1 year\n"
-        "- Cover: price action, fundamentals, valuation, news flow, risks, and catalysts\n"
-        "- Prefer verified and recent sources; note gaps explicitly if source coverage is incomplete"
+    from app.core.prompts import PromptRegistry
+
+    return PromptRegistry.bundled().render(
+        "session.normalized_scope",
+        query=normalized,
     )

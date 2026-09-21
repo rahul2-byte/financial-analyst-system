@@ -223,6 +223,49 @@ def aggregate_run_events(
     }
 
 
+def aggregate_stage_timings(events: list[dict[str, Any]]) -> dict[str, Any]:
+    """Aggregate explicit stage.started/stage.completed event pairs."""
+    by_run: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for event in events:
+        if event.get("run_id"):
+            by_run[str(event["run_id"])].append(event)
+    values: dict[str, list[float]] = defaultdict(list)
+    missing: dict[str, int] = defaultdict(int)
+    for run_events in by_run.values():
+        starts = {(str(event.get("stage")), str(event.get("label"))): event for event in run_events if event.get("event_type") == "stage.started"}
+        for event in run_events:
+            if event.get("event_type") != "stage.completed":
+                continue
+            key = (str(event.get("stage")), str(event.get("label")))
+            start = starts.get(key)
+            if start is None:
+                missing[key[1]] += 1
+                continue
+            try:
+                elapsed = (_parse_time(event["occurred_at"]) - _parse_time(start["occurred_at"])).total_seconds() * 1000
+            except (KeyError, TypeError, ValueError):
+                missing[key[1]] += 1
+            else:
+                values[key[1]].append(elapsed)
+
+    def percentile(samples: list[float], q: float) -> float | None:
+        if not samples:
+            return None
+        ordered = sorted(samples)
+        return round(ordered[min(len(ordered) - 1, max(0, int(len(ordered) * q) - 1))], 2)
+
+    return {
+        label: {
+            "sample_count": len(samples),
+            "missing_count": missing.get(label, 0),
+            "p50": percentile(samples, 0.5),
+            "p95": percentile(samples, 0.95),
+            "p99": percentile(samples, 0.99) if len(samples) >= 200 else None,
+        }
+        for label, samples in values.items()
+    }
+
+
 def _parse_time(value: Any):
     from datetime import datetime
 

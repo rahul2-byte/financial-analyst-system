@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from app.core.prompts import PromptRegistry
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 
@@ -47,31 +48,34 @@ class SkillManifest(BaseModel):
 class SkillPackage:
     manifest: SkillManifest
     path: Path
-    instructions: str
     sha256: str
 
-    def prompt(self) -> str:
-        return (
-            f"Active FIN-AI skill: {self.manifest.id} v{self.manifest.version}\n"
-            f"Skill contract: {self.manifest.description}\n"
-            "Use only verified evidence. Keep calculations and quantitative claims "
-            "grounded in deterministic tool outputs; do not invent missing data.\n\n"
-            f"{self.instructions.strip()}"
-        )
+    def prompt(self, prompts: PromptRegistry | None = None) -> str:
+        registry = prompts or PromptRegistry.bundled()
+        return registry.get(f"skills.{self.manifest.id.replace('-', '_')}")
 
 
 class SkillRegistry:
-    def __init__(self, skills: dict[str, SkillPackage]) -> None:
+    def __init__(self, skills: dict[str, SkillPackage], prompts: PromptRegistry | None = None) -> None:
         self._skills = dict(sorted(skills.items()))
+        self.prompts = prompts or PromptRegistry.bundled()
 
     @classmethod
     def bundled(cls, root: Path | None = None) -> SkillRegistry:
         package_root = root or Path(__file__).resolve().parents[3] / "skills"
-        return cls.load(package_root, registered_tools=BUILTIN_TOOL_NAMES)
+        return cls.load(
+            package_root,
+            registered_tools=BUILTIN_TOOL_NAMES,
+            prompts=PromptRegistry.bundled(),
+        )
 
     @classmethod
     def load(
-        cls, root: Path, *, registered_tools: set[str] | frozenset[str] | None = None
+        cls,
+        root: Path,
+        *,
+        registered_tools: set[str] | frozenset[str] | None = None,
+        prompts: PromptRegistry | None = None,
     ) -> SkillRegistry:
         if not root.is_dir():
             raise SkillValidationError(f"skill root does not exist: {root}")
@@ -80,7 +84,7 @@ class SkillRegistry:
             skill_file = path / "SKILL.md"
             if not skill_file.is_file():
                 continue
-            manifest, instructions = _read_skill_file(skill_file)
+            manifest = _read_skill_file(skill_file)
             if manifest.id in packages:
                 raise SkillValidationError(f"duplicate skill id: {manifest.id}")
             for relative in (*manifest.scripts, *manifest.references):
@@ -98,10 +102,9 @@ class SkillRegistry:
             packages[manifest.id] = SkillPackage(
                 manifest=manifest,
                 path=path,
-                instructions=instructions,
                 sha256=digest,
             )
-        return cls(packages)
+        return cls(packages, prompts=prompts)
 
     def ids(self) -> tuple[str, ...]:
         return tuple(self._skills)
@@ -139,14 +142,14 @@ class SkillRegistry:
         return [item[2] for item in ranked[:limit]]
 
 
-def _read_skill_file(path: Path) -> tuple[SkillManifest, str]:
+def _read_skill_file(path: Path) -> SkillManifest:
     text = path.read_text(encoding="utf-8")
     if not text.startswith("---\n"):
         raise SkillValidationError(f"missing front matter: {path}")
     try:
-        _, raw_manifest, instructions = text.split("---\n", 2)
+        _, raw_manifest, _ = text.split("---\n", 2)
         values: dict[str, Any] = yaml.safe_load(raw_manifest) or {}
-        return SkillManifest.model_validate(values), instructions
+        return SkillManifest.model_validate(values)
     except (ValueError, TypeError, ValidationError, yaml.YAMLError) as exc:
         raise SkillValidationError(f"invalid manifest: {path}: {exc}") from exc
 

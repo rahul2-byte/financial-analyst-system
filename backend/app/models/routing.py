@@ -8,16 +8,35 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 class ModelTier(StrEnum):
     NONE = "none"
+    SMALL = "small"
     MAIN = "main"
 
 
 class ExecutionMode(StrEnum):
     DETERMINISTIC = "deterministic"
+    DENY = "deny"
     TOOL_ONLY = "tool_only"
     MODEL_ANSWER = "model_answer"
     REPORT_SYNTHESIS = "report_synthesis"
     REPAIR = "repair"
     ESCALATE = "escalate"
+
+
+class NextAction(StrEnum):
+    TOOL_ONLY = "tool_only"
+    COLLECT_EVIDENCE = "collect_evidence"
+    GENERATE_TEXT = "generate_text"
+    REPAIR_OUTPUT = "repair_output"
+    ESCALATE_MODEL = "escalate_model"
+    ASK_CLARIFICATION = "ask_clarification"
+    FINISH_WITH_LIMITATIONS = "finish_with_limitations"
+    DENY = "deny"
+
+
+class PromptInjectionRisk(StrEnum):
+    LOW = "low"
+    MEDIUM = "medium"
+    HIGH = "high"
 
 
 class RoutingContext(BaseModel):
@@ -53,6 +72,11 @@ class RoutePlan(BaseModel):
     retry_policy: str = "bounded"
     max_cost_usd: float | None = Field(default=None, ge=0)
     max_latency_ms: int | None = Field(default=None, ge=0)
+    next_action: NextAction = NextAction.GENERATE_TEXT
+    prompt_injection_risk: PromptInjectionRisk = PromptInjectionRisk.LOW
+    risk_flags: list[str] = Field(default_factory=list)
+    evidence_sufficient: bool | None = None
+    escalation_reason: str | None = None
 
     @model_validator(mode="after")
     def validate_tool_selection(self) -> RoutePlan:
@@ -64,10 +88,16 @@ class RoutePlan(BaseModel):
             in {
                 ExecutionMode.DETERMINISTIC,
                 ExecutionMode.TOOL_ONLY,
+                ExecutionMode.DENY,
             }
             and self.model_tier is not ModelTier.NONE
         ):
             raise ValueError("deterministic and tool-only routes cannot select a model")
         if self.requires_main_model and self.model_tier is not ModelTier.MAIN:
             raise ValueError("main-model routes must select the main tier")
+        if (
+            self.execution_mode is ExecutionMode.DENY
+            and self.next_action is not NextAction.DENY
+        ):
+            raise ValueError("deny routes must use the deny action")
         return self

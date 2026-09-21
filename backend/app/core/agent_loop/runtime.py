@@ -25,8 +25,11 @@ from app.core.agent_loop.publication import (
 from app.core.agent_loop.terminal_state import terminal_status
 from app.core.agent_loop.tool_execution import ToolExecutor
 from app.core.diagnostics import diagnostic_payload, diagnostics_enabled
+from app.core.guardrails import assess_input_safety
 from app.core.observability import observe
+from app.core.prompts import PromptRegistry
 from app.core.skills import SkillPackage, SkillRegistry
+from app.core.ticker import parse_ticker
 from app.events.models import (
     ClarificationRequested,
     EventFactory,
@@ -53,7 +56,7 @@ from app.events.models import (
     ToolStarted,
 )
 from app.models.request_models import Message
-from app.models.routing import RoutePlan
+from app.models.routing import ExecutionMode, ModelTier, NextAction, RoutePlan
 from app.observability.tracing import set_current_span_attributes, span
 from app.security.policy import redact_secrets
 
@@ -74,6 +77,56 @@ _EVIDENCE_REQUIRED_SKILLS = {
     "equity-research",
     "report-synthesis",
 }
+_TICKER_TOOLS = {
+    "data:fetch_stock_data",
+    "data:fetch_fundamentals",
+    "news:fetch_news",
+    "analysis:run_fundamental_scan",
+    "analysis:run_technical_scan",
+    "analysis:get_technical_overview",
+}
+def _clarification_prompt(route: RoutePlan) -> str:
+    if route.escalation_reason:
+        return route.escalation_reason
+    if route.reason and not route.reason.casefold().startswith("jev selected"):
+        return route.reason
+    return "Please clarify the request so I can continue safely."
+
+
+def _report_repair_history(messages: list[Message]) -> list[Message]:
+    """Keep report repair input free of completed or stale tool-call turns."""
+    repair_instruction = next(
+        (
+            message
+            for message in reversed(messages)
+            if message.role == "system"
+            and (
+                message.prompt_key == "publication.report_repair"
+            )
+        ),
+        None,
+    )
+    previous_draft = next(
+        (
+            message
+            for message in reversed(messages)
+            if message.role == "assistant"
+            and bool(message.content.strip())
+            and not message.tool_calls
+        ),
+        None,
+    )
+    retained = [
+        message
+        for message in messages
+        if message.role in {"user", "system"}
+        and message.prompt_key != "publication.report_repair"
+    ]
+    if previous_draft is not None:
+        retained.append(previous_draft)
+    if repair_instruction is not None:
+        retained.append(repair_instruction)
+    return retained
 
 
 class ModelStream(Protocol):
@@ -99,16 +152,24 @@ class AgentLoopError(RuntimeError):
 @dataclass(frozen=True)
 class AgentLoopConfig:
     max_rounds: int = 12
-    max_tool_calls: int = 24
+    max_run_seconds: float = 300.0
+    emergency_max_tool_calls: int = 128
+    max_input_tokens: int = 32_000
+    duplicate_reuse_limit: int = 1
     model: str = "reasoning"
+    repair_model: str | None = None
+    escalation_model: str | None = None
+    decision_provider: Any | None = None
     mode: str = "guided"
     max_tokens: int = 8192
     report_max_tokens: int = 32768
     report_repair_max_tokens: int = 8192
+    max_report_repairs: int = 2
     report_repair_timeout_seconds: float = 120.0
     publish_reports: bool = False
     allowed_tools: frozenset[str] | None = None
     route_plan: RoutePlan | None = None
+    resolved_ticker: str | None = None
 
 
 class AgentLoop:
@@ -121,10 +182,12 @@ class AgentLoop:
         *,
         config: AgentLoopConfig | None = None,
         skill_registry: SkillRegistry | None = None,
+        prompt_registry: PromptRegistry | None = None,
     ) -> None:
         self.model_client = model_client
         self.tool_runner = tool_runner
         self.config = config or AgentLoopConfig()
+        self.prompt_registry = prompt_registry or PromptRegistry.bundled()
         self.skill_registry = skill_registry
 
     @observe("workflow.report_generation", as_type="workflow")
@@ -143,34 +206,30 @@ class AgentLoop:
         approved = approved_tool_ids or set()
         history = list(messages)
         selected_skills = self._select_skills(history)
-        history = _add_skill_context(history, selected_skills)
+        history.insert(
+            0,
+            Message(
+                role="system",
+                content=self.prompt_registry.get("agent_loop.core.system"),
+                prompt_key="agent_loop.core.system",
+            ),
+        )
+        history = _add_skill_context(history, selected_skills, self.prompt_registry)
         if self.config.publish_reports:
             history.append(
                 Message(
                     role="system",
-                    content=(
-                        "Report mode: call research tools before writing conclusions. "
-                        "Return only one JSON object with these fields: "
-                        "executive_summary (string), key_drivers (nonempty string list), "
-                        "detailed_analysis (string), risks (nonempty string list), "
-                        "final_view (string), claims (nonempty list of objects with "
-                        "claim_id, text, importance, evidence_refs, numeric_refs), "
-                        "and citations (list of objects with citation_id, source_id). "
-                        "importance is major, supporting, or minor. Every major claim "
-                        "must reference a citation_id. Each citation source_id must match "
-                        "a verified tool source_id. "
-                        "For every numeric statement, use a marker exactly like [[fact:DATASET:data.path]] "
-                        "and list that fact ID in numeric_refs. Do not write other digits in report prose. "
-                        "Treat missing or degraded evidence as unavailable, never as negative evidence. "
-                        "If verified fundamental facts are unavailable or degraded, do not make positive "
-                        "profitability or valuation conclusions; state the limitation explicitly. "
-                        "If news is unavailable, state that recent news and catalysts could not be verified. "
-                        "Use technical observations as observations; comparative claims require a cited benchmark. "
-                        "Do not use the internal unit name provider_value in prose."
-                    ),
+                    content=self.prompt_registry.get("agent_loop.report.system"),
+                    prompt_key="agent_loop.report.system",
                 )
             )
         tool_calls_seen = 0
+        invalid_tool_attempts: dict[tuple[str, str], int] = {}
+        tool_signature_attempts: dict[str, int] = {}
+        successful_tool_signatures: set[str] = set()
+        tool_results_by_signature: dict[str, str] = {}
+        duplicate_reuses = 0
+        tools_disabled = False
         failed_tools = 0
         successful_tools = 0
         evidence = EvidenceAccounting()
@@ -178,7 +237,10 @@ class AgentLoop:
         report_parse_repair_attempts = 0
         report_validation_repair_attempts = 0
         model_generation_retry_attempts = 0
+        output_review_attempts = 0
         availability_context_snapshot: str | None = None
+        controller_route: RoutePlan | None = None
+        stop_reason: str | None = None
         tool_executor = ToolExecutor(
             self.tool_runner, self._allowed_tool_names(selected_skills)
         )
@@ -195,6 +257,18 @@ class AgentLoop:
             for message in history
             if message.role == "tool" and message.tool_call_id
         }
+        for message in history:
+            if message.role != "assistant" or not message.tool_calls:
+                continue
+            for call in message.tool_calls:
+                try:
+                    name, call_id, arguments = _tool_call_parts(call)
+                except AgentLoopError:
+                    continue
+                if call_id in completed_tool_ids:
+                    successful_tool_signatures.add(
+                        _tool_call_signature(name, arguments)
+                    )
         resumed_assistant = (
             next(
                 (
@@ -227,6 +301,11 @@ class AgentLoop:
                 reason=route.reason,
                 selected_provider=route.selected_provider,
                 selected_model=route.selected_model,
+                next_action=route.next_action.value,
+                prompt_injection_risk=route.prompt_injection_risk.value,
+                risk_flags=route.risk_flags,
+                evidence_sufficient=route.evidence_sufficient,
+                escalation_reason=route.escalation_reason,
             )
         for skill in selected_skills:
             yield factory.make(
@@ -236,9 +315,41 @@ class AgentLoop:
                 package_hash=skill.sha256,
             )
         yield factory.make(StageStarted, stage="agent", label="Preparing research")
+        if self.config.route_plan is not None:
+            route = self.config.route_plan
+            if route.next_action is NextAction.ASK_CLARIFICATION:
+                prompt = _clarification_prompt(route)
+                if checkpoint_writer:
+                    checkpoint_writer(
+                        {
+                            "messages": [
+                                message.model_dump(mode="json") for message in history
+                            ],
+                            "tool_name": "interaction:ask_user",
+                            "arguments": {"question": prompt},
+                            "status": "awaiting_clarification",
+                        }
+                    )
+                yield factory.make(ClarificationRequested, prompt=prompt)
+                yield factory.make(
+                    RunCompleted,
+                    terminal_status="awaiting_clarification",
+                    duration_ms=round((time.perf_counter() - started) * 1000, 2),
+                )
+                return
+            if route.next_action is NextAction.DENY:
+                yield factory.make(
+                    RunCompleted,
+                    terminal_status="denied",
+                    duration_ms=round((time.perf_counter() - started) * 1000, 2),
+                )
+                return
 
         try:
             for round_number in range(1, self.config.max_rounds + 1):
+                if time.perf_counter() - started >= self.config.max_run_seconds:
+                    stop_reason = "run time budget reached"
+                    break
                 if diagnostics_enabled():
                     logger.debug(
                         "agent round start run_id=%s round=%s messages=%s tools=%s",
@@ -280,23 +391,28 @@ class AgentLoop:
                         history.append(
                             Message(
                                 role="system",
-                                content=(
-                                    "Evidence availability context for this report: "
-                                    + availability_snapshot
-                                    + ". Use available evidence only; never treat missing evidence as negative evidence."
+                                content=self.prompt_registry.render(
+                                    "agent_loop.report.availability",
+                                    availability_snapshot=availability_snapshot,
                                 ),
+                                prompt_key="agent_loop.report.availability",
                             )
                         )
                     yield factory.make(
                         ModelRequestStarted,
-                        model=self.config.model,
+                        model=self._model_for_history(history, controller_route),
                         round=round_number,
                     )
                     streamed_text: list[str] = []
                     provider_stream_started = False
                     try:
                         async for item in self._stream_model(
-                            history, factory, round_number, selected_skills
+                            history,
+                            factory,
+                            round_number,
+                            selected_skills,
+                            controller_route,
+                            disable_tools=tools_disabled,
                         ):
                             if isinstance(item, TextDelta):
                                 streamed_text.append(item.text)
@@ -317,6 +433,7 @@ class AgentLoop:
                                 yield item
                             else:
                                 assistant = item
+                        controller_route = None
                     except Exception as exc:
                         stream_error = exc
                         partial_text = "".join(streamed_text)
@@ -365,10 +482,8 @@ class AgentLoop:
                             history.append(
                                 Message(
                                     role="system",
-                                    content=(
-                                        "The previous model response contained no visible answer. "
-                                        "Respond with a concise user-facing answer or call the appropriate research tool."
-                                    ),
+                                    content=self.prompt_registry.get("agent_loop.retry.empty_answer"),
+                                    prompt_key="agent_loop.retry.empty_answer",
                                 )
                             )
                             continue
@@ -376,7 +491,65 @@ class AgentLoop:
                             "model generation returned empty content",
                             category="model_generation",
                         )
+                    if assistant.tool_calls:
+                        assistant, ticker_resolved = _hydrate_tool_call_tickers(
+                            assistant, self.config.resolved_ticker
+                        )
+                        if not ticker_resolved:
+                            question = self.prompt_registry.get(
+                                "agent_loop.clarification.ticker"
+                            )
+                            if checkpoint_writer:
+                                checkpoint_writer(
+                                    {
+                                        "messages": [
+                                            message.model_dump(mode="json")
+                                            for message in history
+                                        ],
+                                        "tool_name": "interaction:ask_user",
+                                        "arguments": {"question": question},
+                                        "status": "awaiting_clarification",
+                                    }
+                                )
+                            yield factory.make(ClarificationRequested, prompt=question)
+                            return
                     history.append(assistant)
+                    if (
+                        not assistant.tool_calls
+                        and not self.config.publish_reports
+                        and self.config.decision_provider
+                        and hasattr(self.config.decision_provider, "review_output")
+                    ):
+                        review = await self.config.decision_provider.review_output(
+                            _output_review_context(history, assistant.content)
+                        )
+                        if review is NextAction.DENY:
+                            raise AgentLoopError(
+                                "generated output failed safety review",
+                                category="output_policy",
+                            )
+                        if (
+                            review
+                            in {NextAction.REPAIR_OUTPUT, NextAction.ESCALATE_MODEL}
+                            and output_review_attempts < 1
+                        ):
+                            output_review_attempts += 1
+                            history.append(
+                                Message(
+                                    role="system",
+                                    content=self.prompt_registry.get("agent_loop.retry.output_review"),
+                                    prompt_key="agent_loop.retry.output_review",
+                                )
+                            )
+                            controller_route = RoutePlan(
+                                intent="output_review",
+                                execution_mode=ExecutionMode.REPAIR,
+                                model_tier=ModelTier.MAIN,
+                                next_action=review,
+                                confidence=1.0,
+                                reason="Jev requested bounded output review.",
+                            )
+                            continue
                     if message_writer and (
                         not self.config.publish_reports or assistant.tool_calls
                     ):
@@ -406,6 +579,32 @@ class AgentLoop:
                         invalid_evidence=evidence.invalid_evidence,
                         partial_provider_response=partial_provider_response,
                     )
+                    if (
+                        self.config.publish_reports
+                        and not evidence.facts
+                        and not partial_provider_response
+                    ):
+                        published = report_validation_fallback(
+                            evidence.facts,
+                            ("evidence_unavailable",),
+                            availability=evidence.availability,
+                        )
+                        if message_writer:
+                            message_writer(Message(role="assistant", content=published))
+                        for offset in range(0, len(published), 64):
+                            yield factory.make(
+                                TextDelta, text=published[offset : offset + 64]
+                            )
+                        yield factory.make(
+                            RunCompleted,
+                            terminal_status="completed_with_limited_evidence",
+                            duration_ms=round(
+                                (time.perf_counter() - started) * 1000, 2
+                            ),
+                            evidence_status="limited",
+                            evidence_availability=list(evidence.availability.values()),
+                        )
+                        return
                     if self.config.publish_reports:
                         if not assistant.content.strip():
                             if model_generation_retry_attempts < 1:
@@ -413,10 +612,8 @@ class AgentLoop:
                                 history.append(
                                     Message(
                                         role="system",
-                                        content=(
-                                            "The previous report generation returned no usable content. "
-                                            "Generate the required report JSON now, using only available evidence."
-                                        ),
+                                        content=self.prompt_registry.get("agent_loop.retry.empty_report"),
+                                        prompt_key="agent_loop.retry.empty_report",
                                     )
                                 )
                                 continue
@@ -447,7 +644,11 @@ class AgentLoop:
                                 factory.run_id,
                                 exc.detail,
                             )
-                            if report_parse_repair_attempts < 1:
+                            if (
+                                report_parse_repair_attempts
+                                + report_validation_repair_attempts
+                                < self.config.max_report_repairs
+                            ):
                                 report_parse_repair_attempts += 1
                                 with span(
                                     "report.repair",
@@ -468,7 +669,9 @@ class AgentLoop:
                                                 exc.reasons,
                                                 parse_error=exc.detail,
                                                 sources=evidence.sources,
+                                                prompts=self.prompt_registry,
                                             ),
+                                            prompt_key="publication.report_repair",
                                         )
                                     )
                                 continue
@@ -504,7 +707,11 @@ class AgentLoop:
                                 factory.run_id,
                                 exc.reasons,
                             )
-                            if report_validation_repair_attempts < 1:
+                            if (
+                                report_parse_repair_attempts
+                                + report_validation_repair_attempts
+                                < self.config.max_report_repairs
+                            ):
                                 report_validation_repair_attempts += 1
                                 with span(
                                     "report.repair",
@@ -521,7 +728,9 @@ class AgentLoop:
                                                 evidence.facts,
                                                 exc.reasons,
                                                 sources=evidence.sources,
+                                                prompts=self.prompt_registry,
                                             ),
+                                            prompt_key="publication.report_repair",
                                         )
                                     )
                                 continue
@@ -576,13 +785,23 @@ class AgentLoop:
 
                 for call in assistant.tool_calls:
                     tool_calls_seen += 1
-                    if tool_calls_seen > self.config.max_tool_calls:
-                        raise AgentLoopError("tool-call limit reached for this run")
+                    if tool_calls_seen > self.config.emergency_max_tool_calls:
+                        stop_reason = "emergency tool-call safety ceiling reached"
+                        break
                     try:
                         name, call_id, arguments = _tool_call_parts(call)
                     except AgentLoopError as exc:
                         name, call_id = _tool_call_identity(call)
                         message = str(exc)
+                        invalid_key = (name, message)
+                        invalid_tool_attempts[invalid_key] = (
+                            invalid_tool_attempts.get(invalid_key, 0) + 1
+                        )
+                        if invalid_tool_attempts[invalid_key] > 1:
+                            raise AgentLoopError(
+                                f"repeated invalid tool call: {message}",
+                                category="tool_validation",
+                            ) from exc
                         if name == "interaction:ask_user":
                             # A malformed clarification call must not trigger
                             # another model round. Pause safely with a
@@ -626,6 +845,48 @@ class AgentLoop:
                         continue
                     if call_id in completed_tool_ids:
                         continue
+                    signature = _tool_call_signature(name, arguments)
+                    if (
+                        signature in successful_tool_signatures
+                        or tool_signature_attempts.get(signature, 0) >= 1
+                    ):
+                        cached = tool_results_by_signature.get(signature)
+                        if (
+                            cached is not None
+                            and duplicate_reuses < self.config.duplicate_reuse_limit
+                        ):
+                            duplicate_reuses += 1
+                            history.append(
+                                Message(
+                                    role="tool",
+                                    content=cached,
+                                    tool_call_id=call_id,
+                                )
+                            )
+                            if message_writer:
+                                message_writer(history[-1])
+                            yield factory.make(
+                                ToolCompleted,
+                                tool=name,
+                                tool_id=call_id,
+                                detail="reused cached evidence",
+                                duration_ms=0.0,
+                            )
+                            continue
+                        tools_disabled = True
+                        history.append(
+                            Message(
+                                role="system",
+                                content=self.prompt_registry.render(
+                                    "agent_loop.tool.duplicate_request", tool_name=name
+                                ),
+                                prompt_key="agent_loop.tool.duplicate_request",
+                            )
+                        )
+                        break
+                    tool_signature_attempts[signature] = (
+                        tool_signature_attempts.get(signature, 0) + 1
+                    )
                     if name == "interaction:ask_user":
                         question = str(
                             arguments.get("question", "Please clarify the request.")
@@ -678,6 +939,18 @@ class AgentLoop:
                             payload.get("success", True),
                         )
 
+                    tool_content = _tool_message_content(payload)
+                    tool_results_by_signature[signature] = tool_content
+                    content_safety = assess_input_safety(tool_content)
+                    if content_safety.risk.value == "high":
+                        history.append(
+                            Message(
+                                role="system",
+                                content=self.prompt_registry.get("agent_loop.tool.untrusted_content"),
+                                prompt_key="agent_loop.tool.untrusted_content",
+                            )
+                        )
+
                     if payload.get("success", True) is False:
                         if not payload.get("retryable", False):
                             failed_tools += 1
@@ -685,6 +958,16 @@ class AgentLoop:
                         message = str(
                             redact_secrets(payload.get("error", "tool failed"))
                         )
+                        if payload.get("retryable", False):
+                            invalid_key = (name, message)
+                            invalid_tool_attempts[invalid_key] = (
+                                invalid_tool_attempts.get(invalid_key, 0) + 1
+                            )
+                            if invalid_tool_attempts[invalid_key] > 1:
+                                raise AgentLoopError(
+                                    f"repeated invalid tool call: {message}",
+                                    category="tool_validation",
+                                )
                         if (
                             name in _EVIDENCE_TOOLS
                             and not payload.get("retryable", False)
@@ -693,12 +976,8 @@ class AgentLoop:
                             history.append(
                                 Message(
                                     role="system",
-                                    content=(
-                                        "Evidence integrity warning: one or more evidence tools failed. "
-                                        "Do not invent prices, ratios, percentages, dates, news, targets, or sources. "
-                                        "Use only values present in successful tool results. Label the final response "
-                                        "as partial or insufficient-data and list the missing evidence explicitly."
-                                    ),
+                                    content=self.prompt_registry.get("agent_loop.tool.evidence_failure"),
+                                    prompt_key="agent_loop.tool.evidence_failure",
                                 )
                             )
                             evidence_warning_added = True
@@ -708,15 +987,13 @@ class AgentLoop:
                             history.append(
                                 Message(
                                     role="system",
-                                    content=(
-                                        "Evidence availability for report generation: "
-                                        + json.dumps(
-                                            evidence.availability,
-                                            sort_keys=True,
-                                        )
-                                        + ". Use available evidence only; explicitly disclose unavailable sources "
-                                        "and never treat missing evidence as negative evidence."
+                                    content=self.prompt_registry.render(
+                                        "agent_loop.report.evidence_failure_availability",
+                                        availability_json=json.dumps(
+                                            evidence.availability, sort_keys=True
+                                        ),
                                     ),
+                                    prompt_key="agent_loop.report.evidence_failure_availability",
                                 )
                             )
                             if message_writer:
@@ -724,7 +1001,7 @@ class AgentLoop:
                         history.append(
                             Message(
                                 role="tool",
-                                content=_tool_message_content(payload),
+                                content=tool_content,
                                 tool_call_id=call_id,
                             )
                         )
@@ -734,10 +1011,8 @@ class AgentLoop:
                             history.append(
                                 Message(
                                     role="system",
-                                    content=(
-                                        "Tool arguments were rejected. Retry the same tool with "
-                                        "valid arguments before writing an answer."
-                                    ),
+                                    content=self.prompt_registry.get("agent_loop.tool.invalid_arguments"),
+                                    prompt_key="agent_loop.tool.invalid_arguments",
                                 )
                             )
                         yield factory.make(
@@ -745,11 +1020,12 @@ class AgentLoop:
                         )
                     else:
                         successful_tools += 1
+                        successful_tool_signatures.add(signature)
                         evidence.record_success(name, payload)
                         history.append(
                             Message(
                                 role="tool",
-                                content=_tool_message_content(payload),
+                                content=tool_content,
                                 tool_call_id=call_id,
                             )
                         )
@@ -768,6 +1044,106 @@ class AgentLoop:
                         if sources:
                             yield factory.make(SourcesUpdated, sources=sources)
                     self._drain_input_queue(history, input_queue)
+                if stop_reason:
+                    for event in _limited_completion(
+                        factory, started, stop_reason, evidence
+                    ):
+                        yield event
+                    return
+                if (
+                    self.config.publish_reports
+                    and not evidence.facts
+                    and any(
+                        item["status"] in {"unavailable", "degraded"}
+                        for item in evidence.availability.values()
+                    )
+                ):
+                    published = report_validation_fallback(
+                        evidence.facts,
+                        availability=evidence.availability,
+                    )
+                    if message_writer:
+                        message_writer(Message(role="assistant", content=published))
+                    for offset in range(0, len(published), 64):
+                        yield factory.make(
+                            TextDelta, text=published[offset : offset + 64]
+                        )
+                    yield factory.make(
+                        RunCompleted,
+                        terminal_status="completed_with_limited_evidence",
+                        duration_ms=round((time.perf_counter() - started) * 1000, 2),
+                        evidence_status="limited",
+                        evidence_availability=list(evidence.availability.values()),
+                    )
+                    return
+                if (
+                    self.config.decision_provider
+                    and tool_calls_seen
+                    and not tools_disabled
+                ):
+                    try:
+                        controller_route = await self.config.decision_provider.decide(
+                            _controller_context(
+                                history,
+                                evidence,
+                                self._allowed_tool_names(selected_skills),
+                            )
+                        )
+                        yield factory.make(
+                            RouteDecisionMade,
+                            intent=controller_route.intent,
+                            execution_mode=controller_route.execution_mode.value,
+                            model_tier=controller_route.model_tier.value,
+                            confidence=controller_route.confidence,
+                            reason_codes=[
+                                *controller_route.reason_codes,
+                                "evidence_review_checkpoint",
+                            ],
+                            required_tools=controller_route.required_tools,
+                            reason=controller_route.reason,
+                            selected_provider=controller_route.selected_provider,
+                            selected_model=controller_route.selected_model,
+                            next_action=controller_route.next_action.value,
+                            prompt_injection_risk=controller_route.prompt_injection_risk.value,
+                            risk_flags=controller_route.risk_flags,
+                            evidence_sufficient=controller_route.evidence_sufficient,
+                            escalation_reason=controller_route.escalation_reason,
+                        )
+                    except Exception:  # noqa: BLE001 - checkpoint is advisory and bounded
+                        controller_route = None
+                    if controller_route is not None:
+                        if controller_route.next_action is NextAction.ASK_CLARIFICATION:
+                            prompt = _clarification_prompt(controller_route)
+                            if checkpoint_writer:
+                                checkpoint_writer(
+                                    {
+                                        "messages": [
+                                            message.model_dump(mode="json")
+                                            for message in history
+                                        ],
+                                        "tool_name": "interaction:ask_user",
+                                        "arguments": {"question": prompt},
+                                        "status": "awaiting_clarification",
+                                    }
+                                )
+                            yield factory.make(ClarificationRequested, prompt=prompt)
+                            yield factory.make(
+                                RunCompleted,
+                                terminal_status="awaiting_clarification",
+                                duration_ms=round(
+                                    (time.perf_counter() - started) * 1000, 2
+                                ),
+                            )
+                            return
+                        if controller_route.next_action is NextAction.DENY:
+                            yield factory.make(
+                                RunCompleted,
+                                terminal_status="denied",
+                                duration_ms=round(
+                                    (time.perf_counter() - started) * 1000, 2
+                                ),
+                            )
+                            return
                 if (
                     not self.config.publish_reports
                     and evidence.failed_evidence_tools
@@ -786,7 +1162,12 @@ class AgentLoop:
                     )
                     return
                 continue
-            raise AgentLoopError("agent round limit reached for this run")
+            if self.config.max_rounds == 0:
+                raise AgentLoopError("agent round limit reached for this run")
+            for event in _limited_completion(
+                factory, started, "model round limit reached", evidence
+            ):
+                yield event
         except asyncio.CancelledError:
             yield factory.make(RunCancelled, reason="cancelled by user")
         except Exception as exc:
@@ -848,6 +1229,8 @@ class AgentLoop:
         factory: EventFactory,
         round_number: int,
         skills: list[SkillPackage],
+        controller_route: RoutePlan | None = None,
+        disable_tools: bool = False,
     ) -> AsyncIterator[
         TextDelta
         | Message
@@ -858,21 +1241,79 @@ class AgentLoop:
         | ProviderFailed
     ]:
         is_repair = any(
-            message.role == "system" and "Formatting repair required" in message.content
+            message.prompt_key == "publication.report_repair"
             for message in messages
         )
         streamer = ModelStreaming(
             self.model_client,
-            self.config.model,
+            self._model_for_history(messages, controller_route),
             self.config.max_tokens,
-            lambda: [] if is_repair else self._tool_definitions(skills),
+            lambda: (
+                []
+                if disable_tools
+                else self._controller_tools(skills, controller_route, is_repair)
+            ),
             publish_reports=self.config.publish_reports,
             report_max_tokens=self.config.report_max_tokens,
             report_repair_max_tokens=self.config.report_repair_max_tokens,
             report_repair_timeout_seconds=self.config.report_repair_timeout_seconds,
         )
-        async for item in streamer.stream(messages, factory, round_number):
+        request_messages = _report_repair_history(messages) if is_repair else messages
+        request_messages = _compact_model_history(
+            request_messages, self.config.max_input_tokens
+        )
+        async for item in streamer.stream(request_messages, factory, round_number):
             yield item
+
+    def _model_for_history(
+        self, messages: list[Message], controller_route: RoutePlan | None = None
+    ) -> str:
+        if controller_route is not None:
+            if (
+                controller_route.next_action.value == "escalate_model"
+                and self.config.escalation_model
+            ):
+                return self.config.escalation_model
+            if (
+                controller_route.next_action.value == "repair_output"
+                and self.config.repair_model
+            ):
+                return self.config.repair_model
+        repair_attempts = sum(
+            message.prompt_key == "publication.report_repair"
+            for message in messages
+        )
+        if self.config.publish_reports and repair_attempts >= 1:
+            return self.config.repair_model or self.config.model
+        if repair_attempts >= 2 and self.config.escalation_model:
+            return self.config.escalation_model
+        if repair_attempts == 1 and self.config.repair_model:
+            return self.config.repair_model
+        return self.config.model
+
+    def _controller_tools(
+        self,
+        skills: list[SkillPackage],
+        route: RoutePlan | None,
+        is_repair: bool,
+    ) -> list[dict[str, Any]]:
+        if is_repair or route is None:
+            return [] if is_repair else self._tool_definitions(skills)
+        if route.next_action.value in {
+            "generate_text",
+            "repair_output",
+            "escalate_model",
+            "finish_with_limitations",
+        }:
+            return []
+        definitions = self._tool_definitions(skills)
+        if not route.required_tools:
+            return definitions
+        return [
+            definition
+            for definition in definitions
+            if definition.get("function", {}).get("name") in route.required_tools
+        ]
 
     @staticmethod
     def _drain_input_queue(
@@ -900,6 +1341,145 @@ def _tool_call_parts(call: dict[str, Any]) -> tuple[str, str, dict[str, Any]]:
     if not isinstance(raw_arguments, dict):
         raise AgentLoopError(f"arguments for {name} must be an object")
     return name, call_id, raw_arguments
+
+
+def _tool_call_signature(name: str, arguments: dict[str, Any]) -> str:
+    return f"{name}:{json.dumps(_normalize_tool_arguments(arguments), sort_keys=True)}"
+
+
+def _normalize_tool_arguments(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            str(key): _normalize_tool_arguments(item) for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_normalize_tool_arguments(item) for item in value]
+    if isinstance(value, str):
+        return " ".join(value.split()).upper()
+    return value
+
+
+def _compact_model_history(messages: list[Message], max_tokens: int) -> list[Message]:
+    """Bound provider input while retaining the user request and newest evidence."""
+    compacted = list(messages)
+    for index, message in enumerate(compacted):
+        if message.role == "tool" and len(message.content) > 6_000:
+            compacted[index] = message.model_copy(
+                update={
+                    "content": message.content[:6_000]
+                    + "\n[tool output truncated for model context budget]"
+                }
+            )
+    while _estimate_message_tokens(compacted) > max_tokens:
+        removable = next(
+            (
+                index
+                for index, message in enumerate(compacted)
+                if message.role == "tool"
+            ),
+            None,
+        )
+        if removable is None:
+            break
+        compacted.pop(removable)
+    return compacted
+
+
+def _estimate_message_tokens(messages: list[Message]) -> int:
+    return sum((len(message.content) + 3) // 4 for message in messages) + sum(
+        (len(json.dumps(message.tool_calls, sort_keys=True)) + 3) // 4
+        for message in messages
+        if message.tool_calls
+    )
+
+
+def _limited_completion(
+    factory: EventFactory,
+    started: float,
+    reason: str,
+    evidence: EvidenceAccounting,
+) -> list[ResearchEvent]:
+    message = (
+        "I stopped this run safely because it reached a runtime boundary: "
+        f"{reason}. I kept the evidence collected so far and will not repeat the same request."
+    )
+    return [
+        factory.make(TextDelta, text=message),
+        factory.make(
+            RunCompleted,
+            terminal_status="completed_with_limits",
+            duration_ms=round((time.perf_counter() - started) * 1000, 2),
+            completion_reason=reason,
+            evidence_status=(
+                "limited"
+                if any(
+                    item["status"] in {"unavailable", "degraded"}
+                    for item in evidence.availability.values()
+                )
+                else "complete"
+            ),
+            evidence_availability=list(evidence.availability.values()),
+        ),
+    ]
+
+
+def _hydrate_tool_call_tickers(
+    assistant: Message, resolved_ticker: str | None = None
+) -> tuple[Message, bool]:
+    """Fill missing research tickers from validated context or sibling calls."""
+    tool_calls = assistant.tool_calls or []
+    parsed: list[tuple[dict[str, Any], str, dict[str, Any]]] = []
+    explicit_tickers: set[str] = set()
+    missing_ticker = False
+    for call in tool_calls:
+        try:
+            name, _, arguments = _tool_call_parts(call)
+        except AgentLoopError:
+            return assistant, True
+        parsed.append((call, name, arguments))
+        if name not in _TICKER_TOOLS:
+            continue
+        ticker = arguments.get("ticker")
+        if not isinstance(ticker, str) or not ticker.strip():
+            missing_ticker = True
+            continue
+        try:
+            explicit_tickers.add(parse_ticker(ticker).provider_symbol)
+        except ValueError:
+            missing_ticker = True
+    if not missing_ticker:
+        return assistant, True
+    if resolved_ticker:
+        try:
+            context_ticker = parse_ticker(resolved_ticker).provider_symbol
+        except ValueError:
+            context_ticker = None
+        if context_ticker:
+            if explicit_tickers and explicit_tickers != {context_ticker}:
+                return assistant, False
+            context_hydrated_calls: list[dict[str, Any]] = []
+            for call, name, arguments in parsed:
+                value = dict(call)
+                function = dict(value.get("function") or {})
+                if name in _TICKER_TOOLS and not arguments.get("ticker"):
+                    function["arguments"] = json.dumps(
+                        {**arguments, "ticker": context_ticker}
+                    )
+                    value["function"] = function
+                context_hydrated_calls.append(value)
+            return assistant.model_copy(update={"tool_calls": context_hydrated_calls}), True
+    if len(explicit_tickers) != 1:
+        return assistant, False
+    ticker = explicit_tickers.pop()
+    hydrated_calls: list[dict[str, Any]] = []
+    for call, name, arguments in parsed:
+        value = dict(call)
+        function = dict(value.get("function") or {})
+        if name in _TICKER_TOOLS and not arguments.get("ticker"):
+            function["arguments"] = json.dumps({**arguments, "ticker": ticker})
+            value["function"] = function
+        hydrated_calls.append(value)
+    return assistant.model_copy(update={"tool_calls": hydrated_calls}), True
 
 
 def _tool_call_identity(call: dict[str, Any]) -> tuple[str, str]:
@@ -975,6 +1555,48 @@ def _requires_evidence(skills: list[SkillPackage]) -> bool:
     return any(skill.manifest.id in _EVIDENCE_REQUIRED_SKILLS for skill in skills)
 
 
+def _controller_context(
+    history: list[Message],
+    evidence: EvidenceAccounting,
+    available_tools: set[str],
+) -> dict[str, Any]:
+    """Build bounded post-tool state for one Jev control checkpoint."""
+    failures = [
+        {
+            "source": key,
+            "status": value.get("status"),
+            "reason": str(value.get("reason") or "")[:160],
+        }
+        for key, value in evidence.availability.items()
+        if value.get("status") in {"unavailable", "degraded"}
+    ]
+    return {
+        "query": _last_user_query(history),
+        "normalized_query": _last_user_query(history),
+        "available_tools": sorted(available_tools),
+        "available_skills": [],
+        "evidence_status": evidence.availability,
+        "prior_failures": failures[-8:],
+        "provider_health": {},
+        "phase": "evidence_review",
+        "evidence_sufficient": bool(evidence.facts),
+    }
+
+
+def _output_review_context(history: list[Message], output: str) -> dict[str, Any]:
+    return {
+        "query": _last_user_query(history),
+        "normalized_query": _last_user_query(history),
+        "available_tools": [],
+        "available_skills": [],
+        "evidence_status": {},
+        "prior_failures": [],
+        "provider_health": {},
+        "phase": "output_review",
+        "output": str(redact_secrets(output))[:4000],
+    }
+
+
 def _last_user_query(messages: list[Message]) -> str:
     for message in reversed(messages):
         if message.role == "user":
@@ -983,15 +1605,17 @@ def _last_user_query(messages: list[Message]) -> str:
 
 
 def _add_skill_context(
-    messages: list[Message], skills: list[SkillPackage]
+    messages: list[Message], skills: list[SkillPackage], prompts: PromptRegistry
 ) -> list[Message]:
     if not skills:
         return messages
-    prompt = "\n\n---\n\n".join(skill.prompt() for skill in skills)
-    for index, message in enumerate(messages):
-        if message.role == "system":
-            messages[index] = Message(
-                role="system", content=f"{message.content}\n\n{prompt}"
-            )
-            return messages
-    return [Message(role="system", content=prompt), *messages]
+    skill_text = "\n\n---\n\n".join(skill.prompt(prompts) for skill in skills)
+    if messages and messages[0].prompt_key == "agent_loop.core.system":
+        messages[0] = messages[0].model_copy(
+            update={"content": f"{messages[0].content}\n\n{skill_text}"}
+        )
+        return messages
+    return [
+        Message(role="system", content=skill_text, prompt_key="skills.selected"),
+        *messages,
+    ]

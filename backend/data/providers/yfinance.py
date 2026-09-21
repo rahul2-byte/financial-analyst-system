@@ -298,6 +298,9 @@ class YFinanceFetcher(IDataFetcher):
             as_of=ingested_at,
             max_age_days=settings.MARKET_DATA_MAX_AGE_DAYS,
         )
+        has_adjusted_close = all(
+            row.get("Adj Close") is not None for row in records
+        )
 
         return {
             "ticker": formatted_ticker,
@@ -318,7 +321,9 @@ class YFinanceFetcher(IDataFetcher):
                 "timezone": "Asia/Kolkata"
                 if formatted_ticker.endswith((".NS", ".BO"))
                 else "UTC",
-                "adjustment": "unadjusted",
+                "adjustment": (
+                    "adjusted_close_available" if has_adjusted_close else "unadjusted"
+                ),
                 "as_of": observed_at.isoformat(),
                 "source_url": f"https://finance.yahoo.com/quote/{formatted_ticker}/history/",
             },

@@ -33,6 +33,7 @@ class RunCompleted(BaseModel):
     artifact_path: str | None = None
     evidence_status: str | None = None
     evidence_availability: list[dict[str, object]] = Field(default_factory=list)
+    completion_reason: str | None = None
 
 
 class RunFailed(BaseModel):
@@ -234,6 +235,11 @@ class RouteDecisionMade(BaseModel):
     reason: str = ""
     selected_provider: str | None = None
     selected_model: str | None = None
+    next_action: str | None = None
+    prompt_injection_risk: str = "low"
+    risk_flags: list[str] = Field(default_factory=list)
+    evidence_sufficient: bool | None = None
+    escalation_reason: str | None = None
 
 
 ResearchEvent = Annotated[

@@ -38,6 +38,67 @@ def test_upstox_requires_credentials() -> None:
         raise AssertionError("missing credentials must fail closed")
 
 
+def test_upstox_resolves_yahoo_suffix_to_exact_equity_symbol(monkeypatch) -> None:
+    seen = {}
+
+    def fake_get(self, path, params=None):
+        seen.update(params)
+        return {
+            "status": "success",
+            "data": [
+                {"trading_symbol": "765HDFC34", "instrument_key": "wrong"},
+                {
+                    "trading_symbol": "HDFCBANK",
+                    "segment": "NSE_EQ",
+                    "instrument_key": "NSE_EQ|INE040A01034",
+                    "isin": "INE040A01034",
+                },
+            ],
+        }
+
+    monkeypatch.setattr(UpstoxFetcher, "_get", fake_get)
+    rows = UpstoxFetcher(access_token="token").resolve_instrument("HDFCBANK.NS")
+    assert seen["query"] == "HDFCBANK"
+    assert seen["exchanges"] == "NSE"
+    assert seen["segments"] == "EQ"
+    assert rows[0]["trading_symbol"] == "HDFCBANK"
+
+
+def test_upstox_caches_normalized_instrument_resolution(monkeypatch) -> None:
+    calls = 0
+
+    def fake_get(self, path, params=None):
+        nonlocal calls
+        calls += 1
+        return {
+            "status": "success",
+            "data": [{"trading_symbol": "HDFCBANK", "instrument_key": "key"}],
+        }
+
+    monkeypatch.setattr(UpstoxFetcher, "_get", fake_get)
+    fetcher = UpstoxFetcher(access_token="token")
+    assert fetcher.resolve_instrument("HDFCBANK.NS") == fetcher.resolve_instrument(
+        "HDFCBANK"
+    )
+    assert calls == 1
+
+
+def test_upstox_quota_exhaustion_is_a_handled_provider_error(monkeypatch) -> None:
+    def exhausted(provider):
+        from app.core.quota import QuotaExceeded
+
+        raise QuotaExceeded(provider)
+
+    fetcher = UpstoxFetcher(access_token="token")
+    monkeypatch.setattr(fetcher.quota, "reserve", exhausted)
+    try:
+        fetcher.resolve_instrument("HDFCBANK.NS")
+    except UpstoxError as exc:
+        assert "budget exhausted" in str(exc)
+    else:
+        raise AssertionError("quota exhaustion must become an UpstoxError")
+
+
 def test_upstox_fundamentals_expose_verified_scanner_fields(monkeypatch) -> None:
     payloads = {
         "/v2/fundamentals/INE/key-ratios": {
@@ -65,3 +126,39 @@ def test_upstox_fundamentals_expose_verified_scanner_fields(monkeypatch) -> None
     assert data["priceToBook"] == 2.13
     assert data["returnOnEquity"] == 0.0894
     assert data["sector"] == "Refineries"
+
+
+def test_upstox_market_status_normalizes_exchange_state(monkeypatch) -> None:
+    def fake_get(self, path, params=None):
+        assert path == "/v2/market/status/NSE"
+        assert params is None
+        return {
+            "status": "success",
+            "data": {
+                "exchange": "NSE",
+                "status": "NORMAL_OPEN",
+                "last_updated": 1705549500000,
+            },
+        }
+
+    monkeypatch.setattr(UpstoxFetcher, "_get", fake_get)
+    result = UpstoxFetcher(access_token="token").fetch_market_status("NSE")
+    assert result == {
+        "exchange": "NSE",
+        "status": "NORMAL_OPEN",
+        "last_updated": 1705549500000,
+    }
+
+
+def test_upstox_market_holidays_accepts_date_filter(monkeypatch) -> None:
+    def fake_get(self, path, params=None):
+        assert path == "/v2/market/holidays"
+        assert params == {"date": "2026-01-26"}
+        return {
+            "status": "success",
+            "data": [{"date": "2026-01-26", "holiday_type": "TRADING_HOLIDAY"}],
+        }
+
+    monkeypatch.setattr(UpstoxFetcher, "_get", fake_get)
+    result = UpstoxFetcher(access_token="token").fetch_market_holidays("2026-01-26")
+    assert result[0]["holiday_type"] == "TRADING_HOLIDAY"

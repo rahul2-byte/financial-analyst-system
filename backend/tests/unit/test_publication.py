@@ -222,6 +222,40 @@ def test_publish_report_rejects_unbound_numeric_claim() -> None:
         publish_report(draft, _evidence())
 
 
+def test_publish_report_rejects_numeric_claim_text_without_fact_marker() -> None:
+    draft = _draft(
+        claims=[
+            {
+                "claim_id": "claim-1",
+                "text": "The return was 100%.",
+                "importance": "major",
+                "evidence_refs": ["citation-1"],
+            }
+        ],
+        detailed_analysis="No numeric facts.",
+    )
+
+    with pytest.raises(PublicationError, match="numeric_claim_unbound"):
+        publish_report(draft, _evidence())
+
+
+def test_publish_report_rejects_guaranteed_return_claim() -> None:
+    draft = _draft(
+        claims=[
+            {
+                "claim_id": "claim-1",
+                "text": "This stock has a guaranteed return.",
+                "importance": "major",
+                "evidence_refs": ["citation-1"],
+            }
+        ],
+        detailed_analysis="No numeric facts.",
+    )
+
+    with pytest.raises(PublicationError, match="unsafe_guarantee_claim"):
+        publish_report(draft, _evidence())
+
+
 def test_publish_report_rejects_unknown_source() -> None:
     draft = _draft(citations=[{"citation_id": "citation-1", "source_id": "unknown"}])
 
@@ -313,3 +347,23 @@ def test_report_validation_fallback_is_report_shaped_without_evidence() -> None:
     assert "No verified evidence was returned" in result
     assert "evidence was unavailable" in result
     assert "No financial conclusion" in result
+
+
+def test_report_validation_fallback_lists_limited_sources_once() -> None:
+    result = report_validation_fallback(
+        _evidence(),
+        availability={
+            "technical_analysis": {
+                "status": "available",
+                "evidence_count": 1,
+            },
+            "news": {
+                "status": "unavailable",
+                "reason": "No usable evidence returned",
+                "evidence_count": 0,
+            },
+        },
+    )
+
+    assert result.count("News unavailable: No usable evidence returned") == 1
+    assert "123.4" in result

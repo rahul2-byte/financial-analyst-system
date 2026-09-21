@@ -9,6 +9,10 @@ def test_source_classifier_blocks_disallowed_domains():
     assert SourceClassifier.classify("zacks.com") == 4
 
 
+def test_source_classifier_recognizes_upstox_published_news():
+    assert SourceClassifier.classify("upstox.com") == 2
+
+
 def test_quality_scorer_rewards_primary_sources_and_full_extraction():
     publish_time = datetime.now(UTC) - timedelta(days=1)
 

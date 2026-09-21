@@ -53,7 +53,7 @@ class ModelStreaming:
         calls: dict[int, dict[str, Any]] = {}
         usage: TokenUsage | None = None
         is_repair = self._publish_reports and any(
-            message.role == "system" and "Formatting repair required" in message.content
+            message.prompt_key == "publication.report_repair"
             for message in messages
         )
         async for event in self._client.generate_stream(
@@ -64,8 +64,7 @@ class ModelStreaming:
                 self._report_repair_max_tokens
                 if self._publish_reports
                 and any(
-                    message.role == "system"
-                    and "Formatting repair required" in message.content
+                    message.prompt_key == "publication.report_repair"
                     for message in messages
                 )
                 else self._report_max_tokens
@@ -87,14 +86,17 @@ class ModelStreaming:
         ):
             event_name = event.get("event")
             if event_name == "provider_attempt_started":
+                data = event.get("data", {})
                 yield factory.make(
                     ProviderAttemptStarted,
-                    attempt=int(event.get("data", {}).get("attempt", 1)),
+                    provider=str(data.get("provider", "hive")),
+                    attempt=int(data.get("attempt", 1)),
                 )
             elif event_name == "provider_retrying":
                 data = event.get("data", {})
                 yield factory.make(
                     ProviderRetrying,
+                    provider=str(data.get("provider", "hive")),
                     attempt=int(data.get("attempt", 1)),
                     status_code=data.get("status_code"),
                     delay_ms=float(data.get("delay_ms", 0)),
@@ -104,6 +106,7 @@ class ModelStreaming:
                 data = event.get("data", {})
                 yield factory.make(
                     ProviderStreamStarted,
+                    provider=str(data.get("provider", "hive")),
                     attempt=int(data.get("attempt", 1)),
                     first_byte_ms=float(data.get("first_byte_ms", 0)),
                 )
@@ -111,6 +114,7 @@ class ModelStreaming:
                 data = event.get("data", {})
                 yield factory.make(
                     ProviderCompleted,
+                    provider=str(data.get("provider", "hive")),
                     attempts=int(data.get("attempts", 1)),
                     duration_ms=float(data.get("duration_ms", 0)),
                     first_token_ms=data.get("first_token_ms"),
@@ -121,6 +125,7 @@ class ModelStreaming:
                 data = event.get("data", {})
                 yield factory.make(
                     ProviderFailed,
+                    provider=str(data.get("provider", "hive")),
                     attempts=int(data.get("attempts", 1)),
                     phase=str(data.get("phase", "unknown")),
                     status_code=data.get("status_code"),

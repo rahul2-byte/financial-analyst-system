@@ -7,6 +7,8 @@ from pathlib import Path
 from typing import Any
 
 from app.config import settings
+from app.core.prompts import PromptRegistry
+from app.core.skills import SkillRegistry
 from app.observability.provider_archive import ProviderArchive
 from app.services.routing_policy import RoutingPolicy
 
@@ -21,6 +23,8 @@ class RuntimeResources:
     upstox_fetcher: Any | None = None
     news_pipeline_runner: Any | None = None
     routing_policy: RoutingPolicy | None = None
+    prompts: PromptRegistry | None = None
+    skills: SkillRegistry | None = None
 
 
 def build_runtime_resources(
@@ -32,6 +36,8 @@ def build_runtime_resources(
     source_quality_filtering: bool = True,
 ) -> RuntimeResources:
     """Build runtime dependencies, allowing tests to inject fakes."""
+    prompts = PromptRegistry.bundled()
+    skills = SkillRegistry.bundled()
     archive = provider_archive or ProviderArchive(Path(".finai"))
     if replay_snapshots:
         from app.core.agent_loop.replay import ReplayModelStream
@@ -62,11 +68,34 @@ def build_runtime_resources(
                 source_quality_filtering=source_quality_filtering,
             ),
             routing_policy=RoutingPolicy(jev=None),
+            prompts=prompts,
+            skills=skills,
         )
     if llm_service is None:
         from app.services.hive_service import HiveService
 
-        llm_service = HiveService(provider_archive=archive)
+        hive_service = HiveService(provider_archive=archive)
+        llm_service = hive_service
+        if (
+            settings.FINAI_CHATGPT_CODEX_ENABLED
+            and settings.FINAI_CHATGPT_CODEX_PRIMARY
+        ):
+            from app.services.chatgpt_codex_service import (
+                ChatGPTCodexService,
+                CodexCredentialStore,
+            )
+
+            llm_service = ChatGPTCodexService(
+                fallback=hive_service,
+                credential_store=CodexCredentialStore(
+                    Path(settings.FINAI_CHATGPT_CODEX_CREDENTIAL_PATH).expanduser()
+                ),
+                client_id=settings.FINAI_CHATGPT_CODEX_CLIENT_ID,
+                issuer=settings.FINAI_CHATGPT_CODEX_ISSUER,
+                endpoint=settings.FINAI_CHATGPT_CODEX_API_ENDPOINT,
+                timeout_seconds=settings.FINAI_CHATGPT_CODEX_TIMEOUT_SECONDS,
+                fallback_model=settings.HIVE_MODEL,
+            )
     if yf_fetcher is None:
         from data.providers.yfinance import YFinanceFetcher
 
@@ -89,6 +118,7 @@ def build_runtime_resources(
             model=settings.OPENROUTER_JEV_MODEL,
             timeout_seconds=settings.FINAI_ROUTER_TIMEOUT_SECONDS,
             max_retries=settings.FINAI_ROUTER_MAX_RETRIES,
+            prompts=prompts,
         )
 
     return RuntimeResources(
@@ -100,6 +130,8 @@ def build_runtime_resources(
         routing_policy=RoutingPolicy(
             jev=jev, min_confidence=settings.FINAI_ROUTER_MIN_CONFIDENCE
         ),
+        prompts=prompts,
+        skills=skills,
     )
 
 

@@ -62,7 +62,7 @@ def test_old_tool_approval_does_not_block_a_new_query(tmp_path: Path, monkeypatc
     assert repl.store.read_pending() is None
 
 
-def test_invalid_report_fails_with_artifact_and_preserves_no_draft(
+def test_invalid_report_returns_limited_evidence_without_draft(
     tmp_path: Path, monkeypatch
 ):
     monkeypatch.setattr(
@@ -77,9 +77,12 @@ def test_invalid_report_fails_with_artifact_and_preserves_no_draft(
         return [event async for event in repl.typed_stream("Write a report on ABC.NS")]
 
     events = asyncio.run(collect())
-    failed = next(event for event in events if event.type == "run.failed")
-    assert failed.category == "report_parse"
-    assert not any(event.type == "response.delta" for event in events)
+    completed = next(event for event in events if event.type == "run.completed")
+    assert completed.terminal_status == "completed_with_limited_evidence"
+    assert any(event.type == "response.delta" for event in events)
+    assert not any(
+        "secret" in event.text for event in events if event.type == "response.delta"
+    )
 
 
 def test_line_terminal_prints_artifact_location(tmp_path: Path, monkeypatch, capsys):

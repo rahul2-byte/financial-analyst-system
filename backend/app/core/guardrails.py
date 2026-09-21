@@ -5,11 +5,48 @@ from __future__ import annotations
 import re
 from typing import Any
 
+from app.models.routing import PromptInjectionRisk
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 _TICKER = re.compile(r"^[A-Za-z0-9._|:-]{1,64}$")
 _PERIODS = {"1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"}
 _INTERVALS = {"1d", "1wk", "1h", "4h", "15m", "5m", "1m"}
+_EXCHANGES = {"NSE", "BSE"}
+_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_INJECTION_RULES = {
+    "instruction_override": re.compile(
+        r"\b(ignore|disregard|override)\b.{0,80}\b(previous|system|developer|safety|instructions?)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    "privilege_claim": re.compile(
+        r"\b(reveal|print|show|leak)\b.{0,80}\b(system prompt|secret|token|api key|credentials?)\b",
+        re.IGNORECASE | re.DOTALL,
+    ),
+    "tool_manipulation": re.compile(
+        r"(?:\b(call|run|execute|use)\b.{0,60}\b(any|all|hidden|internal)\b.{0,40}\btool|tool permission)",
+        re.IGNORECASE | re.DOTALL,
+    ),
+}
+
+
+class InputSafetyAssessment(BaseModel):
+    risk: PromptInjectionRisk = PromptInjectionRisk.LOW
+    flags: list[str] = Field(default_factory=list)
+
+
+def assess_input_safety(value: str) -> InputSafetyAssessment:
+    """Detect clear instruction attacks before any model or tool is called."""
+    flags = [
+        name for name, pattern in _INJECTION_RULES.items() if pattern.search(value)
+    ]
+    risk = (
+        PromptInjectionRisk.HIGH
+        if len(flags) >= 2
+        else PromptInjectionRisk.MEDIUM
+        if flags
+        else PromptInjectionRisk.LOW
+    )
+    return InputSafetyAssessment(risk=risk, flags=flags)
 
 
 class ToolArguments(BaseModel):
@@ -55,6 +92,20 @@ def validate_tool_arguments(name: str, arguments: dict[str, Any]) -> dict[str, A
         if not question or len(question) > 500:
             raise ValueError("clarification question must be 1-500 characters")
         return {"question": question}
+    if name == "data:fetch_market_status":
+        if set(arguments) != {"exchange"} or not isinstance(arguments.get("exchange"), str):
+            raise ValueError("market status requires only exchange")
+        exchange = arguments["exchange"].strip().upper()
+        if exchange not in _EXCHANGES:
+            raise ValueError("unsupported exchange")
+        return {"exchange": exchange}
+    if name == "data:fetch_market_holidays":
+        if set(arguments) - {"date"} or not isinstance(arguments.get("date"), str):
+            raise ValueError("market holidays requires an ISO date")
+        date = arguments["date"].strip()
+        if not _DATE.fullmatch(date):
+            raise ValueError("market holidays requires an ISO date")
+        return {"date": date}
     if name not in {
         "data:fetch_stock_data",
         "data:fetch_fundamentals",

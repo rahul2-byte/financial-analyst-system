@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 
 import pytest
@@ -50,9 +51,46 @@ def test_definitions_are_the_current_finite_tool_surface() -> None:
         "news:fetch_news",
         "analysis:run_fundamental_scan",
         "analysis:run_technical_scan",
-        "analysis:get_technical_overview",
-        "interaction:ask_user",
+            "analysis:get_technical_overview",
+            "interaction:ask_user",
+            "data:fetch_market_status",
+            "data:fetch_market_holidays",
     }
+
+
+def test_market_status_tool_returns_provider_state_and_provenance() -> None:
+    class Upstox:
+        def fetch_market_status(self, exchange):
+            assert exchange == "NSE"
+            return {"exchange": "NSE", "status": "NORMAL_OPEN", "last_updated": 1}
+
+        def fetch_market_holidays(self, date):
+            raise AssertionError(date)
+
+    resources = RuntimeResources(
+        llm_service=object(), yf_fetcher=FakeFetcher(), upstox_fetcher=Upstox()
+    )
+    tool_runner = FinancialToolRunner(resources)
+    result = asyncio.run(
+        tool_runner.execute("data:fetch_market_status", {"exchange": "NSE"})
+    )
+    assert result["success"] is True
+    assert result["data"]["status"] == "NORMAL_OPEN"
+    assert result["provenance"]["source"] == "upstox"
+
+
+def test_fixture_tool_result_overrides_provider_call() -> None:
+    tool_runner, _ = runner()
+    tool_runner.set_mocked_tools(
+        [{
+            "name": "data:fetch_stock_data",
+            "response": {"success": False, "error": "fixture timeout"},
+        }]
+    )
+    result = asyncio.run(
+        tool_runner.execute("data:fetch_stock_data", {"ticker": "ABC"})
+    )
+    assert result == {"success": False, "error": "fixture timeout"}
 
 
 @pytest.mark.asyncio
@@ -63,6 +101,30 @@ async def test_stock_data_returns_summary_and_caches_for_analysis() -> None:
     assert result["data"]["period_return_pct"] == 20.0
     await tool_runner.execute("analysis:run_technical_scan", {"ticker": "ABC"})
     assert [call[0] for call in fetcher.calls] == ["price"]
+
+
+@pytest.mark.asyncio
+async def test_stock_data_uses_adjusted_close_for_period_return() -> None:
+    class AdjustedFetcher(FakeFetcher):
+        def fetch_stock_price(self, ticker: str, period: str, interval: str) -> dict:
+            return {
+                "ticker": ticker,
+                "period": period,
+                "interval": interval,
+                "data": [
+                    {"Open": 10, "High": 11, "Low": 9, "Close": 10, "Adj Close": 5, "Volume": 100},
+                    {"Open": 11, "High": 13, "Low": 10, "Close": 12, "Adj Close": 6, "Volume": 120},
+                ],
+            }
+
+    fetcher = AdjustedFetcher()
+    result = await FinancialToolRunner(
+        RuntimeResources(llm_service=object(), yf_fetcher=fetcher)
+    ).execute("data:fetch_stock_data", {"ticker": "ABC"})
+
+    assert result["data"]["period_return_pct"] == 20.0
+    assert result["data"]["period_return_basis"] == "adjusted_close"
+    assert result["data"]["corporate_action_adjusted"] is True
 
 
 @pytest.mark.asyncio
@@ -186,6 +248,59 @@ async def test_news_tool_uses_the_configured_news_pipeline() -> None:
     assert result["sources"] == [
         {"name": "news.example", "url": "https://news.example/article"}
     ]
+
+
+@pytest.mark.asyncio
+async def test_news_tool_uses_cached_company_name_from_fundamentals() -> None:
+    class NamedFetcher(FakeFetcher):
+        def fetch_company_fundamentals(self, ticker: str) -> dict:
+            return {"ticker": ticker, "name": "HDFC Bank Limited", "peRatio": 12}
+
+    class CheckingPipeline:
+        async def run(self, *, company, time_window_days):
+            assert company.ticker == "HDFCBANK.NS"
+            assert company.company_name == "HDFC Bank Limited"
+            return []
+
+    tool_runner = FinancialToolRunner(
+        RuntimeResources(
+            llm_service=object(),
+            yf_fetcher=NamedFetcher(),
+            news_pipeline_runner=CheckingPipeline(),
+        )
+    )
+    await tool_runner.execute(
+        "analysis:run_fundamental_scan", {"ticker": "HDFCBANK.NS"}
+    )
+    await tool_runner.execute("news:fetch_news", {"ticker": "HDFCBANK.NS"})
+
+
+@pytest.mark.asyncio
+async def test_news_tool_resolves_company_name_from_upstox_when_not_cached() -> None:
+    class Upstox:
+        def resolve_instrument(self, ticker: str) -> list[dict]:
+            assert ticker == "HDFCBANK.NS"
+            return [
+                {
+                    "trading_symbol": "HDFCBANK",
+                    "short_name": "HDFC Bank",
+                }
+            ]
+
+    class CheckingPipeline:
+        async def run(self, *, company, time_window_days):
+            assert company.company_name == "HDFC Bank"
+            return []
+
+    tool_runner = FinancialToolRunner(
+        RuntimeResources(
+            llm_service=object(),
+            yf_fetcher=FakeFetcher(),
+            upstox_fetcher=Upstox(),
+            news_pipeline_runner=CheckingPipeline(),
+        )
+    )
+    await tool_runner.execute("news:fetch_news", {"ticker": "HDFCBANK.NS"})
 
 
 @pytest.mark.asyncio

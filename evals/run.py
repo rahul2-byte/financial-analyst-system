@@ -88,7 +88,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     for label in judge_results:
         judges_by_case.setdefault(str(label.get("case_id")), []).append(label)
     for task in tasks:
-        case_id = str(task.get("id"))
+        case_id = str(task.get("id") or task.get("case_id"))
         result = results.get(case_id)
         if result is None:
             missing_results.append(case_id)

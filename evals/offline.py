@@ -170,7 +170,9 @@ async def run_offline_case(
     loop_configuration = {
         "mode": str(configuration.get("mode", "guided")),
         "max_rounds": int(configuration.get("max_rounds", 12)),
-        "max_tool_calls": int(configuration.get("max_tool_calls", 24)),
+        "emergency_max_tool_calls": int(
+            configuration.get("emergency_max_tool_calls", 128)
+        ),
         "max_tokens": int(configuration.get("max_tokens", 2048)),
         "report_max_tokens": int(configuration.get("report_max_tokens", 32768)),
         "publish_reports": bool(configuration.get("publish_reports", True)),
@@ -225,7 +227,9 @@ async def run_offline_case(
                 model=case["model_id"],
                 mode=loop_configuration["mode"],
                 max_rounds=loop_configuration["max_rounds"],
-                max_tool_calls=loop_configuration["max_tool_calls"],
+                emergency_max_tool_calls=loop_configuration[
+                    "emergency_max_tool_calls"
+                ],
                 max_tokens=loop_configuration["max_tokens"],
                 report_max_tokens=loop_configuration["report_max_tokens"],
                 publish_reports=loop_configuration["publish_reports"],

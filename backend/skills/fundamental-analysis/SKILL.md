@@ -10,4 +10,4 @@ scripts: []
 references: []
 ---
 
-Fetch fundamentals and run the deterministic scanner when usable provider metrics exist. Preserve reporting period, units, currency, and source. Distinguish reported values from interpretation; disclose missing statements or peer baselines. Never estimate a ratio, compare incompatible periods, or describe unavailable filings as if they were returned.
+LLM instructions are maintained in `backend/app/core/prompts/prompts.yaml`.

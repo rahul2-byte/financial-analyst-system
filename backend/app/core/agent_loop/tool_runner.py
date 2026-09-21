@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import Any, cast
 
 import pandas as pd
 from app.config import settings
+from app.core.prompts import PromptRegistry
 from app.core.research_schemas import EvidenceProvenance
 from app.core.resources import RuntimeResources
 from app.observability.provider_archive import ProviderSnapshot
@@ -22,7 +24,7 @@ _TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "data:fetch_stock_data",
-            "description": "Fetch verified OHLCV data for a Yahoo Finance ticker.",
+            "description": "",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -38,7 +40,7 @@ _TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "analysis:get_technical_overview",
-            "description": "Return compact, deterministic multi-indicator technical evidence for a cached OHLCV dataset.",
+            "description": "",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -54,7 +56,7 @@ _TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "data:fetch_fundamentals",
-            "description": "Fetch verified company fundamentals for a Yahoo Finance ticker.",
+            "description": "",
             "parameters": {
                 "type": "object",
                 "properties": {"ticker": {"type": "string"}},
@@ -66,7 +68,7 @@ _TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "news:fetch_news",
-            "description": "Fetch recent news for a Yahoo Finance ticker.",
+            "description": "",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -81,7 +83,7 @@ _TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "analysis:run_fundamental_scan",
-            "description": "Run deterministic fundamental analysis using verified provider data.",
+            "description": "",
             "parameters": {
                 "type": "object",
                 "properties": {"ticker": {"type": "string"}},
@@ -93,7 +95,7 @@ _TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "analysis:run_technical_scan",
-            "description": "Run deterministic RSI, MACD, and Bollinger analysis using verified OHLCV data.",
+            "description": "",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -109,11 +111,35 @@ _TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "interaction:ask_user",
-            "description": "Ask one concise clarification question before continuing research.",
+            "description": "",
             "parameters": {
                 "type": "object",
                 "properties": {"question": {"type": "string"}},
                 "required": ["question"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "data:fetch_market_status",
+            "description": "",
+            "parameters": {
+                "type": "object",
+                "properties": {"exchange": {"type": "string"}},
+                "required": ["exchange"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "data:fetch_market_holidays",
+            "description": "",
+            "parameters": {
+                "type": "object",
+                "properties": {"date": {"type": "string"}},
+                "required": ["date"],
             },
         },
     },
@@ -125,6 +151,8 @@ class FinancialToolRunner:
 
     def __init__(self, resources: RuntimeResources) -> None:
         self.resources = resources
+        self.prompts = resources.prompts or PromptRegistry.bundled()
+        self._mocked_tools: dict[str, list[Any]] = {}
         self._ohlcv_by_request: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
         self._ohlcv_provenance_by_request: dict[
             tuple[str, str, str], dict[str, Any]
@@ -133,11 +161,72 @@ class FinancialToolRunner:
         self._fundamental_provenance_by_ticker: dict[str, dict[str, Any]] = {}
         self._technical_engine = TechnicalEngine()
 
+    def set_mocked_tools(self, mocked_tools: list[dict[str, Any]]) -> None:
+        """Install one-shot fixture responses for deterministic evaluation runs."""
+        self._mocked_tools = {}
+        for item in mocked_tools:
+            name = item.get("name")
+            if isinstance(name, str) and "response" in item:
+                self._mocked_tools.setdefault(name, []).append(item["response"])
+
+    def mocked_tools_remaining(self) -> int:
+        return sum(len(items) for items in self._mocked_tools.values())
+
     def definitions(self) -> list[dict[str, Any]]:
-        return [dict(definition) for definition in _TOOL_DEFINITIONS]
+        definitions = deepcopy(_TOOL_DEFINITIONS)
+        keys = {
+            "data:fetch_stock_data": "tools.data_fetch_stock_data.description",
+            "analysis:get_technical_overview": "tools.analysis_get_technical_overview.description",
+            "data:fetch_fundamentals": "tools.data_fetch_fundamentals.description",
+            "news:fetch_news": "tools.news_fetch_news.description",
+            "analysis:run_fundamental_scan": "tools.analysis_run_fundamental_scan.description",
+            "analysis:run_technical_scan": "tools.analysis_run_technical_scan.description",
+            "interaction:ask_user": "tools.interaction_ask_user.description",
+            "data:fetch_market_status": "tools.data_fetch_market_status.description",
+            "data:fetch_market_holidays": "tools.data_fetch_market_holidays.description",
+        }
+        for definition in definitions:
+            function = cast(dict[str, Any], definition["function"])
+            function["description"] = self.prompts.get(keys[function["name"]])
+        return definitions
 
     async def execute(self, name: str, arguments: dict[str, Any]) -> Any:
         value: Any
+        fixture = self._mocked_tools.get(name)
+        if fixture:
+            return fixture.pop(0)
+        if name == "data:fetch_market_status":
+            fetcher = self.resources.upstox_fetcher
+            if fetcher is None:
+                return {"success": False, "error": "Market status provider is unavailable"}
+            try:
+                data = fetcher.fetch_market_status(str(arguments["exchange"]))
+            except UpstoxError as exc:
+                return {"success": False, "error": str(exc)}
+            return {
+                "success": True,
+                "data": data,
+                "provenance": _provider_provenance(
+                    "market_status", str(arguments["exchange"]), None, source="upstox"
+                ),
+            }
+
+        if name == "data:fetch_market_holidays":
+            fetcher = self.resources.upstox_fetcher
+            if fetcher is None:
+                return {"success": False, "error": "Market holiday provider is unavailable"}
+            try:
+                data = fetcher.fetch_market_holidays(str(arguments["date"]))
+            except UpstoxError as exc:
+                return {"success": False, "error": str(exc)}
+            return {
+                "success": True,
+                "data": data,
+                "provenance": _provider_provenance(
+                    "market_holidays", str(arguments["date"]), None, source="upstox"
+                ),
+            }
+
         if name == "analysis:run_fundamental_scan":
             ticker = str(arguments.get("ticker", "")).strip()
             if not ticker:
@@ -458,6 +547,8 @@ class FinancialToolRunner:
                 "interval": interval,
                 "row_count": len(rows),
                 "period_return_pct": _period_return_pct(rows[0], rows[-1]),
+                "period_return_basis": _period_return_basis(rows[0], rows[-1]),
+                "corporate_action_adjusted": _has_adjusted_close(rows[0], rows[-1]),
                 "first": rows[0],
                 "latest": rows[-1],
                 "provenance": provenance,
@@ -502,6 +593,25 @@ class FinancialToolRunner:
         elif name == "news:fetch_news":
             ticker = str(arguments.get("ticker", "")).strip()
             limit = int(arguments.get("limit", 10))
+            fundamentals = self._fundamentals_by_ticker.get(ticker) or {}
+            company_name = str(fundamentals.get("name") or ticker).strip()
+            if company_name == ticker and self.resources.upstox_fetcher is not None:
+                try:
+                    matches = self.resources.upstox_fetcher.resolve_instrument(ticker)
+                    match: dict[str, Any] = next(
+                        (
+                            item
+                            for item in matches
+                            if item.get("trading_symbol")
+                            == ticker.split(".", 1)[0].upper()
+                        ),
+                        {},
+                    )
+                    company_name = str(
+                        match.get("short_name") or match.get("name") or ticker
+                    ).strip()
+                except UpstoxError:
+                    pass
             pipeline = self.resources.news_pipeline_runner
             if pipeline is None:
                 return {
@@ -518,7 +628,7 @@ class FinancialToolRunner:
                 records = await pipeline.run(
                     company=CompanyContext(
                         ticker=ticker,
-                        company_name=ticker,
+                        company_name=company_name,
                         nse_symbol=ticker.split(".", 1)[0],
                     ),
                     time_window_days=30,
@@ -575,6 +685,8 @@ class FinancialToolRunner:
                 and (
                     pipeline_stats.get("query_failures", 0)
                     or pipeline_stats.get("connector_failures", 0)
+                    or pipeline_stats.get("degraded_fallback_count", 0)
+                    or pipeline_stats.get("timeout", False)
                 )
                 else "verified"
                 if source == "upstox"
@@ -721,8 +833,7 @@ def _parse_timestamp(value: Any) -> datetime | None:
 
 
 def _period_return_pct(first: dict[str, Any], latest: dict[str, Any]) -> float | None:
-    first_value = first.get("Close", first.get("close"))
-    latest_value = latest.get("Close", latest.get("close"))
+    first_value, latest_value = _return_values(first, latest)
     if first_value is None or latest_value is None:
         return None
     try:
@@ -733,6 +844,30 @@ def _period_return_pct(first: dict[str, Any], latest: dict[str, Any]) -> float |
     if first_close == 0:
         return None
     return round((latest_close / first_close - 1) * 100, 4)
+
+
+def _return_values(
+    first: dict[str, Any], latest: dict[str, Any]
+) -> tuple[Any, Any]:
+    adjusted_keys = ("Adj Close", "adjusted_close", "adj_close", "adjustedClose")
+    for key in adjusted_keys:
+        if first.get(key) is not None and latest.get(key) is not None:
+            return first[key], latest[key]
+    return (
+        first.get("Close", first.get("close")),
+        latest.get("Close", latest.get("close")),
+    )
+
+
+def _has_adjusted_close(first: dict[str, Any], latest: dict[str, Any]) -> bool:
+    return any(
+        first.get(key) is not None and latest.get(key) is not None
+        for key in ("Adj Close", "adjusted_close", "adj_close", "adjustedClose")
+    )
+
+
+def _period_return_basis(first: dict[str, Any], latest: dict[str, Any]) -> str:
+    return "adjusted_close" if _has_adjusted_close(first, latest) else "unadjusted_close"
 
 
 def _period_days(period: str) -> int:

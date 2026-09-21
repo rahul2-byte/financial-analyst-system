@@ -53,6 +53,32 @@ def test_engine_marks_long_lookbacks_unavailable() -> None:
     assert "less than 200 bars" in snapshot.warnings[0]
 
 
+def test_engine_handles_fewer_than_keltner_lookback_bars() -> None:
+    snapshot = TechnicalEngine().analyze(bars(1), ticker="ABC")
+    values = {item.indicator: item.value for item in snapshot.measurements}
+
+    assert snapshot.status == "partial"
+    assert values["KC_20"] is None
+    assert values["CMF_20"] is None
+
+
+def test_engine_marks_optional_pandas_ta_indicator_unavailable_on_library_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from quant import technical_engine
+
+    monkeypatch.setattr(
+        technical_engine.pta,
+        "kc",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(IndexError("short series")),
+    )
+
+    snapshot = TechnicalEngine().analyze(bars(), ticker="ABC")
+    values = {item.indicator: item.value for item in snapshot.measurements}
+
+    assert values["KC_20"] is None
+
+
 def test_engine_uses_provider_timestamp_column() -> None:
     frame = bars().reset_index(names="timestamp")
     snapshot = TechnicalEngine().analyze(frame, ticker="ABC")

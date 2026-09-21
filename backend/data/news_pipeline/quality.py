@@ -19,6 +19,7 @@ class SourceClassifier:
         "livemint.com",
         "business-standard.com",
         "moneycontrol.com",
+        "upstox.com",
     }
     BLOCKED: ClassVar[set[str]] = {"zacks.com", "pocketsense.com", "wisesheets.io"}
 

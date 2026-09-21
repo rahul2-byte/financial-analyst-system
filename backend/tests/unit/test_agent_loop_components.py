@@ -90,6 +90,34 @@ async def test_model_streaming_converts_provider_tokens_to_assistant_message() -
 
 
 @pytest.mark.asyncio
+async def test_model_streaming_preserves_provider_metadata() -> None:
+    class Model:
+        def generate_stream(self, messages, model, **kwargs):
+            del messages, model, kwargs
+
+            async def stream():
+                yield {
+                    "event": "provider_completed",
+                    "data": {
+                        "provider": "chatgpt_codex",
+                        "model_id": "gpt-5.6-luna",
+                    },
+                }
+
+            return stream()
+
+    events = [
+        item
+        async for item in ModelStreaming(Model(), "fixture", 128, list).stream(
+            [], EventFactory(uuid4()), 1
+        )
+    ]
+
+    assert events[0].provider == "chatgpt_codex"
+    assert events[0].model_id == "gpt-5.6-luna"
+
+
+@pytest.mark.asyncio
 async def test_model_streaming_accepts_report_content_above_message_limit() -> None:
     class Model:
         def generate_stream(self, messages, model, **kwargs):
@@ -232,7 +260,11 @@ async def test_report_repair_uses_bounded_token_budget() -> None:
         report_repair_max_tokens=4096,
     )
     messages = [
-        Message(role="system", content="Formatting repair required. Fix JSON."),
+        Message(
+            role="system",
+            content="Formatting repair required. Fix JSON.",
+            prompt_key="publication.report_repair",
+        ),
         Message(role="assistant", content="{}"),
     ]
 
