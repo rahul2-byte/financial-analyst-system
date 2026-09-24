@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import hashlib
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -81,9 +80,3 @@ class ExperimentRegistry:
         temporary = target.with_suffix(".tmp")
         temporary.write_text(data, encoding="utf-8")
         temporary.replace(target)
-
-
-def reproducibility_fingerprint(value: Any) -> str:
-    return hashlib.sha256(
-        json.dumps(value, sort_keys=True, default=str, separators=(",", ":")).encode()
-    ).hexdigest()

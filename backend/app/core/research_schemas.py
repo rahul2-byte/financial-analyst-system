@@ -60,14 +60,6 @@ class ClaimRecord(BaseModel):
     contradicted_by: list[str] = Field(default_factory=list)
 
 
-class CoverageReport(BaseModel):
-    required_dimensions: list[str]
-    covered_dimensions: list[str]
-    missing_dimensions: list[str]
-    source_diversity_score: float = Field(ge=0.0, le=1.0)
-    evidence_strength_score: float = Field(ge=0.0, le=1.0)
-
-
 class ResearchAgentResult(BaseModel):
     agent: str
     status: Literal["ok", "insufficient_evidence", "failed"]

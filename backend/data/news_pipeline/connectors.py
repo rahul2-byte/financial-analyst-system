@@ -147,23 +147,6 @@ def _explode_portal_headlines(text: str) -> list[tuple[str, str]]:
     return headlines
 
 
-class BaseNewsConnector:
-    def __init__(self, *, timeout: float = 20.0) -> None:
-        self.timeout = timeout
-
-    async def _get(
-        self, url: str, *, headers: dict[str, str] | None = None
-    ) -> httpx.Response:
-        async with httpx.AsyncClient(
-            timeout=self.timeout,
-            follow_redirects=True,
-            limits=_httpx_limits(),
-        ) as client:
-            response = await client.get(url, headers=headers)
-            response.raise_for_status()
-            return response
-
-
 class UpstoxNewsConnector:
     """Adapt Upstox instrument news into the existing news pipeline contract."""
 

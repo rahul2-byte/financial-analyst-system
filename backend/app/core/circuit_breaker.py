@@ -131,14 +131,3 @@ class CircuitBreaker:
         if asyncio.iscoroutinefunction(func):
             return async_wrapper
         return sync_wrapper
-
-
-# Singleton circuit breakers for each service
-_circuits: dict[str, CircuitBreaker] = {}
-
-
-def get_circuit(name: str, **kwargs) -> CircuitBreaker:
-    """Get or create a circuit breaker for a service."""
-    if name not in _circuits:
-        _circuits[name] = CircuitBreaker(name, **kwargs)
-    return _circuits[name]

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from enum import StrEnum
-from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -37,20 +36,6 @@ class PromptInjectionRisk(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
-
-
-class RoutingContext(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    query: str = Field(min_length=1, max_length=131_072)
-    normalized_query: str = Field(min_length=1, max_length=131_072)
-    available_tools: list[str] = Field(default_factory=list)
-    available_skills: list[str] = Field(default_factory=list)
-    evidence_status: dict[str, str] = Field(default_factory=dict)
-    prior_failures: list[dict[str, Any]] = Field(default_factory=list, max_length=8)
-    provider_health: dict[str, str] = Field(default_factory=dict)
-    retry_budget_remaining: int = Field(default=1, ge=0)
-    cost_budget_usd: float | None = Field(default=None, ge=0)
 
 
 class RoutePlan(BaseModel):

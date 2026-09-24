@@ -1,9 +1,6 @@
 from datetime import datetime
-from typing import TypeAlias
 
 from pydantic import BaseModel
-
-MetadataValue: TypeAlias = str | int | float | bool | None
 
 
 class NewsArticle(BaseModel):
@@ -35,10 +32,3 @@ class NewsArticle(BaseModel):
     dedupe_key: str | None = None
     timeframe: str | None = None
     run_id: str | None = None
-
-
-class ProcessedChunk(BaseModel):
-    chunk_id: str
-    ticker: str
-    text: str
-    metadata: dict[str, MetadataValue]

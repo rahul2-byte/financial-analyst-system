@@ -19,11 +19,6 @@ def get_public_token_sink() -> TokenSink | None:
     return _token_sink.get() if _publishing_public_tokens.get() else None
 
 
-def get_captured_token_sink() -> TokenSink | None:
-    """Return the run-level sink without granting publication permission."""
-    return _token_sink.get()
-
-
 @contextmanager
 def capture_public_tokens(sink: TokenSink) -> Iterator[None]:
     token = _token_sink.set(sink)

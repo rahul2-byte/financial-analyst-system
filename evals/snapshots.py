@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import hashlib
-import json
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -99,11 +98,3 @@ def validate_candidate_source_record(record: dict[str, Any]) -> list[str]:
     if any(record.get(field) not in (None, "") for field in _CANDIDATE_SOURCE_FIELDS):
         errors.append("candidate source must remain unresolved")
     return errors
-
-
-def write_manifest(path: Path, records: list[dict[str, Any]]) -> None:
-    """Persist a versioned manifest without silently overwriting malformed data."""
-    payload = {"version": "v1", "sources": records}
-    path.write_text(
-        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )

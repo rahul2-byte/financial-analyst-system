@@ -955,16 +955,6 @@ def _provider_provenance(
     ).model_dump(mode="json")
 
 
-def _row_timestamp(row: dict[str, Any]) -> datetime | None:
-    raw = row.get("Datetime", row.get("Date", row.get("datetime", row.get("date"))))
-    if not isinstance(raw, str):
-        return None
-    try:
-        return datetime.fromisoformat(raw).astimezone(UTC)
-    except ValueError:
-        return None
-
-
 def _news_timestamp(items: Any) -> datetime | None:
     timestamps = [
         _parse_timestamp(item.get("published_at", item.get("published_time")))
