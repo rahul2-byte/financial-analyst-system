@@ -1,3 +1,4 @@
+import asyncio
 import json
 import urllib.parse
 
@@ -12,6 +13,29 @@ from app.services.chatgpt_codex_service import (
     _response_tool,
     _responses_input,
 )
+
+
+@pytest.mark.asyncio
+async def test_codex_generate_has_total_deadline_for_heartbeating_stream(
+    tmp_path, monkeypatch
+) -> None:
+    service = ChatGPTCodexService(
+        client=httpx.AsyncClient(),
+        credential_store=CodexCredentialStore(tmp_path / "credentials.json"),
+        timeout_seconds=0.01,
+    )
+
+    async def heartbeat(messages, model, **kwargs):
+        while True:
+            await asyncio.sleep(0)
+            yield {"event": "provider_stream_started", "data": {}}
+
+    monkeypatch.setattr(service, "generate_stream", heartbeat)
+
+    with pytest.raises(ChatGPTCodexError, match="total timeout"):
+        await service.generate([Message(role="user", content="hello")], "gpt-test")
+
+    await service.aclose()
 
 
 def test_authorization_url_contains_pkce_and_state() -> None:
@@ -137,7 +161,163 @@ async def test_codex_stream_translates_text_and_completion(tmp_path) -> None:
     assert events[1]["data"]["provider"] == "chatgpt_codex"
     assert events[3]["data"]["provider"] == "chatgpt_codex"
     assert events[3]["data"]["duration_ms"] > 0
+    assert isinstance(events[3]["data"]["first_token_ms"], float)
     await service.aclose()
+
+
+@pytest.mark.asyncio
+async def test_codex_trace_records_sent_body_and_assembled_response(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FINAI_MODEL_TRACE", "full")
+    monkeypatch.setenv("FINAI_MODEL_TRACE_DIR", str(tmp_path / "traces"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            content=(
+                b"event: response.output_text.delta\n"
+                b'data: {"delta":"Answer"}\n\n'
+                b"event: response.completed\n"
+                b'data: {"response":{"usage":{"input_tokens":3,"output_tokens":1}}}\n\n'
+            ),
+        )
+
+    service = ChatGPTCodexService(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        credential_store=CodexCredentialStore(tmp_path / "credentials.json"),
+    )
+    service.credential_store.save(
+        {"access_token": "never-write-this", "expires_at": 9_999_999_999}
+    )
+
+    events = [
+        event
+        async for event in service.generate_stream(
+            [Message(role="user", content="exact question")], "gpt-test", run_id="run-7"
+        )
+    ]
+
+    trace_path = next((tmp_path / "traces").glob("**/*.jsonl"))
+    records = [json.loads(line) for line in trace_path.read_text().splitlines()]
+    request_record = next(
+        record for record in records if record["event"] == "request.attempt"
+    )
+    response_record = next(
+        record for record in records if record["event"] == "call.completed"
+    )
+    assert (
+        request_record["payload"]["request_body"]["input"][0]["content"]
+        == "exact question"
+    )
+    assert "never-write-this" not in trace_path.read_text()
+    assert response_record["payload"]["text"] == "Answer"
+    assert response_record["payload"]["chunk_timings"]
+    assert response_record["run_id"] == "run-7"
+    assert events[-1]["event"] == "provider_completed"
+    await service.aclose()
+
+
+@pytest.mark.asyncio
+async def test_codex_trace_assembles_tool_call_arguments(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FINAI_MODEL_TRACE", "full")
+    monkeypatch.setenv("FINAI_MODEL_TRACE_DIR", str(tmp_path / "traces"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            content=(
+                b"event: response.output_item.done\n"
+                b'data: {"item":{"type":"function_call","call_id":"c1",'
+                b'"output_index":0,"name":"data__fetch_stock_data",'
+                b'"arguments":"{\\"ticker\\":\\"TCS.NS\\"}"}}\n\n'
+                b"event: response.completed\n"
+                b'data: {"response":{}}\n\n'
+            ),
+        )
+
+    service = ChatGPTCodexService(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+        credential_store=CodexCredentialStore(tmp_path / "credentials.json"),
+    )
+    service.credential_store.save(
+        {"access_token": "access", "expires_at": 9_999_999_999}
+    )
+    [
+        event
+        async for event in service.generate_stream([], "gpt-test", run_id="run-tool")
+    ]
+
+    trace_path = next((tmp_path / "traces").glob("**/*.jsonl"))
+    records = [json.loads(line) for line in trace_path.read_text().splitlines()]
+    completed = next(
+        record for record in records if record["event"] == "call.completed"
+    )
+    assert completed["payload"]["tool_calls"][0]["function"] == {
+        "name": "data:fetch_stock_data",
+        "arguments": '{"ticker":"TCS.NS"}',
+    }
+    assert completed["payload"]["chunk_timings"]
+    await service.aclose()
+
+
+@pytest.mark.asyncio
+async def test_codex_to_hive_fallback_keeps_one_correlated_trace(
+    tmp_path, monkeypatch
+) -> None:
+    from app.config import settings
+    from app.services.hive_service import HiveService
+
+    monkeypatch.setenv("FINAI_MODEL_TRACE", "full")
+    monkeypatch.setenv("FINAI_MODEL_TRACE_DIR", str(tmp_path / "traces"))
+    monkeypatch.setattr(settings, "HIVE_API_KEY", "secret-hive-key")
+    hive = HiveService(
+        client=httpx.AsyncClient(
+            transport=httpx.MockTransport(
+                lambda request: httpx.Response(
+                    200,
+                    request=request,
+                    content=b'data: {"choices":[{"delta":{"content":"fallback answer"}}]}\n\ndata: [DONE]\n\n',
+                )
+            )
+        )
+    )
+    service = ChatGPTCodexService(
+        client=httpx.AsyncClient(),
+        fallback=hive,
+        credential_store=CodexCredentialStore(tmp_path / "missing-credentials.json"),
+    )
+
+    events = [
+        event
+        async for event in service.generate_stream(
+            [Message(role="user", content="question")],
+            "gpt-test",
+            run_id="run-fallback",
+        )
+    ]
+
+    trace_path = next((tmp_path / "traces").glob("**/*.jsonl"))
+    raw = trace_path.read_text()
+    records = [json.loads(line) for line in raw.splitlines()]
+    hive_request = next(
+        record
+        for record in records
+        if record["event"] == "request.attempt"
+        and record["payload"].get("provider") == "hive"
+    )
+    completed = next(
+        record for record in records if record["event"] == "call.completed"
+    )
+    assert hive_request["run_id"] == "run-fallback"
+    assert completed["payload"]["text"] == "fallback answer"
+    assert any(record["event"] == "provider.fallback" for record in records)
+    assert "secret-hive-key" not in raw
+    assert events[-1]["event"] == "provider_completed"
+    await service.aclose()
+    await hive.aclose()
 
 
 @pytest.mark.asyncio

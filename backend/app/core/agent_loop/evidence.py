@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 import re
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any
 
 from app.core.agent_loop.publication import EvidenceFact
@@ -147,6 +147,29 @@ def extract_evidence_facts(payload: dict[str, Any]) -> dict[str, EvidenceFact]:
                 fact_id=fact_id,
                 value=value,
                 unit="provider_value",
+                source_id=source_id,
+                instrument=instrument,
+                observed_at=observed,
+                quality_status="verified",
+                source_url=str(provenance.get("source_url") or "") or None,
+            )
+        elif isinstance(value, str):
+            try:
+                if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
+                    date.fromisoformat(value)
+                    unit = "provider_date"
+                elif re.match(r"^\d{4}-\d{2}-\d{2}[T ]", value):
+                    datetime.fromisoformat(value)
+                    unit = "provider_timestamp"
+                else:
+                    return
+            except ValueError:
+                return
+            fact_id = f"{source_id}:{safe_path(path)}"
+            facts[fact_id] = EvidenceFact(
+                fact_id=fact_id,
+                value=value,
+                unit=unit,
                 source_id=source_id,
                 instrument=instrument,
                 observed_at=observed,

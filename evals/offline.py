@@ -139,13 +139,22 @@ def write_result_artifact(path: Path, payload: dict[str, Any]) -> Path:
     if path.exists():
         raise FileExistsError(f"result artifact already exists: {path}")
     temporary = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
-    temporary.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n")
     try:
-        os.link(temporary, path)
-    except FileExistsError as exc:
-        raise FileExistsError(f"result artifact already exists: {path}") from exc
+        with temporary.open("w", encoding="utf-8") as output:
+            output.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+            output.flush()
+            os.fsync(output.fileno())
+        try:
+            os.link(temporary, path)
+        except FileExistsError as exc:
+            raise FileExistsError(f"result artifact already exists: {path}") from exc
     finally:
         temporary.unlink(missing_ok=True)
+    directory_fd = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(directory_fd)
+    finally:
+        os.close(directory_fd)
     return path
 
 
@@ -227,9 +236,7 @@ async def run_offline_case(
                 model=case["model_id"],
                 mode=loop_configuration["mode"],
                 max_rounds=loop_configuration["max_rounds"],
-                emergency_max_tool_calls=loop_configuration[
-                    "emergency_max_tool_calls"
-                ],
+                emergency_max_tool_calls=loop_configuration["emergency_max_tool_calls"],
                 max_tokens=loop_configuration["max_tokens"],
                 report_max_tokens=loop_configuration["report_max_tokens"],
                 publish_reports=loop_configuration["publish_reports"],

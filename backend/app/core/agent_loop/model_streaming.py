@@ -35,12 +35,16 @@ class ModelStreaming:
         report_max_tokens: int = 32768,
         report_repair_max_tokens: int = 8192,
         report_repair_timeout_seconds: float = 120.0,
+        structured_output: bool | None = None,
     ) -> None:
         self._client = client
         self._model = model
         self._max_tokens = max_tokens
         self._tool_definitions = tool_definitions
         self._publish_reports = publish_reports
+        self._structured_output = (
+            publish_reports if structured_output is None else structured_output
+        )
         self._report_max_tokens = report_max_tokens
         self._report_repair_max_tokens = report_repair_max_tokens
         self._report_repair_timeout_seconds = report_repair_timeout_seconds
@@ -52,8 +56,9 @@ class ModelStreaming:
         text: list[str] = []
         calls: dict[int, dict[str, Any]] = {}
         usage: TokenUsage | None = None
-        is_repair = self._publish_reports and any(
-            message.prompt_key == "publication.report_repair"
+        is_repair = self._structured_output and any(
+            message.prompt_key
+            in {"publication.report_repair", "publication.lookup_repair"}
             for message in messages
         )
         async for event in self._client.generate_stream(
@@ -62,11 +67,7 @@ class ModelStreaming:
             tools=self._tool_definitions(),
             max_tokens=(
                 self._report_repair_max_tokens
-                if self._publish_reports
-                and any(
-                    message.prompt_key == "publication.report_repair"
-                    for message in messages
-                )
+                if is_repair
                 else self._report_max_tokens
                 if self._publish_reports
                 and any(message.role == "tool" for message in messages)
@@ -80,6 +81,7 @@ class ModelStreaming:
             ),
             temperature=0.1,
             run_id=str(factory.run_id),
+            conversation_id=str(factory.conversation_id),
             timeout_seconds=(
                 self._report_repair_timeout_seconds if is_repair else None
             ),

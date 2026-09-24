@@ -9,10 +9,17 @@ from collections.abc import AsyncGenerator
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
+from uuid import uuid4
 
 import httpx
 from app.config import settings
 from app.core.circuit_breaker import CircuitBreaker
+from app.core.model_call_trace import (
+    ModelCallTrace,
+    call_started,
+    capture_stream,
+    safe_endpoint,
+)
 from app.core.model_stream import get_public_token_sink
 from app.core.observability import observe
 from app.models.request_models import Message
@@ -255,6 +262,19 @@ class HiveService(LLMServiceInterface):
                 # request budget must also cap the whole attempt, otherwise a
                 # stalled SSE stream can run past the configured deadline.
                 async with asyncio.timeout(remaining):
+                    trace = kwargs.get("_model_call_trace")
+                    if isinstance(trace, ModelCallTrace):
+                        trace.write(
+                            "request.attempt",
+                            {
+                                "attempt": attempt,
+                                "provider": self.provider_name,
+                                "endpoint": safe_endpoint(
+                                    f"{self.base_url}/chat/completions"
+                                ),
+                                "request_body": payload,
+                            },
+                        )
                     async with self._client.stream(
                         "POST",
                         f"{self.base_url}/chat/completions",
@@ -267,6 +287,16 @@ class HiveService(LLMServiceInterface):
                     ) as response:
                         if response.status_code != 200:
                             body = (await response.aread()).decode(errors="replace")
+                            trace = kwargs.get("_model_call_trace")
+                            if isinstance(trace, ModelCallTrace):
+                                trace.write(
+                                    "response.http_error",
+                                    {
+                                        "attempt": attempt,
+                                        "status_code": response.status_code,
+                                        "body": body,
+                                    },
+                                )
                             if (
                                 _retryable_status(response.status_code)
                                 and retries < self.retry_policy.max_retries
@@ -573,7 +603,35 @@ class HiveService(LLMServiceInterface):
         self, messages: list[Message], model: str, **kwargs: Any
     ) -> AsyncGenerator[dict[str, Any], None]:
         async def generator() -> AsyncGenerator[dict[str, Any], None]:
-            async for event in self._stream_request(messages, model, **kwargs):
+            trace = kwargs.get("_model_call_trace")
+            owns_trace = not isinstance(trace, ModelCallTrace)
+            if owns_trace:
+                trace = ModelCallTrace.create(
+                    provider=self.provider_name,
+                    model=self._model(model),
+                    run_id=str(kwargs["run_id"]) if kwargs.get("run_id") else None,
+                    conversation_id=(
+                        str(kwargs["conversation_id"])
+                        if kwargs.get("conversation_id")
+                        else None
+                    ),
+                    call_id=str(kwargs.get("model_call_id") or uuid4()),
+                )
+                call_started(
+                    trace,
+                    messages=messages,
+                    tools=kwargs.get("tools"),
+                    parameters={
+                        key: kwargs.get(key)
+                        for key in ("max_tokens", "temperature", "timeout_seconds")
+                        if kwargs.get(key) is not None
+                    },
+                )
+            traced_kwargs = {**kwargs, "_model_call_trace": trace}
+            source = self._stream_request(messages, model, **traced_kwargs)
+            if owns_trace and isinstance(trace, ModelCallTrace):
+                source = capture_stream(trace, source)
+            async for event in source:
                 public = {"event": event["event"], "data": event["data"]}
                 if "chunk" in event:
                     public["chunk"] = event["chunk"]
@@ -585,7 +643,7 @@ class HiveService(LLMServiceInterface):
 
     async def generate(self, messages: list[Message], model: str, **kwargs: Any) -> str:
         parts: list[str] = []
-        async for event in self._stream_request(messages, model, **kwargs):
+        async for event in self.generate_stream(messages, model, **kwargs):
             if event["event"] == "token":
                 parts.append(str(event["data"]))
         return "".join(parts)
@@ -595,7 +653,7 @@ class HiveService(LLMServiceInterface):
     ) -> Message:
         parts: list[str] = []
         tool_calls_by_index: dict[int, dict[str, Any]] = {}
-        async for event in self._stream_request(messages, model, **kwargs):
+        async for event in self.generate_stream(messages, model, **kwargs):
             if event["event"] == "token":
                 parts.append(str(event["data"]))
             elif event["event"] == "chunk":

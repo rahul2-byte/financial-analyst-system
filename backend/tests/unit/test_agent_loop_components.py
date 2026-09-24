@@ -169,6 +169,7 @@ async def test_model_streaming_links_usage_and_run_id_to_provider_event() -> Non
 
     completed = next(event for event in events if event.type == "provider.completed")
     assert requests[0]["run_id"] == str(factory.run_id)
+    assert requests[0]["conversation_id"] == str(factory.conversation_id)
     assert completed.meta.run_id == factory.run_id
     assert completed.usage.prompt_tokens == 4
     assert completed.usage.completion_tokens == 2

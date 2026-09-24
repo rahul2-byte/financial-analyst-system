@@ -9,18 +9,24 @@ import os
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from uuid import UUID
 
 from app.core.agent_loop.evidence import EvidenceAccounting
 from app.core.agent_loop.model_streaming import ModelStreaming
 from app.core.agent_loop.publication import (
+    LookupAnswerV1,
     PublicationError,
+    ReportDraft,
     ReportParseError,
+    lookup_repair_instruction,
+    parse_lookup_answer,
     parse_report_draft,
+    publish_lookup_answer,
     publish_report,
     report_repair_instruction,
     report_validation_fallback,
+    unreferenced_fact_markers,
 )
 from app.core.agent_loop.terminal_state import terminal_status
 from app.core.agent_loop.tool_execution import ToolExecutor
@@ -85,6 +91,8 @@ _TICKER_TOOLS = {
     "analysis:run_technical_scan",
     "analysis:get_technical_overview",
 }
+
+
 def _clarification_prompt(route: RoutePlan) -> str:
     if route.escalation_reason:
         return route.escalation_reason
@@ -94,15 +102,13 @@ def _clarification_prompt(route: RoutePlan) -> str:
 
 
 def _report_repair_history(messages: list[Message]) -> list[Message]:
-    """Keep report repair input free of completed or stale tool-call turns."""
+    """Keep structured repair input free of stale tool-call turns."""
+    repair_keys = {"publication.report_repair", "publication.lookup_repair"}
     repair_instruction = next(
         (
             message
             for message in reversed(messages)
-            if message.role == "system"
-            and (
-                message.prompt_key == "publication.report_repair"
-            )
+            if message.role == "system" and message.prompt_key in repair_keys
         ),
         None,
     )
@@ -119,8 +125,7 @@ def _report_repair_history(messages: list[Message]) -> list[Message]:
     retained = [
         message
         for message in messages
-        if message.role in {"user", "system"}
-        and message.prompt_key != "publication.report_repair"
+        if message.role in {"user", "system"} and message.prompt_key not in repair_keys
     ]
     if previous_draft is not None:
         retained.append(previous_draft)
@@ -167,6 +172,7 @@ class AgentLoopConfig:
     max_report_repairs: int = 2
     report_repair_timeout_seconds: float = 120.0
     publish_reports: bool = False
+    answer_contract: Literal["auto", "lookup", "freeform"] = "auto"
     allowed_tools: frozenset[str] | None = None
     route_plan: RoutePlan | None = None
     resolved_ticker: str | None = None
@@ -189,6 +195,12 @@ class AgentLoop:
         self.config = config or AgentLoopConfig()
         self.prompt_registry = prompt_registry or PromptRegistry.bundled()
         self.skill_registry = skill_registry
+        self.last_report_result: dict[str, Any] = {
+            "status": "not_requested",
+            "draft": None,
+            "publication_status": "not_requested",
+            "reasons": [],
+        }
 
     @observe("workflow.report_generation", as_type="workflow")
     async def run(
@@ -202,6 +214,14 @@ class AgentLoop:
         message_writer: Any | None = None,
     ) -> AsyncIterator[ResearchEvent]:
         started = time.perf_counter()
+        answer_contract = self._answer_contract()
+        structured_output = answer_contract != "freeform"
+        self.last_report_result = {
+            "status": "pending" if structured_output else "not_requested",
+            "draft": None,
+            "publication_status": "pending" if structured_output else "not_requested",
+            "reasons": [],
+        }
         factory = EventFactory(conversation_id)
         approved = approved_tool_ids or set()
         history = list(messages)
@@ -215,12 +235,34 @@ class AgentLoop:
             ),
         )
         history = _add_skill_context(history, selected_skills, self.prompt_registry)
-        if self.config.publish_reports:
+        if answer_contract == "report":
             history.append(
                 Message(
                     role="system",
-                    content=self.prompt_registry.get("agent_loop.report.system"),
+                    content=self.prompt_registry.render(
+                        "agent_loop.report.system",
+                        report_schema=json.dumps(
+                            ReportDraft.model_json_schema(),
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                    ),
                     prompt_key="agent_loop.report.system",
+                )
+            )
+        elif answer_contract == "lookup":
+            history.append(
+                Message(
+                    role="system",
+                    content=self.prompt_registry.render(
+                        "agent_loop.lookup.system",
+                        lookup_schema=json.dumps(
+                            LookupAnswerV1.model_json_schema(),
+                            sort_keys=True,
+                            separators=(",", ":"),
+                        ),
+                    ),
+                    prompt_key="agent_loop.lookup.system",
                 )
             )
         tool_calls_seen = 0
@@ -236,6 +278,7 @@ class AgentLoop:
         evidence_warning_added = False
         report_parse_repair_attempts = 0
         report_validation_repair_attempts = 0
+        lookup_repair_attempts = 0
         model_generation_retry_attempts = 0
         output_review_attempts = 0
         availability_context_snapshot: str | None = None
@@ -416,7 +459,7 @@ class AgentLoop:
                         ):
                             if isinstance(item, TextDelta):
                                 streamed_text.append(item.text)
-                                if not self.config.publish_reports:
+                                if not structured_output:
                                     yield item
                             elif isinstance(
                                 item,
@@ -447,7 +490,7 @@ class AgentLoop:
                         if (
                             len(partial_text.strip()) < _PARTIAL_RESPONSE_MIN_CHARS
                             and not (provider_stream_started and evidence.facts)
-                            and not self.config.publish_reports
+                            and not structured_output
                         ):
                             raise
                         logger.warning(
@@ -465,7 +508,7 @@ class AgentLoop:
                             name="partial_provider_response",
                             content=partial_text,
                         )
-                    if assistant is None and self.config.publish_reports:
+                    if assistant is None and structured_output:
                         assistant = Message(
                             role="assistant",
                             name="partial_provider_response",
@@ -475,14 +518,16 @@ class AgentLoop:
                         raise AgentLoopError("model stream ended without a response")
                     if not assistant.tool_calls and not assistant.content.strip():
                         if (
-                            not self.config.publish_reports
+                            not structured_output
                             and model_generation_retry_attempts < 1
                         ):
                             model_generation_retry_attempts += 1
                             history.append(
                                 Message(
                                     role="system",
-                                    content=self.prompt_registry.get("agent_loop.retry.empty_answer"),
+                                    content=self.prompt_registry.get(
+                                        "agent_loop.retry.empty_answer"
+                                    ),
                                     prompt_key="agent_loop.retry.empty_answer",
                                 )
                             )
@@ -516,12 +561,17 @@ class AgentLoop:
                     history.append(assistant)
                     if (
                         not assistant.tool_calls
-                        and not self.config.publish_reports
+                        and not structured_output
                         and self.config.decision_provider
                         and hasattr(self.config.decision_provider, "review_output")
                     ):
+                        review_context = _output_review_context(
+                            history, assistant.content
+                        )
+                        review_context["run_id"] = str(factory.run_id)
+                        review_context["conversation_id"] = str(factory.conversation_id)
                         review = await self.config.decision_provider.review_output(
-                            _output_review_context(history, assistant.content)
+                            review_context
                         )
                         if review is NextAction.DENY:
                             raise AgentLoopError(
@@ -537,7 +587,9 @@ class AgentLoop:
                             history.append(
                                 Message(
                                     role="system",
-                                    content=self.prompt_registry.get("agent_loop.retry.output_review"),
+                                    content=self.prompt_registry.get(
+                                        "agent_loop.retry.output_review"
+                                    ),
                                     prompt_key="agent_loop.retry.output_review",
                                 )
                             )
@@ -551,7 +603,7 @@ class AgentLoop:
                             )
                             continue
                     if message_writer and (
-                        not self.config.publish_reports or assistant.tool_calls
+                        not structured_output or assistant.tool_calls
                     ):
                         message_writer(assistant)
                     yield factory.make(
@@ -569,10 +621,7 @@ class AgentLoop:
                         failed_tools=failed_tools,
                         successful_tools=successful_tools,
                         requires_evidence=(
-                            (
-                                self.config.publish_reports
-                                and not partial_provider_response
-                            )
+                            (structured_output and not partial_provider_response)
                             or _requires_evidence(selected_skills)
                         ),
                         successful_evidence_tools=evidence.successful_evidence_tools,
@@ -605,6 +654,76 @@ class AgentLoop:
                             evidence_availability=list(evidence.availability.values()),
                         )
                         return
+                    if answer_contract == "lookup":
+                        try:
+                            answer = parse_lookup_answer(assistant.content)
+                            self.last_report_result = {
+                                "status": "structured",
+                                "draft": answer.model_dump(mode="json"),
+                                "publication_status": "pending",
+                                "reasons": [],
+                            }
+                            published = publish_lookup_answer(
+                                answer, evidence.facts, evidence.sources
+                            )
+                            self.last_report_result["publication_status"] = "passed"
+                            if answer.outcome == "insufficient_data":
+                                status = "insufficient_data"
+                            elif answer.outcome == "partial" or any(
+                                item["status"] in {"unavailable", "degraded"}
+                                for item in evidence.availability.values()
+                            ):
+                                status = "completed_with_limited_evidence"
+                        except PublicationError as exc:
+                            self.last_report_result = {
+                                "status": "invalid",
+                                "draft": None,
+                                "publication_status": "failed",
+                                "reasons": list(exc.reasons),
+                            }
+                            if lookup_repair_attempts < self.config.max_report_repairs:
+                                lookup_repair_attempts += 1
+                                history.append(
+                                    Message(
+                                        role="system",
+                                        content=lookup_repair_instruction(
+                                            evidence.facts,
+                                            exc.reasons,
+                                            sources=evidence.sources,
+                                            prompts=self.prompt_registry,
+                                        ),
+                                        prompt_key="publication.lookup_repair",
+                                    )
+                                )
+                                continue
+                            published = (
+                                "I could not verify a safe answer from the returned "
+                                "evidence. Check the source data and try again."
+                            )
+                            status = "completed_with_limited_evidence"
+                        if message_writer:
+                            message_writer(Message(role="assistant", content=published))
+                        for offset in range(0, len(published), 64):
+                            yield factory.make(
+                                TextDelta, text=published[offset : offset + 64]
+                            )
+                        yield factory.make(
+                            RunCompleted,
+                            terminal_status=status,
+                            duration_ms=round(
+                                (time.perf_counter() - started) * 1000, 2
+                            ),
+                            evidence_status=(
+                                "limited"
+                                if any(
+                                    item["status"] in {"unavailable", "degraded"}
+                                    for item in evidence.availability.values()
+                                )
+                                else "complete"
+                            ),
+                            evidence_availability=list(evidence.availability.values()),
+                        )
+                        return
                     if self.config.publish_reports:
                         if not assistant.content.strip():
                             if model_generation_retry_attempts < 1:
@@ -612,7 +731,9 @@ class AgentLoop:
                                 history.append(
                                     Message(
                                         role="system",
-                                        content=self.prompt_registry.get("agent_loop.retry.empty_report"),
+                                        content=self.prompt_registry.get(
+                                            "agent_loop.retry.empty_report"
+                                        ),
                                         prompt_key="agent_loop.retry.empty_report",
                                     )
                                 )
@@ -621,13 +742,22 @@ class AgentLoop:
                                 "model generation returned empty report",
                                 category="model_generation",
                             )
+                        draft = None
                         try:
+                            draft = parse_report_draft(assistant.content)
+                            self.last_report_result = {
+                                "status": "structured",
+                                "draft": draft.model_dump(mode="json"),
+                                "publication_status": "pending",
+                                "reasons": [],
+                            }
                             published = publish_report(
-                                parse_report_draft(assistant.content),
+                                draft,
                                 evidence.facts,
                                 evidence.sources,
                                 evidence.availability,
                             )
+                            self.last_report_result["publication_status"] = "passed"
                             status = (
                                 "completed_with_limited_evidence"
                                 if evidence.availability
@@ -639,6 +769,12 @@ class AgentLoop:
                                 else "completed"
                             )
                         except ReportParseError as exc:
+                            self.last_report_result = {
+                                "status": "invalid",
+                                "draft": None,
+                                "publication_status": "failed",
+                                "reasons": list(exc.reasons),
+                            }
                             logger.warning(
                                 "report parsing failed run_id=%s error=%s",
                                 factory.run_id,
@@ -702,6 +838,14 @@ class AgentLoop:
                                     category="report_parse",
                                 ) from exc
                         except PublicationError as exc:
+                            self.last_report_result = {
+                                "status": "structured",
+                                "draft": draft.model_dump(mode="json")
+                                if draft
+                                else None,
+                                "publication_status": "failed",
+                                "reasons": list(exc.reasons),
+                            }
                             logger.warning(
                                 "report publication validation failed run_id=%s reasons=%s",
                                 factory.run_id,
@@ -727,6 +871,11 @@ class AgentLoop:
                                             content=report_repair_instruction(
                                                 evidence.facts,
                                                 exc.reasons,
+                                                unreferenced_fact_ids=(
+                                                    unreferenced_fact_markers(draft)
+                                                    if draft
+                                                    else ()
+                                                ),
                                                 sources=evidence.sources,
                                                 prompts=self.prompt_registry,
                                             ),
@@ -946,7 +1095,9 @@ class AgentLoop:
                         history.append(
                             Message(
                                 role="system",
-                                content=self.prompt_registry.get("agent_loop.tool.untrusted_content"),
+                                content=self.prompt_registry.get(
+                                    "agent_loop.tool.untrusted_content"
+                                ),
                                 prompt_key="agent_loop.tool.untrusted_content",
                             )
                         )
@@ -976,7 +1127,9 @@ class AgentLoop:
                             history.append(
                                 Message(
                                     role="system",
-                                    content=self.prompt_registry.get("agent_loop.tool.evidence_failure"),
+                                    content=self.prompt_registry.get(
+                                        "agent_loop.tool.evidence_failure"
+                                    ),
                                     prompt_key="agent_loop.tool.evidence_failure",
                                 )
                             )
@@ -1011,7 +1164,9 @@ class AgentLoop:
                             history.append(
                                 Message(
                                     role="system",
-                                    content=self.prompt_registry.get("agent_loop.tool.invalid_arguments"),
+                                    content=self.prompt_registry.get(
+                                        "agent_loop.tool.invalid_arguments"
+                                    ),
                                     prompt_key="agent_loop.tool.invalid_arguments",
                                 )
                             )
@@ -1082,12 +1237,17 @@ class AgentLoop:
                     and not tools_disabled
                 ):
                     try:
+                        controller_context = _controller_context(
+                            history,
+                            evidence,
+                            self._allowed_tool_names(selected_skills),
+                        )
+                        controller_context["run_id"] = str(factory.run_id)
+                        controller_context["conversation_id"] = str(
+                            factory.conversation_id
+                        )
                         controller_route = await self.config.decision_provider.decide(
-                            _controller_context(
-                                history,
-                                evidence,
-                                self._allowed_tool_names(selected_skills),
-                            )
+                            controller_context
                         )
                         yield factory.make(
                             RouteDecisionMade,
@@ -1181,7 +1341,21 @@ class AgentLoop:
     def _select_skills(self, messages: list[Message]) -> list[SkillPackage]:
         if self.skill_registry is None:
             return []
+        if self.config.route_plan is not None:
+            allowed = self.config.route_plan.allowed_skills & set(
+                self.skill_registry.ids()
+            )
+            return [self.skill_registry.get(skill_id) for skill_id in sorted(allowed)]
         return self.skill_registry.select(_last_user_query(messages))
+
+    def _answer_contract(self) -> Literal["report", "lookup", "freeform"]:
+        if self.config.publish_reports:
+            return "report"
+        return (
+            "freeform"
+            if self.config.answer_contract == "auto"
+            else self.config.answer_contract
+        )
 
     def _tool_definitions(self, skills: list[SkillPackage]) -> list[dict[str, Any]]:
         definitions = self.tool_runner.definitions()
@@ -1241,7 +1415,8 @@ class AgentLoop:
         | ProviderFailed
     ]:
         is_repair = any(
-            message.prompt_key == "publication.report_repair"
+            message.prompt_key
+            in {"publication.report_repair", "publication.lookup_repair"}
             for message in messages
         )
         streamer = ModelStreaming(
@@ -1257,6 +1432,7 @@ class AgentLoop:
             report_max_tokens=self.config.report_max_tokens,
             report_repair_max_tokens=self.config.report_repair_max_tokens,
             report_repair_timeout_seconds=self.config.report_repair_timeout_seconds,
+            structured_output=self._answer_contract() != "freeform",
         )
         request_messages = _report_repair_history(messages) if is_repair else messages
         request_messages = _compact_model_history(
@@ -1280,10 +1456,17 @@ class AgentLoop:
             ):
                 return self.config.repair_model
         repair_attempts = sum(
-            message.prompt_key == "publication.report_repair"
+            message.prompt_key
+            in {"publication.report_repair", "publication.lookup_repair"}
             for message in messages
         )
-        if self.config.publish_reports and repair_attempts >= 1:
+        if self.config.publish_reports and repair_attempts >= 2:
+            return (
+                self.config.escalation_model
+                or self.config.repair_model
+                or self.config.model
+            )
+        if self.config.publish_reports and repair_attempts == 1:
             return self.config.repair_model or self.config.model
         if repair_attempts >= 2 and self.config.escalation_model:
             return self.config.escalation_model
@@ -1467,7 +1650,9 @@ def _hydrate_tool_call_tickers(
                     )
                     value["function"] = function
                 context_hydrated_calls.append(value)
-            return assistant.model_copy(update={"tool_calls": context_hydrated_calls}), True
+            return assistant.model_copy(
+                update={"tool_calls": context_hydrated_calls}
+            ), True
     if len(explicit_tickers) != 1:
         return assistant, False
     ticker = explicit_tickers.pop()

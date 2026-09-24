@@ -139,7 +139,9 @@ def build(
         cases.append(_case(record, index + 1, category, prompts[category]))
     pair_keys = [(case["snapshot_id"], case["query"]) for case in cases]
     if len(pair_keys) != len(set(pair_keys)):
-        case_errors = [{"reason": "duplicate snapshot/query pair"}]
+        case_errors: list[dict[str, Any]] = [
+            {"reason": "duplicate snapshot/query pair"}
+        ]
     else:
         case_errors = []
     case_errors.extend([

@@ -92,6 +92,60 @@ async def test_hive_reuses_injected_client_and_retries_504_before_streaming(
 
 
 @pytest.mark.asyncio
+async def test_hive_trace_records_each_attempt_and_full_response(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FINAI_MODEL_TRACE", "full")
+    monkeypatch.setenv("FINAI_MODEL_TRACE_DIR", str(tmp_path / "traces"))
+    monkeypatch.setattr(settings, "HIVE_API_KEY", "must-not-be-written")
+    monkeypatch.setattr(settings, "HIVE_MAX_RETRIES", 1)
+    attempts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal attempts
+        attempts += 1
+        if attempts == 1:
+            return httpx.Response(504, request=request, text="temporary")
+        return httpx.Response(
+            200,
+            request=request,
+            content=b'data: {"choices":[{"delta":{"content":"ready"}}]}\n\ndata: [DONE]\n\n',
+        )
+
+    service = HiveService(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    )
+    events = [
+        event
+        async for event in service.generate_stream(
+            [Message(role="user", content="exact question")],
+            "test-model",
+            run_id="run-8",
+        )
+    ]
+
+    trace_path = next((tmp_path / "traces").glob("**/*.jsonl"))
+    raw = trace_path.read_text()
+    records = [json.loads(line) for line in raw.splitlines()]
+    request_records = [
+        record for record in records if record["event"] == "request.attempt"
+    ]
+    response_record = next(
+        record for record in records if record["event"] == "call.completed"
+    )
+    assert [record["payload"]["attempt"] for record in request_records] == [1, 2]
+    assert (
+        request_records[0]["payload"]["request_body"]["messages"][0]["content"]
+        == "exact question"
+    )
+    assert response_record["payload"]["text"] == "ready"
+    assert "must-not-be-written" not in raw
+    assert response_record["run_id"] == "run-8"
+    assert events[-1]["event"] == "provider_completed"
+    await service.aclose()
+
+
+@pytest.mark.asyncio
 async def test_hive_reports_started_stream_timeout_before_budget_exhaustion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

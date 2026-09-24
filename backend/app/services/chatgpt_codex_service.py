@@ -13,8 +13,15 @@ import webbrowser
 from collections.abc import AsyncGenerator
 from pathlib import Path
 from typing import Any
+from uuid import uuid4
 
 import httpx
+from app.core.model_call_trace import (
+    ModelCallTrace,
+    call_started,
+    capture_stream,
+    safe_endpoint,
+)
 from app.models.request_models import Message
 from app.services.llm_interface import LLMServiceInterface
 
@@ -232,6 +239,9 @@ class ChatGPTCodexService(LLMServiceInterface):
         self, messages: list[Message], model: str, reason: str, **kwargs: Any
     ) -> AsyncGenerator[dict[str, Any], None]:
         self.last_telemetry = {"provider": "chatgpt_codex", "fallback_reason": reason}
+        trace = kwargs.get("_model_call_trace")
+        if isinstance(trace, ModelCallTrace):
+            trace.write("provider.fallback", {"reason": reason})
         yield {
             "event": "provider_failed",
             "data": {
@@ -252,33 +262,69 @@ class ChatGPTCodexService(LLMServiceInterface):
         self, messages: list[Message], model: str, **kwargs: Any
     ) -> AsyncGenerator[dict[str, Any], None]:
         async def stream() -> AsyncGenerator[dict[str, Any], None]:
-            credentials = await self._credentials()
-            if credentials is None:
-                async for event in self._fallback_stream(
-                    messages, model, "ChatGPT credentials unavailable", **kwargs
-                ):
+            trace = kwargs.get("_model_call_trace")
+            owns_trace = not isinstance(trace, ModelCallTrace)
+            if owns_trace:
+                trace = ModelCallTrace.create(
+                    provider="chatgpt_codex",
+                    model=model,
+                    run_id=str(kwargs["run_id"]) if kwargs.get("run_id") else None,
+                    conversation_id=(
+                        str(kwargs["conversation_id"])
+                        if kwargs.get("conversation_id")
+                        else None
+                    ),
+                    call_id=str(kwargs.get("model_call_id") or uuid4()),
+                )
+                call_started(
+                    trace,
+                    messages=messages,
+                    tools=kwargs.get("tools"),
+                    parameters={
+                        key: kwargs.get(key)
+                        for key in ("max_tokens", "temperature", "timeout_seconds")
+                        if kwargs.get(key) is not None
+                    },
+                )
+            traced_kwargs = {**kwargs, "_model_call_trace": trace}
+            source = self._generate_stream_events(messages, model, traced_kwargs)
+            if owns_trace and isinstance(trace, ModelCallTrace):
+                async for event in capture_stream(trace, source):
                     yield event
-                return
-            stream_started = False
-            try:
-                async for event in self._stream_request(
-                    credentials, messages, model, **kwargs
-                ):
-                    stream_started = stream_started or event.get("event") in {
-                        "provider_stream_started",
-                        "token",
-                        "chunk",
-                    }
-                    yield event
-            except (ChatGPTCodexError, httpx.HTTPError, TimeoutError) as exc:
-                if stream_started:
-                    raise
-                async for event in self._fallback_stream(
-                    messages, model, str(exc), **kwargs
-                ):
+            else:
+                async for event in source:
                     yield event
 
         return stream()
+
+    async def _generate_stream_events(
+        self, messages: list[Message], model: str, kwargs: dict[str, Any]
+    ) -> AsyncGenerator[dict[str, Any], None]:
+        credentials = await self._credentials()
+        if credentials is None:
+            async for event in self._fallback_stream(
+                messages, model, "ChatGPT credentials unavailable", **kwargs
+            ):
+                yield event
+            return
+        stream_started = False
+        try:
+            async for event in self._stream_request(
+                credentials, messages, model, **kwargs
+            ):
+                stream_started = stream_started or event.get("event") in {
+                    "provider_stream_started",
+                    "token",
+                    "chunk",
+                }
+                yield event
+        except (ChatGPTCodexError, httpx.HTTPError, TimeoutError) as exc:
+            if stream_started:
+                raise
+            async for event in self._fallback_stream(
+                messages, model, str(exc), **kwargs
+            ):
+                yield event
 
     async def _stream_request(
         self,
@@ -295,6 +341,17 @@ class ChatGPTCodexService(LLMServiceInterface):
         }
         if kwargs.get("tools"):
             payload["tools"] = [_response_tool(tool) for tool in kwargs["tools"]]
+        trace = kwargs.get("_model_call_trace")
+        if isinstance(trace, ModelCallTrace):
+            trace.write(
+                "request.attempt",
+                {
+                    "attempt": 1,
+                    "provider": "chatgpt_codex",
+                    "endpoint": safe_endpoint(self.endpoint),
+                    "request_body": payload,
+                },
+            )
         headers = {
             "Authorization": f"Bearer {credentials['access_token']}",
             "Content-Type": "application/json",
@@ -308,6 +365,7 @@ class ChatGPTCodexService(LLMServiceInterface):
             "data": {"attempt": 1, "provider": "chatgpt_codex"},
         }
         started = time.perf_counter()
+        first_token_ms: float | None = None
         saw_stream = False
         current_event = ""
         tool_indexes: dict[str, int] = {}
@@ -320,6 +378,16 @@ class ChatGPTCodexService(LLMServiceInterface):
         ) as response:
             if response.status_code != 200:
                 body = (await response.aread()).decode(errors="replace")
+                trace = kwargs.get("_model_call_trace")
+                if isinstance(trace, ModelCallTrace):
+                    trace.write(
+                        "response.http_error",
+                        {
+                            "attempt": 1,
+                            "status_code": response.status_code,
+                            "body": body,
+                        },
+                    )
                 raise ChatGPTCodexError(
                     f"ChatGPT HTTP {response.status_code}: {body[:200]}"
                 )
@@ -341,6 +409,10 @@ class ChatGPTCodexService(LLMServiceInterface):
                 if current_event == "response.output_text.delta":
                     delta = data.get("delta", "")
                     if delta:
+                        if first_token_ms is None:
+                            first_token_ms = round(
+                                (time.perf_counter() - started) * 1000, 2
+                            )
                         yield {"event": "token", "data": delta}
                 elif current_event == "response.output_item.added":
                     item = data.get("item", {})
@@ -381,6 +453,7 @@ class ChatGPTCodexService(LLMServiceInterface):
                             "duration_ms": round(
                                 (time.perf_counter() - started) * 1000, 2
                             ),
+                            "first_token_ms": first_token_ms,
                             "model_id": model,
                             "usage": _normalize_usage(usage),
                         },
@@ -392,10 +465,23 @@ class ChatGPTCodexService(LLMServiceInterface):
 
     async def generate(self, messages: list[Message], model: str, **kwargs: Any) -> str:
         parts: list[str] = []
-        async for event in self.generate_stream(messages, model, **kwargs):
-            if event.get("event") == "token":
-                parts.append(str(event.get("data", "")))
-        return "".join(parts)
+
+        async def collect() -> str:
+            stream = self.generate_stream(messages, model, **kwargs)
+            try:
+                async for event in stream:
+                    if event.get("event") == "token":
+                        parts.append(str(event.get("data", "")))
+            finally:
+                await stream.aclose()
+            return "".join(parts)
+
+        try:
+            return await asyncio.wait_for(collect(), timeout=self.timeout_seconds)
+        except TimeoutError as exc:
+            raise ChatGPTCodexError(
+                "ChatGPT generation exceeded total timeout"
+            ) from exc
 
     async def generate_message(
         self, messages: list[Message], model: str, **kwargs: Any

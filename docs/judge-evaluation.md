@@ -1,7 +1,7 @@
 # Judge-only evaluation
 
 The supported semantic evaluator is the independently configured ChatGPT Codex
-model (`gpt-5.6-sol`). It is not the agent provider and has no Hive fallback.
+model (`gpt-6-luna`). It is not the agent provider and has no Hive fallback.
 The evaluator receives the case, the saved run artifact, and deterministic
 audit fields, then must return the strict schema in `evals/judge.py`.
 
@@ -9,19 +9,20 @@ audit fields, then must return the strict schema in `evals/judge.py`.
 
 ```bash
 PYTHONPATH=backend:. UV_CACHE_DIR=.uv-cache \
-  uv run python -m evals.judge preflight --model gpt-5.6-sol
+  uv run python -m evals.judge preflight --model gpt-6-luna
 
 PYTHONPATH=backend:. UV_CACHE_DIR=.uv-cache \
   uv run python -m evals.judge evaluate \
   --cases evals/gold/v1/tasks.jsonl \
   --artifacts-dir .finai/evals/artifacts \
   --output .finai/evals/judge-v1.jsonl \
-  --model gpt-5.6-sol --prompt-version judge-v1
+  --model gpt-6-luna --prompt-version judge-v1
 ```
 
 `preflight` exits non-zero when the local OAuth credential is missing. An
-evaluation exits non-zero if any case is unavailable or malformed. Those runs
-must not be reported as accuracy. A complete run prints `status:
-judge_evaluated`; only that status is eligible for a resume metric. The old
+evaluation exits non-zero unless every case is measured and judged `pass`.
+Unmeasured, malformed, insufficient-evidence, or failed judgments do not pass
+the quality gate. The summary prints `quality_gate: passed`, `failed`, or
+`incomplete`; only `passed` is eligible for final benchmark reporting. The old
 human-label files remain backward-compatible historical artifacts and are not
 used by this path.

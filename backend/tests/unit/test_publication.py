@@ -1,13 +1,20 @@
+import json
 from datetime import UTC, datetime
 
 import pytest
 from app.core.agent_loop.publication import (
     EvidenceFact,
+    LookupAnswerV1,
     PublicationError,
     ReportDraft,
+    lookup_repair_instruction,
+    parse_lookup_answer,
     parse_report_draft,
+    publish_lookup_answer,
     publish_report,
+    report_repair_instruction,
     report_validation_fallback,
+    unreferenced_fact_markers,
 )
 
 
@@ -55,6 +62,47 @@ def test_publish_report_renders_only_verified_numeric_facts() -> None:
     assert "[[fact:" not in result
 
 
+def test_report_repair_instruction_includes_verified_fact_values() -> None:
+    prompt = report_repair_instruction(_evidence(), ("numeric_fact_missing",))
+    lookup_prompt = lookup_repair_instruction(_evidence(), ("numeric_fact_missing",))
+
+    assert "price.latest = 123.4 INR" in prompt
+    assert "price.latest = 123.4 INR" in lookup_prompt
+
+
+def test_report_repair_instruction_names_unreferenced_fact_ids() -> None:
+    draft = _draft(
+        detailed_analysis="The source time is [[fact:source.observed_at]]."
+    )
+    missing = unreferenced_fact_markers(draft)
+    prompt = report_repair_instruction(
+        _evidence(),
+        ("numeric_fact_reference_missing",),
+        unreferenced_fact_ids=missing,
+    )
+
+    assert missing == ("source.observed_at",)
+    assert "Unreferenced fact IDs: source.observed_at" in prompt
+
+
+def test_parse_report_normalizes_bracketed_numeric_refs_before_publication() -> None:
+    payload = _draft().model_dump(mode="json")
+    payload["claims"][0]["numeric_refs"] = ["[[fact:price.latest]]"]
+
+    draft = parse_report_draft(json.dumps(payload))
+
+    assert draft.claims[0].numeric_refs == ["price.latest"]
+    assert "123.4 INR" in publish_report(draft, _evidence())
+
+
+def test_publish_report_requires_every_fact_marker_in_numeric_refs() -> None:
+    payload = _draft().model_dump(mode="json")
+    payload["claims"][0]["numeric_refs"] = []
+
+    with pytest.raises(PublicationError, match="numeric_fact_reference_missing"):
+        publish_report(ReportDraft.model_validate(payload), _evidence())
+
+
 def test_publish_report_formats_provider_values_by_metric() -> None:
     evidence = {
         "historical_prices:data.period_return_pct": EvidenceFact(
@@ -86,10 +134,16 @@ def test_publish_report_formats_provider_values_by_metric() -> None:
         claims=[
             {
                 "claim_id": "claim-1",
-                "text": "Return [[fact:historical_prices:data.period_return_pct]].",
+                "text": (
+                    "Return [[fact:historical_prices:data.period_return_pct]] with volume "
+                    "[[fact:historical_prices:data.Volume]]."
+                ),
                 "importance": "major",
                 "evidence_refs": ["citation-1"],
-                "numeric_refs": ["historical_prices:data.period_return_pct"],
+                "numeric_refs": [
+                    "historical_prices:data.period_return_pct",
+                    "historical_prices:data.Volume",
+                ],
             }
         ],
     )
@@ -99,6 +153,36 @@ def test_publish_report_formats_provider_values_by_metric() -> None:
     assert "-25.17%" in result
     assert "39,400,710" in result
     assert "provider_value" not in result
+
+
+def test_publish_report_renders_verified_timestamp_fact() -> None:
+    timestamp = EvidenceFact(
+        fact_id="history:data.0.timestamp",
+        value="2026-09-22T00:00:00+05:30",
+        unit="provider_timestamp",
+        source_id="source:yfinance",
+        instrument="ABC.NS",
+        observed_at=datetime(2026, 9, 23, tzinfo=UTC),
+        quality_status="verified",
+        source_url="https://example.test/history",
+    )
+    draft = _draft(
+        detailed_analysis="Observed at [[fact:history:data.0.timestamp]].",
+        claims=[
+            {
+                "claim_id": "claim-1",
+                "text": "Observed at [[fact:history:data.0.timestamp]].",
+                "importance": "major",
+                "evidence_refs": ["citation-1"],
+                "numeric_refs": ["history:data.0.timestamp"],
+            }
+        ],
+    )
+
+    result = publish_report(draft, {timestamp.fact_id: timestamp})
+
+    assert "Observed at 2026-09-22T00:00:00+05:30." in result
+    assert "[[fact:" not in result
 
 
 def test_publish_report_discloses_limited_evidence_and_price_basis() -> None:
@@ -222,6 +306,12 @@ def test_publish_report_rejects_unbound_numeric_claim() -> None:
         publish_report(draft, _evidence())
 
 
+def test_publish_report_does_not_treat_digits_in_ticker_as_unbound_numbers() -> None:
+    draft = _draft(final_view="HDFCNEXT50 has a verified observation.")
+
+    assert "HDFCNEXT50" in publish_report(draft, _evidence())
+
+
 def test_publish_report_rejects_numeric_claim_text_without_fact_marker() -> None:
     draft = _draft(
         claims=[
@@ -307,6 +397,102 @@ def test_publish_report_rejects_numeric_fact_with_unresolved_source() -> None:
 def test_parse_report_draft_rejects_non_json() -> None:
     with pytest.raises(PublicationError, match="structured_report_invalid"):
         parse_report_draft("plain text report")
+
+
+def test_parse_report_draft_rejects_fields_outside_declared_schema() -> None:
+    payload = _draft().model_dump(mode="json")
+    payload["unreviewed_field"] = "must not be silently accepted"
+
+    with pytest.raises(PublicationError, match="structured_report_invalid"):
+        parse_report_draft(json.dumps(payload))
+
+
+def test_lookup_answer_reuses_evidence_and_citation_validation() -> None:
+    answer = LookupAnswerV1.model_validate(
+        {
+            "outcome": "answered",
+            "answer": "Latest price is [[fact:price.latest]].",
+            "claims": [
+                {
+                    "claim_id": "price",
+                    "text": "Latest price is [[fact:price.latest]].",
+                    "importance": "major",
+                    "evidence_refs": ["citation-1"],
+                    "numeric_refs": ["price.latest"],
+                }
+            ],
+            "citations": [
+                {"citation_id": "citation-1", "source_id": "source:yfinance"}
+            ],
+            "limitations": [],
+        }
+    )
+
+    output = publish_lookup_answer(answer, _evidence())
+
+    assert "123.4 INR" in output
+    assert "citation-1" in output
+    assert "https://example.test/price" in output
+
+
+def test_lookup_answer_must_publish_a_claim_backed_summary() -> None:
+    answer = LookupAnswerV1.model_validate(
+        {
+            "outcome": "answered",
+            "answer": "Unsupported summary.",
+            "claims": [
+                {
+                    "claim_id": "price",
+                    "text": "Latest price is [[fact:price.latest]].",
+                    "importance": "major",
+                    "evidence_refs": ["citation-1"],
+                    "numeric_refs": ["price.latest"],
+                }
+            ],
+            "citations": [
+                {"citation_id": "citation-1", "source_id": "source:yfinance"}
+            ],
+        }
+    )
+
+    with pytest.raises(PublicationError, match="lookup_answer_not_claim_backed"):
+        publish_lookup_answer(answer, _evidence())
+
+
+def test_lookup_answer_rejects_unknown_fields_and_invalid_importance() -> None:
+    with pytest.raises(PublicationError, match="structured_report_invalid"):
+        parse_lookup_answer(
+            '{"outcome":"answered","answer":"ok",'
+            '"claims":[],"citations":[],"unknown":true}'
+        )
+    with pytest.raises(PublicationError, match="structured_report_invalid"):
+        parse_lookup_answer(
+            '{"outcome":"answered","answer":"ok",'
+            '"claims":[{"claim_id":"c","text":"ok",'
+            '"importance":"medium","evidence_refs":["src"]}],'
+            '"citations":[{"citation_id":"src","source_id":"price"}]}'
+        )
+
+    answer = LookupAnswerV1.model_validate(
+        {
+            "outcome": "answered",
+            "answer": "Latest price is 999.",
+            "claims": [
+                {
+                    "claim_id": "price",
+                    "text": "Latest price is 999.",
+                    "importance": "major",
+                    "evidence_refs": ["citation-1"],
+                    "numeric_refs": [],
+                }
+            ],
+            "citations": [
+                {"citation_id": "citation-1", "source_id": "source:yfinance"}
+            ],
+        }
+    )
+    with pytest.raises(PublicationError, match="numeric_claim_unbound"):
+        publish_lookup_answer(answer, _evidence())
 
 
 def test_report_validation_fallback_renders_evidence_and_limitations() -> None:

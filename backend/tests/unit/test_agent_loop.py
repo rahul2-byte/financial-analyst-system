@@ -370,8 +370,8 @@ def test_invalid_report_returns_verification_summary_with_source() -> None:
         config=AgentLoopConfig(
             publish_reports=True,
             model="gpt-5.6-luna",
-            repair_model="gpt-5.6-terra",
-            escalation_model="gpt-5.6-sol",
+            repair_model="gpt-5.6-luna",
+            escalation_model="gpt-6-luna",
         ),
     )
 
@@ -385,8 +385,8 @@ def test_invalid_report_returns_verification_summary_with_source() -> None:
     assert [item["model"] for item in model.request_kwargs] == [
         "gpt-5.6-luna",
         "gpt-5.6-luna",
-        "gpt-5.6-terra",
-        "gpt-5.6-terra",
+        "gpt-5.6-luna",
+        "gpt-6-luna",
     ]
 
 
@@ -1286,7 +1286,7 @@ def test_report_mode_repairs_publication_validation_once() -> None:
     assert "citation_source_missing" in model.calls[-1][-1].content
 
 
-def test_report_validation_repair_does_not_escalate_to_sol() -> None:
+def test_report_validation_uses_default_then_escalation_model() -> None:
     tool_call = {
         "index": 0,
         "id": "call-report-no-sol",
@@ -1319,9 +1319,9 @@ def test_report_validation_repair_does_not_escalate_to_sol() -> None:
                 model,
                 ReportTools(),
                 config=AgentLoopConfig(
-                    model="luna",
-                    repair_model="terra",
-                    escalation_model="sol",
+                    model="gpt-5.6-luna",
+                    repair_model="gpt-5.6-luna",
+                    escalation_model="gpt-6-luna",
                     max_report_repairs=2,
                     publish_reports=True,
                 ),
@@ -1331,12 +1331,130 @@ def test_report_validation_repair_does_not_escalate_to_sol() -> None:
     )
 
     assert [request["model"] for request in model.request_kwargs] == [
-        "luna",
-        "luna",
-        "terra",
-        "terra",
+        "gpt-5.6-luna",
+        "gpt-5.6-luna",
+        "gpt-5.6-luna",
+        "gpt-6-luna",
     ]
     assert events[-1].terminal_status == "completed_with_limited_evidence"
+
+
+def test_successful_report_retains_validated_structured_artifact() -> None:
+    tool_call = {
+        "index": 0,
+        "id": "call-report-artifact",
+        "type": "function",
+        "function": {"name": "data:fetch_stock_data", "arguments": '{"ticker":"ABC"}'},
+    }
+    report = (
+        '{"executive_summary":"Close [[fact:prices:data.latest.close]].",'
+        '"key_drivers":["Price evidence returned."],'
+        '"detailed_analysis":"Close [[fact:prices:data.latest.close]].",'
+        '"risks":["Coverage is limited."],"final_view":"Review.",'
+        '"claims":[{"claim_id":"c1",'
+        '"text":"Close [[fact:prices:data.latest.close]].",'
+        '"importance":"major","evidence_refs":["src"],'
+        '"numeric_refs":["prices:data.latest.close"]}],'
+        '"citations":[{"citation_id":"src","source_id":"prices"}]}'
+    )
+    model = FakeModel(
+        [
+            [
+                {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"tool_calls": [tool_call]}}]},
+                }
+            ],
+            [{"event": "token", "data": report}],
+        ]
+    )
+    loop = AgentLoop(model, ReportTools(), config=AgentLoopConfig(publish_reports=True))
+
+    asyncio.run(_collect(loop, [Message(role="user", content="report on ABC")]))
+
+    assert loop.last_report_result["status"] == "structured"
+    assert loop.last_report_result["draft"]["claims"][0]["claim_id"] == "c1"
+    assert loop.last_report_result["draft"]["citations"][0]["source_id"] == "prices"
+    report_prompt = next(
+        message.content
+        for message in model.calls[-1]
+        if message.prompt_key == "agent_loop.report.system"
+    )
+    assert '"importance":{"enum":["major","supporting","minor"]' in report_prompt
+
+
+def test_route_selected_skills_override_keyword_selection() -> None:
+    registry = SkillRegistry.bundled()
+    route = RoutePlan(
+        execution_mode=ExecutionMode.MODEL_ANSWER,
+        model_tier=ModelTier.MAIN,
+        allowed_skills={"technical-analysis"},
+    )
+    loop = AgentLoop(
+        FakeModel([]),
+        FakeTools(),
+        config=AgentLoopConfig(route_plan=route),
+        skill_registry=registry,
+    )
+
+    selected = loop._select_skills([Message(role="user", content="hello")])
+
+    assert [skill.manifest.id for skill in selected] == ["technical-analysis"]
+
+
+def test_lookup_contract_repairs_and_publishes_only_validated_json() -> None:
+    tool_call = {
+        "index": 0,
+        "id": "call-lookup",
+        "type": "function",
+        "function": {"name": "data:fetch_stock_data", "arguments": '{"ticker":"ABC"}'},
+    }
+    valid = (
+        '{"outcome":"answered","answer":"Close '
+        '[[fact:prices:data.latest.close]].",'
+        '"claims":[{"claim_id":"close",'
+        '"text":"Close [[fact:prices:data.latest.close]].",'
+        '"importance":"major","evidence_refs":["src"],'
+        '"numeric_refs":["prices:data.latest.close"]}],'
+        '"citations":[{"citation_id":"src","source_id":"prices"}],'
+        '"limitations":[]}'
+    )
+    model = FakeModel(
+        [
+            [
+                {
+                    "event": "chunk",
+                    "data": {"choices": [{"delta": {"tool_calls": [tool_call]}}]},
+                }
+            ],
+            [{"event": "token", "data": "not json"}],
+            [{"event": "token", "data": valid}],
+        ]
+    )
+    loop = AgentLoop(
+        model,
+        ReportTools(),
+        config=AgentLoopConfig(
+            model="gpt-5.6-luna",
+            repair_model="gpt-5.6-luna",
+            escalation_model="gpt-6-luna",
+            answer_contract="lookup",
+        ),
+    )
+
+    events = asyncio.run(_collect(loop, [Message(role="user", content="ABC price")]))
+    output = "".join(event.text for event in events if event.type == "response.delta")
+
+    assert events[-1].terminal_status == "success"
+    assert "123.4" in output
+    assert "not json" not in output
+    assert [request["model"] for request in model.request_kwargs] == [
+        "gpt-5.6-luna",
+        "gpt-5.6-luna",
+        "gpt-5.6-luna",
+    ]
+    assert model.request_kwargs[-1]["tools"] == []
+    assert loop.last_report_result["publication_status"] == "passed"
 
 
 def test_report_repair_timeout_returns_verified_evidence_fallback() -> None:

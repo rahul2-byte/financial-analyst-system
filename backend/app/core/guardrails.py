@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from datetime import date
 from typing import Any
 
 from app.models.routing import PromptInjectionRisk
@@ -93,7 +94,9 @@ def validate_tool_arguments(name: str, arguments: dict[str, Any]) -> dict[str, A
             raise ValueError("clarification question must be 1-500 characters")
         return {"question": question}
     if name == "data:fetch_market_status":
-        if set(arguments) != {"exchange"} or not isinstance(arguments.get("exchange"), str):
+        if set(arguments) != {"exchange"} or not isinstance(
+            arguments.get("exchange"), str
+        ):
             raise ValueError("market status requires only exchange")
         exchange = arguments["exchange"].strip().upper()
         if exchange not in _EXCHANGES:
@@ -102,10 +105,14 @@ def validate_tool_arguments(name: str, arguments: dict[str, Any]) -> dict[str, A
     if name == "data:fetch_market_holidays":
         if set(arguments) - {"date"} or not isinstance(arguments.get("date"), str):
             raise ValueError("market holidays requires an ISO date")
-        date = arguments["date"].strip()
-        if not _DATE.fullmatch(date):
+        iso_date = arguments["date"].strip()
+        if not _DATE.fullmatch(iso_date):
             raise ValueError("market holidays requires an ISO date")
-        return {"date": date}
+        try:
+            date.fromisoformat(iso_date)
+        except ValueError as exc:
+            raise ValueError("market holidays requires an ISO date") from exc
+        return {"date": iso_date}
     if name not in {
         "data:fetch_stock_data",
         "data:fetch_fundamentals",

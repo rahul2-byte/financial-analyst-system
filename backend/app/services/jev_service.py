@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import time
 from typing import Any
+from uuid import uuid4
 
 import httpx
 from app.core.logging import get_logger
+from app.core.model_call_trace import ModelCallTrace, safe_endpoint
 from app.core.prompts import PromptRegistry
 from app.models.routing import (
     ExecutionMode,
@@ -114,13 +117,45 @@ class JevService:
                     "instructions": self.prompts.get("jev.route.instructions"),
                     "criteria": {
                         key: self.prompts.get(f"jev.route.criteria.{key}")
-                        for key in ("tool_market", "tool_fundamentals", "tool_technical", "tool_news", "small_answer", "mid_repair", "report", "clarify", "deny")
+                        for key in (
+                            "tool_market",
+                            "tool_fundamentals",
+                            "tool_technical",
+                            "tool_news",
+                            "small_answer",
+                            "mid_repair",
+                            "report",
+                            "clarify",
+                            "deny",
+                        )
                     },
                 }
             },
         }
+        trace = ModelCallTrace.create(
+            provider="openrouter_jev",
+            model=self.model,
+            run_id=str(context["run_id"]) if context.get("run_id") else None,
+            conversation_id=(
+                str(_conversation_id(context)) if _conversation_id(context) else None
+            ),
+            call_id=str(uuid4()),
+        )
+        started = time.perf_counter()
+        if trace is not None:
+            trace.write("call.started", {"operation": "route"})
         for attempt in range(self.max_retries + 1):
+            attempt_started = time.perf_counter()
             try:
+                if trace is not None:
+                    trace.write(
+                        "request.attempt",
+                        {
+                            "attempt": attempt + 1,
+                            "endpoint": safe_endpoint(self.base_url),
+                            "request_body": payload,
+                        },
+                    )
                 response = await self._client.post(
                     self.base_url,
                     headers={
@@ -131,22 +166,129 @@ class JevService:
                     timeout=self.timeout_seconds,
                 )
                 if response.status_code in {429, 529} and attempt < self.max_retries:
+                    if trace is not None:
+                        trace.write(
+                            "request.retrying",
+                            {
+                                "attempt": attempt + 1,
+                                "attempt_duration_ms": round(
+                                    (time.perf_counter() - attempt_started) * 1000, 2
+                                ),
+                                "status_code": response.status_code,
+                                "response_body": response.text,
+                            },
+                        )
                     await asyncio.sleep(min(0.1 * (2**attempt), 0.5))
                     continue
                 response.raise_for_status()
-                return _route_from_response(response.json(), context, model=self.model)
-            except (httpx.TimeoutException, httpx.NetworkError) as exc:
+                response_payload = response.json()
+                route = _route_from_response(
+                    response_payload, context, model=self.model
+                )
+                if trace is not None:
+                    trace.write(
+                        "call.completed",
+                        {
+                            "operation": "route",
+                            "duration_ms": round(
+                                (time.perf_counter() - started) * 1000, 2
+                            ),
+                            "attempt_duration_ms": round(
+                                (time.perf_counter() - attempt_started) * 1000, 2
+                            ),
+                            "attempt": attempt + 1,
+                            "status_code": response.status_code,
+                            "response": response_payload,
+                            "route": route.model_dump(mode="json"),
+                        },
+                    )
+                return route
+            except httpx.TransportError as exc:
+                if trace is not None:
+                    trace.write(
+                        "request.failed",
+                        {
+                            "attempt": attempt + 1,
+                            "attempt_duration_ms": round(
+                                (time.perf_counter() - attempt_started) * 1000, 2
+                            ),
+                            "error_type": type(exc).__name__,
+                        },
+                    )
                 if attempt < self.max_retries:
                     continue
+                if trace is not None:
+                    trace.write(
+                        "call.failed",
+                        {
+                            "operation": "route",
+                            "duration_ms": round(
+                                (time.perf_counter() - started) * 1000, 2
+                            ),
+                            "attempt_duration_ms": round(
+                                (time.perf_counter() - attempt_started) * 1000, 2
+                            ),
+                            "attempt": attempt + 1,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        },
+                    )
                 raise JevProviderError(
                     f"Jev transport failure: {type(exc).__name__}"
                 ) from exc
             except httpx.HTTPStatusError as exc:
+                if trace is not None:
+                    trace.write(
+                        "call.failed",
+                        {
+                            "operation": "route",
+                            "duration_ms": round(
+                                (time.perf_counter() - started) * 1000, 2
+                            ),
+                            "attempt_duration_ms": round(
+                                (time.perf_counter() - attempt_started) * 1000, 2
+                            ),
+                            "attempt": attempt + 1,
+                            "status_code": exc.response.status_code,
+                            "response_body": exc.response.text,
+                            "error_type": type(exc).__name__,
+                        },
+                    )
                 raise JevProviderError(
                     f"Jev HTTP failure: {exc.response.status_code}"
                 ) from exc
             except (KeyError, TypeError, ValueError) as exc:
+                if trace is not None:
+                    trace.write(
+                        "call.failed",
+                        {
+                            "operation": "route",
+                            "duration_ms": round(
+                                (time.perf_counter() - started) * 1000, 2
+                            ),
+                            "attempt_duration_ms": round(
+                                (time.perf_counter() - attempt_started) * 1000, 2
+                            ),
+                            "attempt": attempt + 1,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        },
+                    )
                 raise JevProviderError(f"Jev response invalid: {exc}") from exc
+            except JevProviderError as exc:
+                if trace is not None:
+                    trace.write(
+                        "call.failed",
+                        {
+                            "operation": "route",
+                            "duration_ms": round(
+                                (time.perf_counter() - started) * 1000, 2
+                            ),
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        },
+                    )
+                raise
         raise JevProviderError("Jev retry budget exhausted")
 
     async def review_output(self, context: dict[str, Any]) -> NextAction:
@@ -166,27 +308,88 @@ class JevService:
                 }
             },
         }
-        response = await self._client.post(
-            self.base_url,
-            headers={
-                "Authorization": f"Bearer {self.api_key}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-            timeout=self.timeout_seconds,
+        trace = ModelCallTrace.create(
+            provider="openrouter_jev",
+            model=self.model,
+            run_id=str(context["run_id"]) if context.get("run_id") else None,
+            conversation_id=(
+                str(_conversation_id(context)) if _conversation_id(context) else None
+            ),
         )
-        response.raise_for_status()
-        choice = str(
-            response.json().get("answers", {}).get("review", {}).get("choice", "")
-        )
-        if choice == "accept":
-            return NextAction.GENERATE_TEXT
+        started = time.perf_counter()
+        attempt_started = started
+        if trace is not None:
+            trace.write("call.started", {"operation": "output_review"})
+            trace.write(
+                "request.attempt",
+                {
+                    "attempt": 1,
+                    "endpoint": safe_endpoint(self.base_url),
+                    "request_body": payload,
+                },
+            )
         try:
-            return NextAction(choice)
-        except ValueError as exc:
-            raise JevProviderError(
-                f"unknown Jev review: {choice or '<missing>'}"
-            ) from exc
+            response = await self._client.post(
+                self.base_url,
+                headers={
+                    "Authorization": f"Bearer {self.api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=self.timeout_seconds,
+            )
+            response.raise_for_status()
+            response_payload = response.json()
+            choice = str(
+                response_payload.get("answers", {}).get("review", {}).get("choice", "")
+            )
+            if choice == "accept":
+                result = NextAction.GENERATE_TEXT
+            else:
+                try:
+                    result = NextAction(choice)
+                except ValueError as exc:
+                    raise JevProviderError(
+                        f"unknown Jev review: {choice or '<missing>'}"
+                    ) from exc
+            if trace is not None:
+                trace.write(
+                    "call.completed",
+                    {
+                        "operation": "output_review",
+                        "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                        "attempt_duration_ms": round(
+                            (time.perf_counter() - attempt_started) * 1000, 2
+                        ),
+                        "attempt": 1,
+                        "status_code": response.status_code,
+                        "response": response_payload,
+                        "action": result.value,
+                    },
+                )
+            return result
+        except BaseException as exc:
+            if trace is not None:
+                trace.write(
+                    "call.failed",
+                    {
+                        "operation": "output_review",
+                        "duration_ms": round((time.perf_counter() - started) * 1000, 2),
+                        "attempt_duration_ms": round(
+                            (time.perf_counter() - attempt_started) * 1000, 2
+                        ),
+                        "attempt": 1,
+                        "status_code": getattr(
+                            getattr(exc, "response", None), "status_code", None
+                        ),
+                        "response_body": getattr(
+                            getattr(exc, "response", None), "text", None
+                        ),
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    },
+                )
+            raise
 
 
 def _minimize_context(context: dict[str, Any]) -> dict[str, Any]:
@@ -213,6 +416,13 @@ def _minimize_context(context: dict[str, Any]) -> dict[str, Any]:
         "evidence_sufficient": context.get("evidence_sufficient"),
         "output": str(context.get("output", ""))[:4000],
     }
+
+
+def _conversation_id(context: dict[str, Any]) -> Any:
+    nested = context.get("conversation_context")
+    if isinstance(nested, dict):
+        return context.get("conversation_id") or nested.get("conversation_id")
+    return context.get("conversation_id")
 
 
 def _bounded_conversation_context(value: Any) -> dict[str, Any]:

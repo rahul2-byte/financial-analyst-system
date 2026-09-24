@@ -65,15 +65,13 @@ def test_resource_builder_uses_chatgpt_as_primary_only_when_enabled(
     assert resources.llm_service.fallback.provider_name == "hive"
 
 
-def test_chatgpt_model_tiers_are_configured(monkeypatch):
+def test_chatgpt_default_and_escalation_models_are_configured(monkeypatch):
     monkeypatch.setattr(settings, "FINAI_CHATGPT_CODEX_ENABLED", True)
     monkeypatch.setattr(settings, "FINAI_CHATGPT_CODEX_PRIMARY", True)
     monkeypatch.setattr(settings, "FINAI_CHATGPT_CODEX_LUNA_MODEL", "luna-test")
-    monkeypatch.setattr(settings, "FINAI_CHATGPT_CODEX_TERRA_MODEL", "terra-test")
-    monkeypatch.setattr(settings, "FINAI_CHATGPT_CODEX_SOL_MODEL", "sol-test")
-    monkeypatch.setattr(settings, "FINAI_CHATGPT_CODEX_ASTRA_MODEL", "astra-test")
+    monkeypatch.setattr(
+        settings, "FINAI_CHATGPT_CODEX_ESCALATION_MODEL", "gpt-6-luna-test"
+    )
 
     assert settings.FINAI_CHATGPT_CODEX_LUNA_MODEL == "luna-test"
-    assert settings.FINAI_CHATGPT_CODEX_TERRA_MODEL == "terra-test"
-    assert settings.FINAI_CHATGPT_CODEX_SOL_MODEL == "sol-test"
-    assert settings.FINAI_CHATGPT_CODEX_ASTRA_MODEL == "astra-test"
+    assert settings.FINAI_CHATGPT_CODEX_ESCALATION_MODEL == "gpt-6-luna-test"

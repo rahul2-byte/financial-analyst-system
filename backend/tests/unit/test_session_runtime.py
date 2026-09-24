@@ -11,10 +11,23 @@ from finai.session_runtime import ResearchRunner, _model_for_route, _wants_repor
 
 def test_small_route_selects_luna(monkeypatch) -> None:
     monkeypatch.setattr(settings, "FINAI_CHATGPT_CODEX_LUNA_MODEL", "luna-test")
+    monkeypatch.setattr(
+        settings, "FINAI_CHATGPT_CODEX_ESCALATION_MODEL", "gpt-6-luna-test"
+    )
 
     route = RoutePlan(model_tier=ModelTier.SMALL)
+    repair = RoutePlan(
+        execution_mode=ExecutionMode.REPAIR,
+        model_tier=ModelTier.MAIN,
+    )
+    escalation = RoutePlan(
+        execution_mode=ExecutionMode.ESCALATE,
+        model_tier=ModelTier.MAIN,
+    )
 
     assert _model_for_route(route, "chatgpt_codex") == "luna-test"
+    assert _model_for_route(repair, "chatgpt_codex") == "luna-test"
+    assert _model_for_route(escalation, "chatgpt_codex") == "gpt-6-luna-test"
 
 
 def test_report_intent_accepts_polite_analysis_requests() -> None:
@@ -132,7 +145,9 @@ async def test_runner_passes_conversation_context_to_router(monkeypatch) -> None
 
 
 @pytest.mark.asyncio
-async def test_runner_resolves_bare_hdfc_bank_and_passes_ticker_context(monkeypatch) -> None:
+async def test_runner_resolves_bare_hdfc_bank_and_passes_ticker_context(
+    monkeypatch,
+) -> None:
     captured = {}
 
     class Upstox:
@@ -281,6 +296,52 @@ async def test_analysis_query_uses_report_validation(monkeypatch) -> None:
     assert configs[0].publish_reports is True
 
 
+@pytest.mark.asyncio
+async def test_single_tool_route_selects_compact_lookup_contract(monkeypatch) -> None:
+    configs = []
+
+    class Policy:
+        async def decide(self, query, **kwargs):
+            del query, kwargs
+            return RoutePlan(
+                intent="market_lookup",
+                execution_mode=ExecutionMode.MODEL_ANSWER,
+                required_tools=["data:fetch_stock_data"],
+                allowed_tools={"data:fetch_stock_data"},
+                allowed_skills={"technical-analysis"},
+                model_tier=ModelTier.MAIN,
+                confidence=0.9,
+            )
+
+    class FakeLoop:
+        def __init__(self, *args, config, **kwargs):
+            del args, kwargs
+            configs.append(config)
+
+        async def run(self, *args, **kwargs):
+            del args, kwargs
+            if False:
+                yield None
+
+    monkeypatch.setattr("finai.session_runtime.AgentLoop", FakeLoop)
+    runner = ResearchRunner(
+        RuntimeResources(
+            llm_service=object(), yf_fetcher=object(), routing_policy=Policy()
+        ),
+        "guided",
+    )
+
+    async for _event in runner.stream(
+        [Message(role="user", content="What is HDFCBANK current price?")],
+        "What is HDFCBANK current price?",
+        uuid4(),
+    ):
+        pass
+
+    assert configs[0].publish_reports is False
+    assert configs[0].answer_contract == "lookup"
+
+
 def test_runner_executes_direct_market_route_without_model_call() -> None:
     class Model:
         def generate_stream(self, *args, **kwargs):
@@ -343,7 +404,9 @@ def test_runner_executes_market_status_route_without_instrument_resolution() -> 
 
     class Upstox:
         def resolve_instrument(self, query):
-            raise AssertionError(f"status lookup must not resolve an instrument: {query}")
+            raise AssertionError(
+                f"status lookup must not resolve an instrument: {query}"
+            )
 
         def fetch_market_status(self, exchange):
             return {"exchange": exchange, "status": "NORMAL_OPEN", "last_updated": 1}

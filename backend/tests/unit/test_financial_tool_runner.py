@@ -44,18 +44,160 @@ def runner() -> tuple[FinancialToolRunner, FakeFetcher]:
 
 def test_definitions_are_the_current_finite_tool_surface() -> None:
     tool_runner, _ = runner()
-    names = {item["function"]["name"] for item in tool_runner.definitions()}
+    definitions = {
+        item["function"]["name"]: item["function"]["parameters"]
+        for item in tool_runner.definitions()
+    }
+    names = set(definitions)
     assert names == {
         "data:fetch_stock_data",
         "data:fetch_fundamentals",
         "news:fetch_news",
         "analysis:run_fundamental_scan",
         "analysis:run_technical_scan",
-            "analysis:get_technical_overview",
-            "interaction:ask_user",
-            "data:fetch_market_status",
-            "data:fetch_market_holidays",
+        "analysis:get_technical_overview",
+        "interaction:ask_user",
+        "data:fetch_market_status",
+        "data:fetch_market_holidays",
     }
+    for parameters in definitions.values():
+        assert parameters["additionalProperties"] is False
+        assert set(parameters["required"]) <= set(parameters["properties"])
+
+    stock = definitions["data:fetch_stock_data"]
+    assert stock["properties"]["ticker"]["pattern"] == r"^[A-Za-z0-9._|:-]{1,64}$"
+    assert stock["properties"]["period"]["enum"] == [
+        "1d",
+        "5d",
+        "1mo",
+        "3mo",
+        "6mo",
+        "1y",
+        "2y",
+        "5y",
+    ]
+    assert stock["properties"]["interval"]["enum"] == [
+        "1d",
+        "1wk",
+        "1h",
+        "4h",
+        "15m",
+        "5m",
+        "1m",
+    ]
+    assert stock["additionalProperties"] is False
+    news = definitions["news:fetch_news"]["properties"]["limit"]
+    assert (news["minimum"], news["maximum"]) == (1, 20)
+    assert definitions["data:fetch_market_status"]["properties"]["exchange"][
+        "enum"
+    ] == ["NSE", "BSE"]
+    assert (
+        definitions["data:fetch_market_holidays"]["properties"]["date"]["format"]
+        == "date"
+    )
+
+
+@pytest.mark.asyncio
+async def test_benchmark_evidence_is_used_without_live_provider_fallback() -> None:
+    fetcher = FakeFetcher()
+    evidence = {
+        "ABC.NS": {
+            "success": True,
+            "data": {
+                "ticker": "ABC.NS",
+                "period": "1d",
+                "interval": "1d",
+                "data": [
+                    {
+                        "timestamp": "2026-09-22T00:00:00+05:30",
+                        "open": 10,
+                        "high": 11,
+                        "low": 9,
+                        "close": 10,
+                        "volume": 100,
+                    }
+                ],
+            },
+            "provenance": {"source": "upstox", "snapshot_id": "a" * 64},
+        },
+        "JHS": {
+            "success": True,
+            "data": {
+                "ticker": "JHS",
+                "period": "1d",
+                "interval": "1d",
+                "data": [
+                    {
+                        "timestamp": "2026-09-22T00:00:00+05:30",
+                        "open": 8.54,
+                        "high": 8.88,
+                        "low": 8.2,
+                        "close": 8.25,
+                        "volume": 83247,
+                    }
+                ],
+            },
+            "provenance": {"source": "upstox", "snapshot_id": "b" * 64},
+            "requested_trading_date": "2026-09-22",
+        },
+        "J&KBANK": {
+            "success": True,
+            "data": {
+                "ticker": "J&KBANK",
+                "period": "1d",
+                "interval": "1d",
+                "data": [
+                    {
+                        "timestamp": "2026-09-22T00:00:00+05:30",
+                        "open": 145,
+                        "high": 147,
+                        "low": 144,
+                        "close": 145.94,
+                        "volume": 100,
+                    }
+                ],
+            },
+            "provenance": {"source": "upstox", "snapshot_id": "c" * 64},
+            "requested_trading_date": "2026-09-22",
+        },
+    }
+    tool_runner = FinancialToolRunner(
+        RuntimeResources(llm_service=object(), yf_fetcher=fetcher),
+        benchmark_evidence=evidence,
+    )
+
+    result = await tool_runner.execute("data:fetch_stock_data", {"ticker": "ABC.NS"})
+    alias_result = await tool_runner.execute(
+        "data:fetch_stock_data", {"ticker": "JHS.NS"}
+    )
+    unknown = await tool_runner.execute("data:fetch_stock_data", {"ticker": "OTHER.NS"})
+    wrong_exchange = await tool_runner.execute(
+        "data:fetch_stock_data", {"ticker": "JHS.BO"}
+    )
+    punctuation_alias = await tool_runner.execute(
+        "data:fetch_stock_data", {"ticker": "JKBANK"}
+    )
+
+    assert result["success"] is True
+    assert result["data"]["latest"]["close"] == 10
+    assert result["provenance"]["snapshot_id"] == "a" * 64
+    assert alias_result["success"] is True
+    assert alias_result["data"]["latest"]["close"] == 8.25
+    assert alias_result["benchmark_context"] == {
+        "requested_trading_date": "2026-09-22",
+        "date_matches": True,
+    }
+    evidence["JHS"]["requested_trading_date"] = "2026-09-21"
+    mismatched = await tool_runner.execute(
+        "data:fetch_stock_data", {"ticker": "JHS.NS"}
+    )
+    assert mismatched["benchmark_context"]["date_matches"] is False
+    assert unknown["success"] is False
+    assert "outside the benchmark" in unknown["error"]
+    assert wrong_exchange["success"] is False
+    assert punctuation_alias["success"] is True
+    assert punctuation_alias["data"]["latest"]["close"] == 145.94
+    assert fetcher.calls == []
 
 
 def test_market_status_tool_returns_provider_state_and_provenance() -> None:
@@ -82,10 +224,12 @@ def test_market_status_tool_returns_provider_state_and_provenance() -> None:
 def test_fixture_tool_result_overrides_provider_call() -> None:
     tool_runner, _ = runner()
     tool_runner.set_mocked_tools(
-        [{
-            "name": "data:fetch_stock_data",
-            "response": {"success": False, "error": "fixture timeout"},
-        }]
+        [
+            {
+                "name": "data:fetch_stock_data",
+                "response": {"success": False, "error": "fixture timeout"},
+            }
+        ]
     )
     result = asyncio.run(
         tool_runner.execute("data:fetch_stock_data", {"ticker": "ABC"})
@@ -112,8 +256,22 @@ async def test_stock_data_uses_adjusted_close_for_period_return() -> None:
                 "period": period,
                 "interval": interval,
                 "data": [
-                    {"Open": 10, "High": 11, "Low": 9, "Close": 10, "Adj Close": 5, "Volume": 100},
-                    {"Open": 11, "High": 13, "Low": 10, "Close": 12, "Adj Close": 6, "Volume": 120},
+                    {
+                        "Open": 10,
+                        "High": 11,
+                        "Low": 9,
+                        "Close": 10,
+                        "Adj Close": 5,
+                        "Volume": 100,
+                    },
+                    {
+                        "Open": 11,
+                        "High": 13,
+                        "Low": 10,
+                        "Close": 12,
+                        "Adj Close": 6,
+                        "Volume": 120,
+                    },
                 ],
             }
 

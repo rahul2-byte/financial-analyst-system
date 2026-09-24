@@ -27,6 +27,8 @@ def test_market_status_arguments_are_strict() -> None:
     assert validate_tool_arguments(
         "data:fetch_market_holidays", {"date": "2026-01-26"}
     ) == {"date": "2026-01-26"}
+    with pytest.raises(ValueError, match="ISO date"):
+        validate_tool_arguments("data:fetch_market_holidays", {"date": "2026-99-99"})
 
 
 def test_input_safety_detects_instruction_override() -> None:

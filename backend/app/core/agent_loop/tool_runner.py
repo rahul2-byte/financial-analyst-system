@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from copy import deepcopy
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any, cast
 
 import pandas as pd
@@ -12,6 +12,7 @@ from app.config import settings
 from app.core.prompts import PromptRegistry
 from app.core.research_schemas import EvidenceProvenance
 from app.core.resources import RuntimeResources
+from app.core.ticker import parse_ticker
 from app.observability.provider_archive import ProviderSnapshot
 from data.news_pipeline.models import CompanyContext
 from data.providers.upstox import UpstoxError
@@ -28,11 +29,25 @@ _TOOL_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "ticker": {"type": "string"},
-                    "period": {"type": "string"},
-                    "interval": {"type": "string"},
+                    "ticker": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z0-9._|:-]{1,64}$",
+                    },
+                    "period": {
+                        "type": "string",
+                        "enum": ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"],
+                        "default": "1y",
+                    },
+                    "interval": {
+                        "type": "string",
+                        "enum": ["1d", "1wk", "1h", "4h", "15m", "5m", "1m"],
+                        "default": "1d",
+                    },
                 },
                 "required": ["ticker"],
+                "additionalProperties": False,
             },
         },
     },
@@ -44,11 +59,25 @@ _TOOL_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "ticker": {"type": "string"},
-                    "period": {"type": "string"},
-                    "interval": {"type": "string"},
+                    "ticker": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z0-9._|:-]{1,64}$",
+                    },
+                    "period": {
+                        "type": "string",
+                        "enum": ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"],
+                        "default": "1y",
+                    },
+                    "interval": {
+                        "type": "string",
+                        "enum": ["1d", "1wk", "1h", "4h", "15m", "5m", "1m"],
+                        "default": "1d",
+                    },
                 },
                 "required": ["ticker"],
+                "additionalProperties": False,
             },
         },
     },
@@ -59,8 +88,16 @@ _TOOL_DEFINITIONS = [
             "description": "",
             "parameters": {
                 "type": "object",
-                "properties": {"ticker": {"type": "string"}},
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z0-9._|:-]{1,64}$",
+                    }
+                },
                 "required": ["ticker"],
+                "additionalProperties": False,
             },
         },
     },
@@ -72,10 +109,21 @@ _TOOL_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "ticker": {"type": "string"},
-                    "limit": {"type": "integer"},
+                    "ticker": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z0-9._|:-]{1,64}$",
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 20,
+                        "default": 10,
+                    },
                 },
                 "required": ["ticker"],
+                "additionalProperties": False,
             },
         },
     },
@@ -86,8 +134,16 @@ _TOOL_DEFINITIONS = [
             "description": "",
             "parameters": {
                 "type": "object",
-                "properties": {"ticker": {"type": "string"}},
+                "properties": {
+                    "ticker": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z0-9._|:-]{1,64}$",
+                    }
+                },
                 "required": ["ticker"],
+                "additionalProperties": False,
             },
         },
     },
@@ -99,11 +155,25 @@ _TOOL_DEFINITIONS = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "ticker": {"type": "string"},
-                    "period": {"type": "string"},
-                    "interval": {"type": "string"},
+                    "ticker": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 64,
+                        "pattern": "^[A-Za-z0-9._|:-]{1,64}$",
+                    },
+                    "period": {
+                        "type": "string",
+                        "enum": ["1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"],
+                        "default": "1y",
+                    },
+                    "interval": {
+                        "type": "string",
+                        "enum": ["1d", "1wk", "1h", "4h", "15m", "5m", "1m"],
+                        "default": "1d",
+                    },
                 },
                 "required": ["ticker"],
+                "additionalProperties": False,
             },
         },
     },
@@ -114,8 +184,11 @@ _TOOL_DEFINITIONS = [
             "description": "",
             "parameters": {
                 "type": "object",
-                "properties": {"question": {"type": "string"}},
+                "properties": {
+                    "question": {"type": "string", "minLength": 1, "maxLength": 500}
+                },
                 "required": ["question"],
+                "additionalProperties": False,
             },
         },
     },
@@ -126,8 +199,9 @@ _TOOL_DEFINITIONS = [
             "description": "",
             "parameters": {
                 "type": "object",
-                "properties": {"exchange": {"type": "string"}},
+                "properties": {"exchange": {"type": "string", "enum": ["NSE", "BSE"]}},
                 "required": ["exchange"],
+                "additionalProperties": False,
             },
         },
     },
@@ -138,8 +212,9 @@ _TOOL_DEFINITIONS = [
             "description": "",
             "parameters": {
                 "type": "object",
-                "properties": {"date": {"type": "string"}},
+                "properties": {"date": {"type": "string", "format": "date"}},
                 "required": ["date"],
+                "additionalProperties": False,
             },
         },
     },
@@ -149,8 +224,14 @@ _TOOL_DEFINITIONS = [
 class FinancialToolRunner:
     """Execute the finite set of tools supported by the current runtime."""
 
-    def __init__(self, resources: RuntimeResources) -> None:
+    def __init__(
+        self,
+        resources: RuntimeResources,
+        *,
+        benchmark_evidence: dict[str, dict[str, Any]] | None = None,
+    ) -> None:
         self.resources = resources
+        self._benchmark_evidence = benchmark_evidence or {}
         self.prompts = resources.prompts or PromptRegistry.bundled()
         self._mocked_tools: dict[str, list[Any]] = {}
         self._ohlcv_by_request: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
@@ -195,10 +276,78 @@ class FinancialToolRunner:
         fixture = self._mocked_tools.get(name)
         if fixture:
             return fixture.pop(0)
+        if name == "data:fetch_stock_data" and self._benchmark_evidence:
+            ticker = str(arguments.get("ticker", "")).strip().upper()
+            evidence = self._benchmark_evidence.get(ticker)
+            if evidence is None:
+                try:
+                    parsed_ticker = parse_ticker(ticker)
+                except ValueError:
+                    parsed_ticker = None
+                if parsed_ticker is not None and parsed_ticker.exchange_suffix != ".BO":
+                    evidence = self._benchmark_evidence.get(parsed_ticker.canonical)
+            if evidence is None:
+                ticker_alias = ticker.replace("&", "")
+                alias_matches = [
+                    item
+                    for key, item in self._benchmark_evidence.items()
+                    if key.replace("&", "") == ticker_alias
+                ]
+                if len(alias_matches) == 1:
+                    evidence = alias_matches[0]
+            if evidence is None:
+                return {
+                    "success": False,
+                    "error": "Ticker is outside the benchmark evidence manifest",
+                    "retryable": False,
+                }
+            if evidence.get("success") is False:
+                return evidence
+            value = evidence["data"]
+            rows = value["data"]
+            period = str(value.get("period", "1d"))
+            interval = str(value.get("interval", "1d"))
+            self._ohlcv_by_request[(ticker, period, interval)] = rows
+            provenance = dict(
+                value.get("provenance") or evidence.get("provenance") or {}
+            )
+            self._ohlcv_provenance_by_request[(ticker, period, interval)] = provenance
+            result = {
+                "ticker": ticker,
+                "period": period,
+                "interval": interval,
+                "row_count": len(rows),
+                "period_return_pct": (
+                    _period_return_pct(rows[0], rows[-1]) if len(rows) > 1 else None
+                ),
+                "period_return_basis": _period_return_basis(rows[0], rows[-1]),
+                "corporate_action_adjusted": _has_adjusted_close(rows[0], rows[-1]),
+                "first": rows[0],
+                "latest": rows[-1],
+                "provenance": provenance,
+            }
+            response = {"success": True, "data": result, "provenance": provenance}
+            requested_date = evidence.get("requested_trading_date")
+            if isinstance(requested_date, str):
+                target_date = date.fromisoformat(requested_date)
+                date_matches = any(
+                    isinstance(row.get("timestamp"), str)
+                    and datetime.fromisoformat(row["timestamp"]).date() == target_date
+                    for row in rows
+                    if isinstance(row, dict)
+                )
+                response["benchmark_context"] = {
+                    "requested_trading_date": requested_date,
+                    "date_matches": date_matches,
+                }
+            return response
         if name == "data:fetch_market_status":
             fetcher = self.resources.upstox_fetcher
             if fetcher is None:
-                return {"success": False, "error": "Market status provider is unavailable"}
+                return {
+                    "success": False,
+                    "error": "Market status provider is unavailable",
+                }
             try:
                 data = fetcher.fetch_market_status(str(arguments["exchange"]))
             except UpstoxError as exc:
@@ -214,7 +363,10 @@ class FinancialToolRunner:
         if name == "data:fetch_market_holidays":
             fetcher = self.resources.upstox_fetcher
             if fetcher is None:
-                return {"success": False, "error": "Market holiday provider is unavailable"}
+                return {
+                    "success": False,
+                    "error": "Market holiday provider is unavailable",
+                }
             try:
                 data = fetcher.fetch_market_holidays(str(arguments["date"]))
             except UpstoxError as exc:
@@ -846,9 +998,7 @@ def _period_return_pct(first: dict[str, Any], latest: dict[str, Any]) -> float |
     return round((latest_close / first_close - 1) * 100, 4)
 
 
-def _return_values(
-    first: dict[str, Any], latest: dict[str, Any]
-) -> tuple[Any, Any]:
+def _return_values(first: dict[str, Any], latest: dict[str, Any]) -> tuple[Any, Any]:
     adjusted_keys = ("Adj Close", "adjusted_close", "adj_close", "adjustedClose")
     for key in adjusted_keys:
         if first.get(key) is not None and latest.get(key) is not None:
@@ -867,7 +1017,9 @@ def _has_adjusted_close(first: dict[str, Any], latest: dict[str, Any]) -> bool:
 
 
 def _period_return_basis(first: dict[str, Any], latest: dict[str, Any]) -> str:
-    return "adjusted_close" if _has_adjusted_close(first, latest) else "unadjusted_close"
+    return (
+        "adjusted_close" if _has_adjusted_close(first, latest) else "unadjusted_close"
+    )
 
 
 def _period_days(period: str) -> int:

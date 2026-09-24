@@ -20,7 +20,11 @@ def validate_assertion_names(cases: list[dict[str, object]]) -> list[str]:
     errors: list[str] = []
     for case in cases:
         case_id = str(case.get("id", ""))
-        for assertion in case.get("assertions", []):
+        assertions = case.get("assertions", [])
+        if not isinstance(assertions, list):
+            errors.append(f"{case_id}: assertions must be a list")
+            continue
+        for assertion in assertions:
             if str(assertion) not in ASSERTION_NAMES:
                 errors.append(f"{case_id}: unsupported assertion {assertion}")
     return errors

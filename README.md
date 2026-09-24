@@ -54,6 +54,18 @@ Set `FINAI_OBSERVABILITY_ENABLED=true` in `.env`, run FIN-AI, then open
 Set `FINAI_TRACE_CONTENT=metadata` to omit prompt and response content.
 Phoenix is best effort: an unavailable collector never stops a research run.
 
+### Raw local model-call traces
+
+For an opt-in local diagnosis, set `FINAI_MODEL_TRACE=full`. This writes the
+exact provider request body, assembled response, and per-chunk timing to
+owner-only JSONL files under `.finai/model-traces/`; it retains full prompt,
+market evidence, and response content. Tool-created dated trace folders older
+than seven days are eligible for cleanup; unowned folders and existing directory
+permissions are preserved. Authorization headers and credential-store contents
+are excluded. Treat the trace files as sensitive and review them before sharing.
+See [`docs/model-call-tracing.md`](docs/model-call-tracing.md) for a traced pilot
+command and trace format.
+
 ## Run
 
 ```bash

@@ -100,6 +100,7 @@ class ResearchRunner:
             instrument_resolution_source=resolution_source,
             instrument_candidates=list(resolution.candidates),
         )
+        conversation_context["conversation_id"] = str(conversation_id)
         if self.routing_policy is not None:
             selected_skills = (self.resources.skills or SkillRegistry.bundled()).select(query)
             route = await self.routing_policy.decide(
@@ -255,6 +256,14 @@ class ResearchRunner:
                     content=planning_context,
                 )
             )
+        publish_reports = _wants_report(normalize_research_scope(query))
+        answer_contract = (
+            "report"
+            if publish_reports
+            else "lookup"
+            if route is not None and len(route.required_tools) == 1
+            else "freeform"
+        )
         loop_kwargs: dict[str, Any] = {
             "skill_registry": self.resources.skills or SkillRegistry.bundled(),
         }
@@ -268,12 +277,12 @@ class ResearchRunner:
                 model=_model_for_route(route, selected_provider),
                 decision_provider=self.routing_policy,
                 repair_model=(
-                    settings.FINAI_CHATGPT_CODEX_TERRA_MODEL
+                    settings.FINAI_CHATGPT_CODEX_LUNA_MODEL
                     if selected_provider == "chatgpt_codex"
                     else settings.HIVE_MODEL
                 ),
                 escalation_model=(
-                    settings.FINAI_CHATGPT_CODEX_SOL_MODEL
+                    settings.FINAI_CHATGPT_CODEX_ESCALATION_MODEL
                     if selected_provider == "chatgpt_codex"
                     else settings.HIVE_MODEL
                 ),
@@ -286,7 +295,8 @@ class ResearchRunner:
                 duplicate_reuse_limit=settings.FINAI_AGENT_DUPLICATE_REUSE_LIMIT,
                 max_report_repairs=settings.HIVE_MAX_REPORT_REPAIRS,
                 report_repair_timeout_seconds=settings.HIVE_REPAIR_TIMEOUT,
-                publish_reports=_wants_report(normalize_research_scope(query)),
+                publish_reports=publish_reports,
+                answer_contract=answer_contract,
                 allowed_tools=(
                     frozenset(route.allowed_tools) if route is not None else None
                 ),
@@ -337,9 +347,9 @@ def _model_for_route(route: RoutePlan | None, provider: str) -> str:
     if provider != "chatgpt_codex":
         return settings.HIVE_MODEL
     if route is not None and route.execution_mode is ExecutionMode.REPAIR:
-        return settings.FINAI_CHATGPT_CODEX_TERRA_MODEL
+        return settings.FINAI_CHATGPT_CODEX_LUNA_MODEL
     if route is not None and route.execution_mode is ExecutionMode.ESCALATE:
-        return settings.FINAI_CHATGPT_CODEX_SOL_MODEL
+        return settings.FINAI_CHATGPT_CODEX_ESCALATION_MODEL
     return settings.FINAI_CHATGPT_CODEX_LUNA_MODEL
 
 

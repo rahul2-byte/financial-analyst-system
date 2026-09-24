@@ -259,6 +259,50 @@ def test_jev_choice_is_mapped_to_a_validated_route() -> None:
     assert route.selected_model == "~typesafe/jev-latest"
 
 
+def test_jev_model_trace_records_request_and_response(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FINAI_MODEL_TRACE", "full")
+    monkeypatch.setenv("FINAI_MODEL_TRACE_DIR", str(tmp_path / "traces"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            json={"answers": {"route": {"choice": "tool_market"}}},
+        )
+
+    jev = JevService(
+        api_key="do-not-log-this",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    asyncio.run(
+        jev.decide(
+            {
+                "query": "price",
+                "conversation_id": "conv-1",
+                "available_tools": ["data:fetch_stock_data"],
+                "available_skills": [],
+            }
+        )
+    )
+
+    trace_path = next((tmp_path / "traces").glob("**/*.jsonl"))
+    raw = trace_path.read_text()
+    records = [json.loads(line) for line in raw.splitlines()]
+    assert any(
+        record["event"] == "request.attempt"
+        and record["payload"]["request_body"]["state"]["query"] == "price"
+        for record in records
+    )
+    completed = next(
+        record for record in records if record["event"] == "call.completed"
+    )
+    assert (
+        completed["payload"]["response"]["answers"]["route"]["choice"] == "tool_market"
+    )
+    assert completed["conversation_id"] == "conv-1"
+    assert "do-not-log-this" not in raw
+
+
 def test_jev_invalid_response_fails_closed() -> None:
     jev = JevService(
         api_key="test-key",
@@ -295,6 +339,37 @@ def test_jev_output_review_returns_bounded_action() -> None:
     )
 
     assert action is NextAction.REPAIR_OUTPUT
+
+
+def test_jev_output_review_is_included_in_model_trace(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("FINAI_MODEL_TRACE", "full")
+    monkeypatch.setenv("FINAI_MODEL_TRACE_DIR", str(tmp_path / "traces"))
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            request=request,
+            json={"answers": {"review": {"choice": "accept"}}},
+        )
+
+    jev = JevService(
+        api_key="not-in-trace",
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
+    )
+    action = asyncio.run(
+        jev.review_output(
+            {"query": "answer", "output": "draft", "run_id": "run-review"}
+        )
+    )
+
+    trace_path = next((tmp_path / "traces").glob("**/*.jsonl"))
+    records = [json.loads(line) for line in trace_path.read_text().splitlines()]
+    completed = next(
+        record for record in records if record["event"] == "call.completed"
+    )
+    assert action is NextAction.GENERATE_TEXT
+    assert completed["payload"]["operation"] == "output_review"
+    assert completed["run_id"] == "run-review"
 
 
 def test_router_context_keeps_latest_relevant_history_within_budget() -> None:

@@ -5,21 +5,32 @@ from __future__ import annotations
 import json
 import math
 import re
-from datetime import datetime
-from typing import Literal
+from datetime import date, datetime
+from typing import Annotated, Literal
 
 from app.core.observability import observe
 from app.core.prompts import PromptRegistry
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
+
+_FACT_ID_PATTERN = r"^[a-zA-Z0-9_.:-]+$"
+_FACT_MARKER = re.compile(r"\[\[fact:([a-zA-Z0-9_.:-]+)\]\]")
+FactReference = Annotated[str, Field(pattern=_FACT_ID_PATTERN)]
 
 
 class EvidenceFact(BaseModel):
-    """One numeric observation made available to a report draft."""
+    """One verified provider observation made available to a report draft."""
 
     model_config = ConfigDict(frozen=True)
 
     fact_id: str = Field(pattern=r"^[a-zA-Z0-9_.:-]+$")
-    value: int | float
+    value: int | float | str
     unit: str = Field(min_length=1)
     source_id: str = Field(min_length=1)
     instrument: str = Field(min_length=1)
@@ -29,27 +40,60 @@ class EvidenceFact(BaseModel):
 
     @field_validator("value")
     @classmethod
-    def finite_value(cls, value: float) -> int | float:
+    def finite_value(cls, value: float | str) -> int | float | str:
         if isinstance(value, float) and not math.isfinite(value):
             raise ValueError("numeric evidence must be finite")
         return value
 
+    @model_validator(mode="after")
+    def validate_provider_date(self) -> EvidenceFact:
+        if isinstance(self.value, str):
+            if self.unit == "provider_date":
+                date.fromisoformat(self.value)
+            elif self.unit == "provider_timestamp":
+                datetime.fromisoformat(self.value)
+            else:
+                raise ValueError("text evidence must be an ISO date or timestamp")
+        return self
+
 
 class ReportCitation(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     citation_id: str = Field(min_length=1)
     source_id: str = Field(min_length=1)
 
 
 class ReportClaim(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     claim_id: str = Field(min_length=1)
     text: str = Field(min_length=1, max_length=5000)
     importance: Literal["major", "supporting", "minor"]
     evidence_refs: list[str] = Field(default_factory=list)
-    numeric_refs: list[str] = Field(default_factory=list)
+    numeric_refs: list[FactReference] = Field(
+        default_factory=list,
+        description="Bare fact IDs, without the [[fact:...]] marker wrappers.",
+    )
+
+    @field_validator("numeric_refs", mode="before")
+    @classmethod
+    def normalize_fact_marker_refs(cls, value: object) -> object:
+        if not isinstance(value, list):
+            return value
+        normalized: list[object] = []
+        for fact_id in value:
+            marker = (
+                _FACT_MARKER.fullmatch(fact_id) if isinstance(fact_id, str) else None
+            )
+            normalized.append(marker.group(1) if marker else fact_id)
+        return normalized
 
 
 class ReportDraft(BaseModel):
     """The only model output accepted as a publishable research report."""
+
+    model_config = ConfigDict(extra="forbid")
 
     executive_summary: str = Field(min_length=1, max_length=10000)
     key_drivers: list[str] = Field(min_length=1, max_length=20)
@@ -58,6 +102,24 @@ class ReportDraft(BaseModel):
     final_view: str = Field(min_length=1, max_length=10000)
     claims: list[ReportClaim] = Field(min_length=1, max_length=100)
     citations: list[ReportCitation] = Field(default_factory=list, max_length=200)
+
+
+class LookupAnswerV1(BaseModel):
+    """Compact output contract for a response grounded in one tool result."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    outcome: Literal["answered", "partial", "insufficient_data"]
+    answer: str = Field(min_length=1, max_length=10000)
+    claims: list[ReportClaim] = Field(default_factory=list, max_length=50)
+    citations: list[ReportCitation] = Field(default_factory=list, max_length=50)
+    limitations: list[str] = Field(default_factory=list, max_length=10)
+
+    @model_validator(mode="after")
+    def supported_outcomes_require_claims(self) -> LookupAnswerV1:
+        if self.outcome != "insufficient_data" and not self.claims:
+            raise ValueError("answered lookup requires at least one claim")
+        return self
 
 
 class ResearchAnswerV2(ReportDraft):
@@ -82,8 +144,7 @@ class ReportParseError(PublicationError):
         super().__init__(["structured_report_invalid", detail])
 
 
-_FACT_MARKER = re.compile(r"\[\[fact:([a-zA-Z0-9_.:-]+)\]\]")
-_NUMBER = re.compile(r"(?<![A-Za-z])[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:%|\b)")
+_NUMBER = re.compile(r"(?<![A-Za-z0-9])[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:%|\b)")
 _UNSAFE_GUARANTEE = re.compile(
     r"\b(?:guaranteed?\s+(?:return|profit|gain)|cannot\s+lose|risk[- ]free)\b",
     re.IGNORECASE,
@@ -98,6 +159,117 @@ def parse_report_draft(text: str) -> ResearchAnswerV2:
         return ResearchAnswerV2.model_validate(value)
     except (json.JSONDecodeError, TypeError, ValidationError) as exc:
         raise ReportParseError(str(exc)) from exc
+
+
+def parse_lookup_answer(text: str) -> LookupAnswerV1:
+    try:
+        return LookupAnswerV1.model_validate_json(text)
+    except (ValueError, ValidationError) as exc:
+        raise ReportParseError(str(exc)) from exc
+
+
+def unreferenced_fact_markers(draft: ReportDraft) -> tuple[str, ...]:
+    all_text = "\n".join(
+        [
+            draft.executive_summary,
+            *draft.key_drivers,
+            draft.detailed_analysis,
+            *draft.risks,
+            draft.final_view,
+            *(claim.text for claim in draft.claims),
+        ]
+    )
+    referenced = {fact_id for claim in draft.claims for fact_id in claim.numeric_refs}
+    return tuple(sorted(set(_FACT_MARKER.findall(all_text)) - referenced))
+
+
+def publish_lookup_answer(
+    answer: LookupAnswerV1,
+    evidence: dict[str, EvidenceFact],
+    sources: dict[str, dict[str, str]] | None = None,
+) -> str:
+    """Fail closed unless each lookup claim and number maps to returned evidence."""
+    citation_ids = {citation.citation_id for citation in answer.citations}
+    source_records: dict[str, EvidenceFact | dict[str, str]] = {
+        key: value for key, value in _source_records(evidence).items()
+    }
+    source_records.update(sources or {})
+    citation_sources = {item.citation_id: item.source_id for item in answer.citations}
+    reasons: list[str] = []
+    if len(citation_ids) != len(answer.citations):
+        reasons.append("duplicate_citation_id")
+    if len({claim.claim_id for claim in answer.claims}) != len(answer.claims):
+        reasons.append("duplicate_claim_id")
+    for citation in answer.citations:
+        source = source_records.get(citation.source_id)
+        if source is None:
+            reasons.append("citation_source_missing")
+        elif not _source_url(source):
+            reasons.append("citation_source_url_missing")
+    all_text = "\n".join(
+        [answer.answer, *answer.limitations, *(claim.text for claim in answer.claims)]
+    )
+    if _UNSAFE_GUARANTEE.search(all_text):
+        reasons.append("unsafe_guarantee_claim")
+    if answer.outcome != "insufficient_data" and answer.answer not in {
+        claim.text for claim in answer.claims
+    }:
+        reasons.append("lookup_answer_not_claim_backed")
+    for claim in answer.claims:
+        claim_markers = set(_FACT_MARKER.findall(claim.text))
+        if not claim.evidence_refs:
+            reasons.append("claim_unsupported")
+        if any(ref not in citation_ids for ref in claim.evidence_refs):
+            reasons.append("claim_citation_missing")
+        supported_sources = {
+            citation_sources[ref]
+            for ref in claim.evidence_refs
+            if ref in citation_sources
+        }
+        for fact_id in claim.numeric_refs:
+            fact = evidence.get(fact_id)
+            if fact is None:
+                reasons.append("numeric_fact_missing")
+            elif fact_id not in claim_markers:
+                reasons.append("numeric_fact_not_rendered")
+            elif fact.source_id not in supported_sources:
+                reasons.append("numeric_fact_source_missing")
+    marker_ids = set(_FACT_MARKER.findall(all_text))
+    claimed_numeric_refs = {
+        fact_id for claim in answer.claims for fact_id in claim.numeric_refs
+    }
+    if marker_ids - claimed_numeric_refs:
+        reasons.append("numeric_fact_reference_missing")
+    if any(fact_id not in evidence for fact_id in marker_ids):
+        reasons.append("numeric_fact_missing")
+    if _NUMBER.findall(_FACT_MARKER.sub("", all_text)):
+        reasons.append("numeric_claim_unbound")
+    if reasons:
+        raise PublicationError(reasons)
+
+    def replace(text: str) -> str:
+        return _FACT_MARKER.sub(
+            lambda match: _format_fact_value(evidence[match.group(1)]), text
+        )
+
+    sections = ["## Answer", replace(answer.answer), "\n## Evidence"]
+    sections.extend(
+        f"- {replace(claim.text)} [citations: {', '.join(claim.evidence_refs)}]"
+        for claim in answer.claims
+    )
+    if answer.limitations:
+        sections.extend(
+            ["\n## Limitations", *[f"- {replace(item)}" for item in answer.limitations]]
+        )
+    cited_source_ids = {citation.source_id for citation in answer.citations}
+    source_lines = [
+        f"- {_source_display(source_records[source_id])}"
+        for source_id in sorted(cited_source_ids)
+        if source_id in source_records
+    ]
+    if source_lines:
+        sections.extend(["\n## Sources", *source_lines])
+    return "\n".join(sections)
 
 
 @observe("report.publish", as_type="publication")
@@ -139,6 +311,11 @@ def publish_report(
         ]
     )
     marker_ids = set(_FACT_MARKER.findall(all_text))
+    claimed_numeric_refs = {
+        fact_id for claim in draft.claims for fact_id in claim.numeric_refs
+    }
+    if marker_ids - claimed_numeric_refs:
+        reasons.append("numeric_fact_reference_missing")
     if _UNSAFE_GUARANTEE.search(all_text):
         reasons.append("unsafe_guarantee_claim")
     for claim in draft.claims:
@@ -189,6 +366,8 @@ _REASON_TEXT = {
     "major_claim_unsupported": "A main conclusion lacked cited evidence.",
     "numeric_claim_unbound": "A number was not linked to verified data.",
     "numeric_fact_missing": "A cited number was absent from verified data.",
+    "numeric_fact_reference_missing": "A fact marker was not linked to a claim's numeric references.",
+    "lookup_answer_not_claim_backed": "The lookup summary did not match a cited claim.",
     "numeric_fact_source_missing": "A cited number did not resolve to a cited source.",
     "citation_source_missing": "A citation did not match a verified source.",
     "citation_source_url_missing": "A citation source did not provide a URL.",
@@ -288,12 +467,21 @@ def report_repair_instruction(
     reasons: tuple[str, ...],
     *,
     parse_error: str | None = None,
+    unreferenced_fact_ids: tuple[str, ...] = (),
     sources: dict[str, dict[str, str]] | None = None,
     prompts: PromptRegistry | None = None,
 ) -> str:
     """Return one bounded correction request after a report-format failure."""
-    facts = list(evidence.values())[:80]
-    fact_catalog = ", ".join(fact.fact_id for fact in facts) or "none"
+    selected_ids = set(unreferenced_fact_ids)
+    facts = [
+        fact
+        for fact in evidence.values()
+        if not selected_ids or fact.fact_id in selected_ids
+    ][:80]
+    fact_catalog = (
+        "; ".join(f"{fact.fact_id} = {fact.value} {fact.unit}" for fact in facts)
+        or "none"
+    )
     source_ids = {fact.source_id for fact in facts}
     source_ids.update(sources or {})
     source_list = ", ".join(sorted(source_ids)) or "none"
@@ -306,6 +494,34 @@ def report_repair_instruction(
         parse_error_detail=detail,
         fact_catalog=fact_catalog,
         source_list=source_list,
+        unreferenced_fact_ids=", ".join(unreferenced_fact_ids) or "none",
+    )
+
+
+def lookup_repair_instruction(
+    evidence: dict[str, EvidenceFact],
+    reasons: tuple[str, ...],
+    *,
+    sources: dict[str, dict[str, str]] | None = None,
+    prompts: PromptRegistry | None = None,
+) -> str:
+    fact_catalog = (
+        "; ".join(
+            f"{fact.fact_id} = {fact.value} {fact.unit}"
+            for fact in list(evidence.values())[:80]
+        )
+        or "none"
+    )
+    source_ids = {fact.source_id for fact in evidence.values()}
+    source_ids.update(sources or {})
+    return (prompts or PromptRegistry.bundled()).render(
+        "agent_loop.lookup.repair",
+        lookup_schema=json.dumps(
+            LookupAnswerV1.model_json_schema(), sort_keys=True, separators=(",", ":")
+        ),
+        reasons=", ".join(reasons),
+        fact_catalog=fact_catalog,
+        source_list=", ".join(sorted(source_ids)) or "none",
     )
 
 
@@ -408,6 +624,8 @@ def _render(
 
 def _format_fact_value(fact: EvidenceFact) -> str:
     """Render provider values with metric-specific presentation semantics."""
+    if fact.unit in {"provider_date", "provider_timestamp"}:
+        return str(fact.value)
     if fact.unit != "provider_value":
         return f"{fact.value} {fact.unit}"
     field = fact.fact_id.rsplit(".", 1)[-1].lower()

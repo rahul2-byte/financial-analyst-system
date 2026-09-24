@@ -52,10 +52,7 @@ class EnvSettings(BaseSettings):
         "https://chatgpt.com/backend-api/codex/responses"
     )
     FINAI_CHATGPT_CODEX_LUNA_MODEL: str = "gpt-5.6-luna"
-    FINAI_CHATGPT_CODEX_TERRA_MODEL: str = "gpt-5.6-terra"
-    FINAI_CHATGPT_CODEX_SOL_MODEL: str = "gpt-5.6-sol"
-    FINAI_CHATGPT_CODEX_ASTRA_MODEL: str = "gpt-6-astra"
-    FINAI_CHATGPT_CODEX_ASTRA_ENABLED: bool = False
+    FINAI_CHATGPT_CODEX_ESCALATION_MODEL: str = "gpt-6-luna"
     FINAI_CHATGPT_CODEX_REDIRECT_HOST: str = "localhost"
     FINAI_CHATGPT_CODEX_REDIRECT_PORT: int = 1455
     FINAI_CHATGPT_CODEX_TIMEOUT_SECONDS: float = 60.0
@@ -94,6 +91,8 @@ class EnvSettings(BaseSettings):
     FINAI_TRACE_CONTENT: str = "redacted_full"
     FINAI_TRACE_MAX_CONTENT_BYTES: int = 1_000_000
     FINAI_TRACE_SAMPLE_RATE: float = 1.0
+    FINAI_MODEL_TRACE: str = "off"
+    FINAI_MODEL_TRACE_DIR: str = ".finai/model-traces"
 
     model_config = SettingsConfigDict(
         env_file=(_REPOSITORY_ENV, ".env"),
