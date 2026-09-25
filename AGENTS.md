@@ -1,158 +1,42 @@
-# AGENT ORIENTATION & COMPLIANCE PROTOCOL
+# Repository agent guidance
 
-## 1. System Identity & Mission
-You are an agent operating within **FIN-AI**, a production-grade Financial Intelligence Platform.
-- **Goal:** Deliver deterministic data processing and synthesis-driven investment research.
-- **Mission:** Bridge raw data and reasoning while maintaining absolute integrity.
+FIN-AI is a CLI-first financial research system. Keep deterministic market calculations in Python and keep LLM synthesis grounded in provider evidence. The system does not place orders.
 
-**CRITICAL MANDATE:** LLMs must **NEVER** perform mathematical computations, financial ratio calculations, or time-series forecasting. All quantitative logic must be implemented in Python within the `backend/` directory.
+## Repository boundaries
 
----
+- `backend/finai/`: CLI, Textual UI, rendering, sessions, and local persistence.
+- `backend/app/`: configuration, routing, bounded AgentLoop, providers, events, security, and observability.
+- `backend/data/`: YFinance, optional Upstox, and the TinyFish news pipeline.
+- `backend/quant/`: deterministic fundamental and technical analysis.
+- `backend/experiments/`: separate offline feature/signal/simulation runtime.
+- `backend/skills/`: validated runtime skill packages.
+- `evals/`: synthetic, replay, live, adversarial, and judge evaluation tooling.
+- `docs/`: maintained system and operational documentation.
 
-## 2. Repository Architecture
-- **`backend/`**: FastAPI (3.11+), Quant Engine, Multi-agent Orchestration, and CLI runtime.
-  - `agents/`: Single-responsibility agents (Fundamental, Technical, Risk, etc.).
-  - `quant/`: Deterministic logic for financial indicators and scanners.
-  - `app/`: Core services, the health route, and Pydantic config.
-  - `.finai/`: Local run artifacts; provider results remain in current graph state.
-- **`AGENTS.md`**: Repository engineering and compliance guidance.
+The current runtime is CLI-first. FastAPI exposes root and health routes only; it is not a research API or SSE gateway.
 
----
+## Engineering rules
 
-## 3. Operational Commands
+- Do not move ratios, indicators, forecasts, or other financial calculations into prompts or model code.
+- Keep external access behind provider/service adapters and registered tools.
+- Validate and normalize provider data before passing it to synthesis; preserve provenance.
+- Use Pydantic v2 for external schemas and settings.
+- Load LLM-facing instructions through `PromptRegistry` and validate skill manifests.
+- Do not commit secrets or credentials. Treat local `.finai/` artifacts and full traces as sensitive.
+- Prefer the smallest coherent change and avoid speculative abstractions.
+- Add tests for new behavior and preserve fail-closed behavior for unsupported evidence.
 
-### Environment & Dependencies
-- **Backend:** `uv sync`
+## Local commands
 
-### Running Tests
-- **Backend (Pytest):**
-  - Full suite: `uv run pytest backend/tests`
-  - Single File: `uv run pytest backend/tests/quant/test_sector_risk.py`
-  - Single Test: `uv run pytest backend/tests/quant/test_sector_risk.py::test_calculation`
+```bash
+uv sync
+uv run ruff check backend evals
+uv run mypy backend
+uv run pytest backend/tests --no-cov
+uv run pytest backend/tests --cov=backend --cov-report=term-missing --cov-fail-under=70
+PYTHONPATH=backend uv run python -m finai --help
+PYTHONPATH=backend uv run python -m experiments --help
+PYTHONPATH=. uv run python -m evals.validate
+```
 
-### Linting & Formatting
-- **Backend (Ruff):** `uv run ruff check backend/` and `uv run ruff format backend/`
-- **Backend (Types):** `uv run mypy backend/`
-
----
-
-## 4. Module-Centric Reference
-
-### A. Orchestration (The Engine)
-- **Primary Class:** `AgentLoop` (`backend/app/core/agent_loop/runtime.py`)
-- **Execution:** CLI and HTTP construct the same bounded model/tool loop through `ResearchRunner` or the HTTP route.
-- **Tool Boundary:** `FinancialToolRunner` fetches provider evidence and invokes deterministic fundamental and technical scanners.
-- **Output:** The loop emits typed `ResearchEvent` values for terminal rendering, SSE, and local session artifacts.
-
-### B. Runtime Development Protocol
-- Keep provider access and deterministic calculation behind registered tools.
-- Ground synthesis in tool evidence; LLMs do not calculate ratios, indicators, or forecasts.
-- Emit `ResearchEvent` progress and terminal events instead of mutating presentation state.
-
-### C. Data Pipeline (The Source)
-- **Interfaces:** Providers expose fetch methods; the AgentLoop run state is the boundary.
-- **Flow:** Fetch -> Validate -> Normalize -> Pass to the tool result -> Write local artifact.
-- **Normalization:** SI Units, ISO Currencies (no local currency scaling in logic).
-- **Integrity:** No sentiment analysis or LLM logic inside the raw data pipeline.
-
----
-
-## 5. Coding Standards & Style Guidelines
-
-### Python (Backend)
-- **Version:** Python 3.11+ (Strict typing mandatory).
-- **Imports:** Use **absolute imports** relative to `backend/` (e.g., `from app.core.logging import logger`).
-- **Validation:** Use **Pydantic v2** for all schemas, API models, and settings.
-- **Math/Quant:** Use NumPy or Pandas for vectorization. **No Python loops** for quantitative logic.
-- **Style:** PEP8 compliant, no global state, no magic numbers, no circular imports.
-- **Architecture:** Dependency Injection and interface-based design. Configuration via environment.
-- **Logging:** Structured logging with execution time tracking and error categorization.
-- **Testing:** Unit tests required for all new logic. Edge case handling is mandatory.
-
----
-
-## 6. Integrity Rules (Constitution)
-- **Rule #1**: LLM reasoning != Computation. Keep them strictly separate.
-- **Rule #2**: All data sources must define: **Fetch, Validate, Normalize, Store**.
-- **Rule #3**: No architectural drift. Check the repository architecture and existing implementation before changing patterns.
-- **Rule #4**: No secrets in source. Use `.env` and `app.config.settings`.
-- **Rule #5**: All data used for investment theses must be verified and deterministic.
-- **Rule #6**: Market data must be normalized to standard SI units and ISO currency codes.
-- **Rule #7**: One agent = One responsibility. No modular overlapping.
-- **Rule #8**: All investment reasoning must be grounded in verified quantitative data points.
-
----
-
-## 7. Data Pipeline & Infrastructure
-- **Pipeline Integrity:** No sentiment analysis or LLM logic allowed inside the raw data pipeline.
-- **Sources:** Explicitly defined modules for News, Market Data, and Filings.
-- **Flow:** Every data point must be Validated and Normalized before Storage.
-- **Logs:** All pipeline steps must log execution time and source attribution for audit trails.
-- **Inference:** Uses Hive's OpenAI-compatible GLM-5.3-Flash API.
-- **Observability:** Uses local run metrics and artifact metadata without a telemetry SDK.
-
----
-
-## 8. Development Boot Sequence
-Before submitting any code changes, agents must:
-1. **Load Context**: Read this file and the relevant repository source, tests, configuration, and architecture references.
-2. **Verify Patterns**: Use `glob`/`grep` to find existing implementations of similar logic.
-3. **Plan & Summarize**: Summarize current task and identify impacted modules before writing code.
-4. **TDD**: Write unit tests for new quant logic or tools BEFORE implementation.
-5. **Self-Verify**: Ensure the backend test and lint checks pass.
-6. **Commit Message**: Use semantic prefixes (e.g., `feat(quant):`, `fix(agent):`).
-7. **Compliance Check**: Confirm changes align with system boundaries and LLM limitations.
-
----
-
-## 9. Behavioral & Philosophical Guidelines
-These rules represent the core interaction principles for all agents and MUST be followed at all times.
-
-### A. Think Before Coding
-**Don't assume. Don't hide confusion. Surface tradeoffs.**
-- State assumptions explicitly. If uncertain, ask.
-- If multiple interpretations exist, present them - don't pick silently.
-- If a simpler approach exists, say so. Push back when warranted.
-- If something is unclear, stop. Name what's confusing. Ask.
-
-### B. Simplicity First
-**Minimum code that solves the problem. Nothing speculative.**
-- No features beyond what was asked.
-- No abstractions for single-use code.
-- No "flexibility" or "configurability" that wasn't requested.
-- No error handling for impossible scenarios.
-- If you write 200 lines and it could be 50, rewrite it.
-- Ask: "Would a senior engineer say this is overcomplicated?" If yes, simplify.
-
-### C. Surgical Changes
-**Touch only what you must. Clean up only your own mess.**
-- Don't "improve" adjacent code, comments, or formatting.
-- Don't refactor things that aren't broken.
-- Match existing style, even if you'd do it differently.
-- Remove imports/variables/functions that YOUR changes made unused.
-- Don't remove pre-existing dead code unless asked.
-
-### D. Goal-Driven Execution
-**Define success criteria. Loop until verified.**
-- Transform tasks into verifiable goals (e.g., "Add validation" -> "Write tests for invalid inputs, then make them pass").
-- For multi-step tasks, state a brief plan:
-  1. [Step] → verify: [check]
-  2. [Step] → verify: [check]
-  3. [Step] → verify: [check]
-- Strong success criteria enable independent looping.
-
-**End of Protocol.**
-
-## Agent skills
-
-### Issue tracker
-
-Issues and specs live in GitHub Issues; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
-
-### Triage labels
-
-Use the default labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
-
-### Domain docs
-
-This is a single-context repo using root `CONTEXT.md` and `docs/adr/`. See `docs/agents/domain.md`.
+For setup, runtime flow, configuration, deployment reality, and evaluation limitations, use [`README.md`](README.md) and [`docs/`](docs/). Issue operations and triage labels are in [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md).

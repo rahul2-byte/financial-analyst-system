@@ -1,34 +1,68 @@
 # FIN-AI
 
-FIN-AI is a CLI-first, human-in-the-loop financial research workflow for NSE/BSE equities. It combines deterministic Python quant analysis with Hive GLM-5.3-Flash, YFinance market data, TinyFish web search, source extraction, citation checks, counter-thesis review, and fail-closed validation.
+FIN-AI is a CLI-first research assistant for NSE/BSE equities. It combines live market and news providers with deterministic Python calculations and a bounded LLM/tool loop. It produces inspectable research artifacts; it does not place orders or provide personalised investment advice.
 
-It produces research artifacts for review. It does not place trades, provide personalized advice, or make trading recommendations.
+## What it does
 
-Offline experiment and shadow-evaluation components live separately under
-`backend/experiments/`. They use frozen, hashed datasets, causal features,
-chronological out-of-sample splits, explicit transaction costs, and
-hypothetical fills only; they never place orders or alter the research CLI.
-Their command-line usage is documented in the package module help and covered
-by the offline experiment tests.
+A research request can resolve an instrument, fetch market/fundamental/news evidence, run deterministic fundamental or technical analysis, and synthesize a cited answer or structured report. Direct lookups such as price, market status, and holidays can bypass model generation. Ambiguous instruments are paused for clarification rather than guessed.
 
-## Architecture
+The runtime has two separate surfaces:
 
-```text
-CLI / FastAPI
-     |
-  AgentLoop ──► model stream + skill selection + registered tools
-     |                         |
-     |              providers / financial agents / deterministic quant
-     |
-  ResearchEvent stream ──► TUI or HTTP SSE
-     |
-  SessionStore ──► transcript, checkpoints, trace, run artifacts
+- **CLI:** the supported research interface, with Textual, plain, and JSON output modes.
+- **FastAPI:** a small HTTP application currently exposing only `/` and `/api/health`; it is not an HTTP research API or SSE gateway.
+
+The repository also contains an independent offline experiment package under [`backend/experiments/`](backend/experiments/) and an evaluation harness under [`evals/`](evals/). Neither changes the CLI research path.
+
+## Architecture at a glance
+
+```mermaid
+flowchart LR
+    U[CLI user] --> S[FinAIRepl]
+    S --> R[ResearchRunner]
+    R --> P[RoutingPolicy]
+    P --> J[Jev optional router]
+    R --> L[AgentLoop]
+    L --> M[Hive streaming model]
+    L --> T[FinancialToolRunner]
+    T --> Y[YFinance]
+    T --> Q[Upstox optional]
+    T --> N[TinyFish news pipeline]
+    T --> D[Deterministic quant tools]
+    L --> E[Typed ResearchEvent stream]
+    E --> V[Textual/plain/JSON renderer]
+    S --> F[Local session files]
+    T --> A[Content-addressed provider archive]
 ```
 
-AgentLoop is the shared runtime used by both CLI and HTTP. Model streaming, tool execution, evidence accounting, and terminal-state decisions are separate runtime components. Provider snapshots are content-addressed under `.finai/provider-snapshots/`; the CLI can replay a complete archived model/data run without constructing live providers. The interactive UI is Textual + Rich over asyncio; one-shot/plain output remains available for automation. There is no Docker, PostgreSQL, vector database, embedding model, or local inference server. Phoenix tracing is optional and disabled by default.
+The detailed call flow, state ownership, persistence layout, and failure behavior are in [`docs/architecture.md`](docs/architecture.md). Configuration is in [`docs/configuration.md`](docs/configuration.md), and tracing is in [`docs/observability.md`](docs/observability.md).
 
-LLM-facing instructions are centralized and validated through the YAML-backed
-`PromptRegistry`; see [`docs/prompt-management.md`](docs/prompt-management.md).
+## Technology
+
+- Python 3.11-3.14, managed with `uv`
+- FastAPI and Uvicorn for the health application
+- Textual and Rich for the terminal UI
+- HTTPX for provider calls
+- Pydantic v2 and `pydantic-settings` for schemas and configuration
+- NumPy, Pandas, TA-Lib, and pandas-ta-classic for deterministic analysis
+- YFinance, optional Upstox, and TinyFish
+- Optional OpenTelemetry/Phoenix tracing
+
+There is no Dockerfile, deployment manifest, PostgreSQL, Redis, vector database, embedding service, scheduled worker, or local inference server in this repository.
+
+## Repository layout
+
+| Path | Responsibility |
+| --- | --- |
+| `backend/finai/` | CLI, Textual UI, rendering, sessions, local persistence |
+| `backend/app/core/agent_loop/` | Bounded model/tool orchestration and publication validation |
+| `backend/app/services/` | Hive, Jev, and optional ChatGPT Codex provider clients |
+| `backend/data/` | YFinance/Upstox adapters and the news search/extraction pipeline |
+| `backend/quant/` | Deterministic fundamental and technical calculations |
+| `backend/experiments/` | Separate offline feature, signal, simulation, and validation runtime |
+| `backend/skills/` | Reviewed skill packages selected from query terms |
+| `evals/` | Synthetic, replay, live benchmark, adversarial, and judge tooling |
+| `backend/tests/` | Unit and integration regression tests |
+| `docs/` | System, configuration, operations, and evaluation documentation |
 
 ## Setup
 
@@ -37,77 +71,98 @@ uv sync
 cp .env.example .env
 ```
 
-Set `OPENROUTER_API_KEY`, `HIVE_API_KEY`, and `TINYFISH_API_KEY` in `.env`. OpenRouter Jev makes typed routing decisions; Hive GLM-5.3-Flash performs model generation by default. FIN-AI also contains an experimental, opt-in OpenCode-style ChatGPT OAuth provider. Enable it with `FINAI_CHATGPT_CODEX_ENABLED=true`, then run `python -m finai --chatgpt-login`; OAuth uses GPT-5.6 Luna by default, Terra for report repair, and Sol for final escalation. Hive remains the bounded fallback. The ChatGPT path uses an OpenCode-compatible internal Codex endpoint and may require changes if that endpoint or its access policy changes.
+Set the provider keys needed for the workflow:
 
-### Local Phoenix tracing
+- `HIVE_API_KEY` for model generation
+- `OPENROUTER_API_KEY` for Jev routing when `FINAI_ROUTER_ENABLED=true`
+- `TINYFISH_API_KEY` for live news search
+- `UPSTOX_ACCESS_TOKEN` is optional and enables Upstox instrument, market, and fundamentals paths
 
-Install the optional tracing group and start Phoenix in a separate terminal:
+Configuration is loaded from the repository `.env` and then `.env`; unknown variables are ignored. See [`docs/configuration.md`](docs/configuration.md) for the complete variable inventory and operational defaults.
 
-```bash
-UV_CACHE_DIR=.uv-cache uv sync --group observability
-PHOENIX_WORKING_DIR=.finai/phoenix PHOENIX_DEFAULT_RETENTION_POLICY_DAYS=30 \
-  uvx --from arize-phoenix==20.14.0 phoenix serve
-```
+## Run the CLI
 
-Set `FINAI_OBSERVABILITY_ENABLED=true` in `.env`, run FIN-AI, then open
-`http://127.0.0.1:6006`. Traces use the `fin-ai-local` project by default.
-Set `FINAI_TRACE_CONTENT=metadata` to omit prompt and response content.
-Phoenix is best effort: an unavailable collector never stops a research run.
-
-### Raw local model-call traces
-
-For an opt-in local diagnosis, set `FINAI_MODEL_TRACE=full`. This writes the
-exact provider request body, assembled response, and per-chunk timing to
-owner-only JSONL files under `.finai/model-traces/`; it retains full prompt,
-market evidence, and response content. Tool-created dated trace folders older
-than seven days are eligible for cleanup; unowned folders and existing directory
-permissions are preserved. Authorization headers and credential-store contents
-are excluded. Treat the trace files as sensitive and review them before sharing.
-See [`docs/model-call-tracing.md`](docs/model-call-tracing.md) for a traced pilot
-command and trace format.
-
-## Run
+From the repository root:
 
 ```bash
 PYTHONPATH=backend uv run python -m finai --help
-uv run uvicorn app.main:app --reload
-# Offline replay: the JSON file maps model_stream/fetch_* operations to hashes
-PYTHONPATH=backend uv run python -m finai --replay-snapshots snapshots.json --plain "Analyze ABC"
+PYTHONPATH=backend uv run python -m finai --plain "Analyze RELIANCE.NS"
+PYTHONPATH=backend uv run python -m finai --json "What is the latest price of RELIANCE.NS?"
 ```
 
-The CLI runs read-only research tools without approval and asks for clarification only when the request needs user input. Requested structured reports are validated before display; if validation fails, FIN-AI explains the evidence gap instead of showing unsupported claims. The saved run artifact path appears with the completed response. Press `Esc` to cancel an active run safely; use `/debug` and `/logs` to inspect local artifacts. Context compaction is automatic at 90% of the configured 250K-token working budget.
+Without a query, the CLI starts Textual when attached to a TTY and a line-oriented terminal otherwise. Useful options include `--session`, `--data-dir`, `--mode guided|review|autonomous`, `--debug`, and `--replay-snapshots`. The `--plain` flag is accepted for compatibility; one-shot output is plain unless `--json` is selected.
+
+Replay uses a JSON mapping of provider operations to hashes stored under the selected data directory. It disables live providers and is intended for deterministic local runs.
+
+## Run the HTTP health application
+
+```bash
+PYTHONPATH=backend uv run uvicorn app.main:app --reload
+```
+
+Available application routes are:
+
+- `GET /` - welcome payload and `/docs` link
+- `GET /api/health` - provider-key/readiness checks, an internal canary, and an optional TinyFish live canary
+- `/docs` and `/openapi.json` - FastAPI-generated documentation
+
+`/api/health` is unauthenticated. Its TinyFish canary can make a paid external request, and TinyFish degradation does not make the core status unhealthy. Do not treat this endpoint as a production readiness contract.
 
 ## Verification
 
 ```bash
 uv run ruff check backend evals
+uv run mypy backend
 uv run python -m compileall -q backend evals
-uv run python evals/run.py --help
-uv run pytest backend/tests
+PYTHONPATH=. uv run python -m evals.validate
+PYTHONPATH=backend:. uv run python -m evals.adversarial
+uv run pytest backend/tests --no-cov
+uv run pytest backend/tests --cov=backend --cov-report=term-missing --cov-fail-under=70
 ```
 
-Pytest is the regression suite, but live provider calls and the full suite are intentionally separate from the deterministic local benchmark.
+CI runs on pushes and pull requests with Ruff, mypy, evaluation manifest checks, selected evaluation tests, the backend suite, and the 70% coverage threshold. See [`docs/development.md`](docs/development.md).
 
-## Evaluation evidence
+## Evaluation
 
-Evaluation fixtures and runners are in [`evals/`](evals/). The repository keeps
-the synthetic contract fixture and a 150-case private-evaluation case manifest.
-A live execution run on 21 September 2026 used `zai-org/glm-5.3-flash` through
-Hive with three workers. It recorded 143 terminal `success` results (95.3%),
-five `partial` results, one `insufficient_data` result, and one `failed` result.
-End-to-end latency was 45.7 s p50 and 110.3 s p95 (150 runs); provider latency
-was 32.0 s p50 and 79.4 s p95 (146 completed provider calls). The run observed
-22 retries and six timeout-affected streams. These are execution-reliability
-and latency measurements—not financial-answer accuracy, citation support, or
-investment performance. The raw provider snapshots and run artifacts remain
-local because their permitted use is private. Full conditions and limitations
-are in the [technical evaluation report](docs/evaluation-report.md).
+Evaluation evidence is separated into synthetic contract checks, replay/live operational runs, deterministic provider checks, semantic judging, and offline experiments. No complete trustworthy financial-answer accuracy or investment-performance result was found. See [`docs/evaluation.md`](docs/evaluation.md) for recorded metrics, commands, and limitations.
 
-## Known limitations
+## Security and limitations
 
-- TinyFish and YFinance are live providers and can fail, rate-limit, or return incomplete data.
-- Company-name resolution is not guessed; the user must confirm a ticker-shaped candidate.
-- Qualitative evidence is limited to sources found and extracted during the current run.
-- The 150 cases are derived from 26 private-evaluation-authorized Upstox snapshots; they are not 150 independent market observations, and raw provider payloads are not published.
-- Execution success does not establish numeric grounding, semantic citation support, financial-answer accuracy, or investment performance. Independent judge scoring was unavailable for this run because the configured Codex account rejected the judge model identifier.
-- Token-usage pricing was not returned for all calls, so no cost-per-report result is claimed.
+Credentials and local research artifacts require operator protection. Full traces can contain prompts, evidence, and model responses; the HTTP surface is unauthenticated; and providers can be incomplete, stale, rate-limited, or unavailable. Company-name resolution may require clarification, and there is no order-execution path. See [`docs/architecture.md`](docs/architecture.md), [`docs/observability.md`](docs/observability.md), and [`docs/infrastructure.md`](docs/infrastructure.md) for the implemented boundaries and gaps.
+
+## Documentation index
+
+### System and operations
+
+| Document | Contents |
+| --- | --- |
+| [`docs/architecture.md`](docs/architecture.md) | Runtime components, request/data flow, events, state, persistence, retries, and failure behavior |
+| [`docs/ml-system.md`](docs/ml-system.md) | Prompts, skills, providers, tools, evidence, deterministic quant boundaries, and AI failure modes |
+| [`docs/configuration.md`](docs/configuration.md) | Environment variables, provider selection, limits, and sensitive settings |
+| [`docs/observability.md`](docs/observability.md) | Event ledgers, provider archives, replay, Phoenix, traces, metrics, and retention |
+| [`docs/infrastructure.md`](docs/infrastructure.md) | CI, local topology, persistence, scaling implications, and absent deployment assets |
+| [`docs/development.md`](docs/development.md) | Setup, commands, tests, replay, CI equivalence, and change boundaries |
+| [`docs/prompt-management.md`](docs/prompt-management.md) | YAML prompt registry format and validation |
+| [`docs/model-call-tracing.md`](docs/model-call-tracing.md) | Raw local model-call trace setup and format |
+
+### Evaluation
+
+| Document | Contents |
+| --- | --- |
+| [`docs/evaluation.md`](docs/evaluation.md) | Authoritative evaluation taxonomy, recorded results, metrics, provenance limits, and gaps |
+| [`docs/evaluation-live-gpt-benchmark.md`](docs/evaluation-live-gpt-benchmark.md) | Upstox collection, replayable GPT pilot/full-run procedure, and retry workflow |
+| [`docs/adversarial-evaluation.md`](docs/adversarial-evaluation.md) | Offline manifest validation and explicitly opt-in live adversarial checks |
+
+### Repository workflow
+
+These documents describe maintainer and agent workflow, not application runtime behavior:
+
+- [`AGENTS.md`](AGENTS.md) - repository engineering and compliance guidance
+- [`docs/agents/issue-tracker.md`](docs/agents/issue-tracker.md) - GitHub issue operations and canonical triage labels
+
+### Module-local documentation
+
+- [`backend/data/README.md`](backend/data/README.md) - provider and data-pipeline boundary
+- [`backend/finai/styles/README.md`](backend/finai/styles/README.md) - Textual style organization and safe edits
+- [`backend/skills/`](backend/skills/) - runtime skill package manifests and prompts
+- [`evals/candidates/pilot-v1/README.md`](evals/candidates/pilot-v1/README.md) - candidate evaluation-set promotion rules
