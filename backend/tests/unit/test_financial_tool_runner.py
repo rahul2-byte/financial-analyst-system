@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from app.core.agent_loop import FinancialToolRunner
@@ -297,7 +297,7 @@ async def test_stock_data_prefers_valid_upstox_daily_candles() -> None:
             assert start < end
             return [
                 {
-                    "timestamp": "2026-09-16T00:00:00+05:30",
+                    "timestamp": (datetime.now(UTC) - timedelta(days=2)).isoformat(),
                     "open": 10,
                     "high": 11,
                     "low": 9,
@@ -305,7 +305,7 @@ async def test_stock_data_prefers_valid_upstox_daily_candles() -> None:
                     "volume": 100,
                 },
                 {
-                    "timestamp": "2026-09-17T00:00:00+05:30",
+                    "timestamp": (datetime.now(UTC) - timedelta(days=1)).isoformat(),
                     "open": 10,
                     "high": 13,
                     "low": 10,

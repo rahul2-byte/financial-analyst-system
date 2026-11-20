@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
+import logging
+import os
 from typing import Any
 
 import httpx
@@ -11,13 +14,49 @@ from app.core.observability import observe
 from app.observability.tracing import set_current_span_attributes
 from app.security.policy import redact_secrets
 
+logger = logging.getLogger(__name__)
+
+DEFAULT_TOOL_TIMEOUT_SECONDS = 30.0
+# Tools with their own longer internal budgets, or that wait on a human.
+_TOOL_TIMEOUT_OVERRIDES: dict[str, float | None] = {
+    "news:fetch_news": 120.0,
+    "interaction:ask_user": None,
+}
+
+
+def default_tool_timeout() -> float:
+    """Per-tool timeout in seconds; override with FINAI_TOOL_TIMEOUT_SECONDS."""
+    raw = os.environ.get("FINAI_TOOL_TIMEOUT_SECONDS")
+    if raw:
+        try:
+            value = float(raw)
+        except ValueError:
+            return DEFAULT_TOOL_TIMEOUT_SECONDS
+        if value > 0:
+            return value
+    return DEFAULT_TOOL_TIMEOUT_SECONDS
+
 
 class ToolExecutor:
     """Normalize successful and failed tool calls into one payload contract."""
 
-    def __init__(self, runner: Any, allowed_tools: set[str] | None = None) -> None:
+    def __init__(
+        self,
+        runner: Any,
+        allowed_tools: set[str] | None = None,
+        *,
+        timeout_seconds: float | None = None,
+    ) -> None:
         self._runner = runner
         self._allowed_tools = allowed_tools
+        self._timeout_seconds = timeout_seconds
+
+    def _timeout_for(self, name: str) -> float | None:
+        if name in _TOOL_TIMEOUT_OVERRIDES and self._timeout_seconds is None:
+            return _TOOL_TIMEOUT_OVERRIDES[name]
+        if self._timeout_seconds is not None:
+            return self._timeout_seconds
+        return default_tool_timeout()
 
     @observe("tool.execute", as_type="tool")
     async def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
@@ -44,7 +83,24 @@ class ToolExecutor:
                         "retryable": True,
                         "error": f"Invalid arguments for {name}: {exc}",
                     }
-            payload = result_payload(await self._runner.execute(name, arguments))
+            timeout = self._timeout_for(name)
+            try:
+                async with asyncio.timeout(timeout):
+                    raw = await self._runner.execute(name, arguments)
+            except TimeoutError:
+                if timeout is None:
+                    raise
+                logger.warning("tool %s timed out after %ss", name, timeout)
+                set_current_span_attributes(
+                    {"tool.name": name, "tool.status": "failed", "error.type": "timeout"}
+                )
+                return {
+                    "success": False,
+                    "retryable": False,
+                    "error_type": "tool_timeout",
+                    "error": f"Tool {name} timed out after {timeout:g}s",
+                }
+            payload = result_payload(raw)
             set_current_span_attributes(
                 {
                     "tool.name": name,
@@ -69,6 +125,21 @@ class ToolExecutor:
                 }
             )
             return {"success": False, "error": str(redact_secrets(str(exc)))}
+        except Exception as exc:
+            logger.exception("tool %s raised an unexpected error", name)
+            set_current_span_attributes(
+                {
+                    "tool.name": name,
+                    "tool.status": "failed",
+                    "error.type": type(exc).__name__,
+                }
+            )
+            return {
+                "success": False,
+                "retryable": False,
+                "error_type": "tool_internal_error",
+                "error": f"Tool {name} failed unexpectedly: {type(exc).__name__}",
+            }
 
 
 def _result_count(payload: dict[str, Any]) -> int:

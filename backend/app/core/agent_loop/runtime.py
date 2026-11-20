@@ -31,7 +31,12 @@ from app.core.agent_loop.publication import (
 from app.core.agent_loop.terminal_state import terminal_status
 from app.core.agent_loop.tool_execution import ToolExecutor
 from app.core.diagnostics import diagnostic_payload, diagnostics_enabled
-from app.core.guardrails import assess_input_safety
+from app.core.guardrails import (
+    assess_input_safety,
+    sanitize_untrusted_payload,
+    sanitize_untrusted_text,
+    wrap_untrusted_data,
+)
 from app.core.observability import observe
 from app.core.prompts import PromptRegistry
 from app.core.skills import SkillPackage, SkillRegistry
@@ -171,6 +176,7 @@ class AgentLoopConfig:
     report_repair_max_tokens: int = 8192
     max_report_repairs: int = 2
     report_repair_timeout_seconds: float = 120.0
+    first_round_max_tokens: int = 1024
     publish_reports: bool = False
     answer_contract: Literal["auto", "lookup", "freeform"] = "auto"
     allowed_tools: frozenset[str] | None = None
@@ -447,6 +453,14 @@ class AgentLoop:
                         round=round_number,
                     )
                     streamed_text: list[str] = []
+                    # Freeform text is held back until the output safety review
+                    # passes, so unsafe text is never published and then
+                    # "reviewed". Without a reviewer, text streams live.
+                    review_gate = (
+                        not structured_output
+                        and self.config.decision_provider is not None
+                        and hasattr(self.config.decision_provider, "review_output")
+                    )
                     provider_stream_started = False
                     try:
                         async for item in self._stream_model(
@@ -459,7 +473,7 @@ class AgentLoop:
                         ):
                             if isinstance(item, TextDelta):
                                 streamed_text.append(item.text)
-                                if not structured_output:
+                                if not structured_output and not review_gate:
                                     yield item
                             elif isinstance(
                                 item,
@@ -602,6 +616,17 @@ class AgentLoop:
                                 reason="Jev requested bounded output review.",
                             )
                             continue
+                    if review_gate:
+                        held = (
+                            assistant.content
+                            if assistant.name == "partial_provider_response"
+                            or not assistant.tool_calls
+                            else "".join(streamed_text)
+                        )
+                        for offset in range(0, len(held), 64):
+                            yield factory.make(
+                                TextDelta, text=held[offset : offset + 64]
+                            )
                     if message_writer and (
                         not structured_output or assistant.tool_calls
                     ):
@@ -942,7 +967,7 @@ class AgentLoop:
                         name, call_id, arguments = _tool_call_parts(call)
                     except AgentLoopError as exc:
                         name, call_id = _tool_call_identity(call)
-                        message = str(exc)
+                        message = sanitize_untrusted_text(str(exc), max_chars=300).text
                         invalid_key = (name, message)
                         invalid_tool_attempts[invalid_key] = (
                             invalid_tool_attempts.get(invalid_key, 0) + 1
@@ -1079,7 +1104,7 @@ class AgentLoop:
                         payload = await tool_executor.execute(name, arguments)
                     except asyncio.CancelledError:
                         yield factory.make(RunCancelled, reason="cancelled by user")
-                        return
+                        raise
                     if diagnostics_enabled():
                         logger.debug(
                             "tool call end run_id=%s tool=%s tool_id=%s duration_ms=%.1f success=%s",
@@ -1090,7 +1115,9 @@ class AgentLoop:
                             payload.get("success", True),
                         )
 
-                    tool_content = _tool_message_content(payload)
+                    tool_content = _tool_message_content(
+                        sanitize_untrusted_payload(payload, source=name)
+                    )
                     tool_results_by_signature[signature] = tool_content
                     content_safety = assess_input_safety(tool_content)
                     if content_safety.risk.value == "high":
@@ -1332,6 +1359,7 @@ class AgentLoop:
                 yield event
         except asyncio.CancelledError:
             yield factory.make(RunCancelled, reason="cancelled by user")
+            raise
         except Exception as exc:
             logger.exception("Agent loop failed")
             yield factory.make(
@@ -1434,6 +1462,7 @@ class AgentLoop:
             report_max_tokens=self.config.report_max_tokens,
             report_repair_max_tokens=self.config.report_repair_max_tokens,
             report_repair_timeout_seconds=self.config.report_repair_timeout_seconds,
+            first_round_max_tokens=self.config.first_round_max_tokens,
             structured_output=self._answer_contract() != "freeform",
         )
         request_messages = _report_repair_history(messages) if is_repair else messages
@@ -1830,7 +1859,9 @@ def _output_review_context(history: list[Message], output: str) -> dict[str, Any
         "prior_failures": [],
         "provider_health": {},
         "phase": "output_review",
-        "output": str(redact_secrets(output))[:4000],
+        "output": wrap_untrusted_data(
+            str(redact_secrets(output))[:4000], source="model_output"
+        ),
     }
 
 

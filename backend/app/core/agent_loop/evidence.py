@@ -141,11 +141,13 @@ def extract_evidence_facts(payload: dict[str, Any]) -> dict[str, EvidenceFact]:
         return {}
     source_id = str(provenance.get("dataset") or provenance.get("source") or "")
     instrument = str(provenance.get("instrument") or "")
-    if (
-        not source_id
-        or not instrument
-        or provenance.get("quality_status") != "verified"
-    ):
+    quality = provenance.get("quality_status")
+    # yfinance fundamentals are labelled "degraded" (single unaudited vendor) but
+    # remain citable; the degraded label is surfaced via availability accounting.
+    citable = quality == "verified" or (
+        quality == "degraded" and source_id == "fundamentals_snapshot"
+    )
+    if not source_id or not instrument or not citable:
         return {}
     try:
         observed = datetime.fromisoformat(str(provenance.get("observed_at")))
@@ -180,7 +182,7 @@ def extract_evidence_facts(payload: dict[str, Any]) -> dict[str, EvidenceFact]:
             add(fact_id, EvidenceFact(
                 fact_id=fact_id,
                 value=value,
-                unit="provider_value",
+                unit=_fundamental_unit(source_id, path),
                 source_id=source_id,
                 instrument=instrument,
                 observed_at=observed,
@@ -219,6 +221,30 @@ def extract_evidence_facts(payload: dict[str, Any]) -> dict[str, EvidenceFact]:
 
     visit(payload.get("data"), "data")
     return facts
+
+
+_FUNDAMENTAL_UNITS = {
+    "marketCap": "currency",
+    "enterpriseValue": "currency",
+    "totalRevenue": "currency",
+    "profitMargins": "fraction",
+    "operatingMargins": "fraction",
+    "grossMargins": "fraction",
+    "returnOnEquity": "fraction",
+    "returnOnAssets": "fraction",
+    "dividendYield": "fraction",
+    "debtToEquity": "ratio",
+    "peRatio": "ratio",
+    "forwardPE": "ratio",
+    "priceToBook": "ratio",
+    "evToEbitda": "ratio",
+}
+
+
+def _fundamental_unit(dataset: str, path: str) -> str:
+    if dataset != "fundamentals_snapshot":
+        return "provider_value"
+    return _FUNDAMENTAL_UNITS.get(path.rsplit(".", 1)[-1], "provider_value")
 
 
 def fact_scope(

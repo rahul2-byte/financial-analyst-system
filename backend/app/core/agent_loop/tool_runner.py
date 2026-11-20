@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+import time
+from collections.abc import Callable
 from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
-from typing import Any, cast
+from typing import Any, TypeVar, cast
 
 import pandas as pd
 from app.config import settings
+from app.core.agent_loop.evidence import extract_evidence_facts
+from app.core.agent_loop.publication import EvidenceFact
 from app.core.prompts import PromptRegistry
 from app.core.research_schemas import EvidenceProvenance
 from app.core.resources import RuntimeResources
@@ -16,7 +21,12 @@ from app.core.ticker import parse_ticker
 from app.observability.provider_archive import ProviderSnapshot
 from data.news_pipeline.models import CompanyContext
 from data.providers.upstox import UpstoxError
-from data.quality import compare_vendor_values, utc_now, validate_market_records
+from data.quality import (
+    compare_vendor_values,
+    utc_now,
+    validate_market_freshness,
+    validate_market_records,
+)
 from quant.fundamentals import FundamentalScanner
 from quant.technical_engine import TechnicalEngine
 
@@ -221,6 +231,66 @@ _TOOL_DEFINITIONS = [
 ]
 
 
+_T = TypeVar("_T")
+
+_EVIDENCE_TOOL_NAMES = {
+    "data:fetch_stock_data",
+    "data:fetch_fundamentals",
+    "news:fetch_news",
+    "analysis:run_fundamental_scan",
+    "analysis:run_technical_scan",
+    "analysis:get_technical_overview",
+}
+
+_INTRADAY_INTERVALS = {"1m", "5m", "15m", "1h", "4h"}
+INTRADAY_CACHE_TTL_SECONDS = 60.0
+DAILY_CACHE_TTL_SECONDS = 900.0
+FUNDAMENTALS_CACHE_TTL_SECONDS = 3_600.0
+
+
+def _ohlcv_ttl(key: Any) -> float:
+    """Intraday bars go stale quickly; daily and weekly bars live longer."""
+    interval = key[2] if isinstance(key, tuple) and len(key) >= 3 else None
+    return (
+        INTRADAY_CACHE_TTL_SECONDS
+        if interval in _INTRADAY_INTERVALS
+        else DAILY_CACHE_TTL_SECONDS
+    )
+
+
+class _TtlCache:
+    """Small dict-like cache whose entries expire after a per-key TTL."""
+
+    def __init__(
+        self,
+        ttl: Callable[[Any], float],
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._ttl = ttl
+        self._clock = clock
+        self._items: dict[Any, tuple[float, Any]] = {}
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        entry = self._items.get(key)
+        if entry is None:
+            return default
+        if self._clock() >= entry[0]:
+            del self._items[key]
+            return default
+        return entry[1]
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        self._items[key] = (self._clock() + self._ttl(key), value)
+
+    def __contains__(self, key: Any) -> bool:
+        return self.get(key) is not None
+
+
+async def _blocking(func: Callable[..., _T], *args: Any, **kwargs: Any) -> _T:
+    """Run a synchronous provider call off the event loop."""
+    return await asyncio.to_thread(func, *args, **kwargs)
+
+
 class FinancialToolRunner:
     """Execute the finite set of tools supported by the current runtime."""
 
@@ -234,13 +304,17 @@ class FinancialToolRunner:
         self._benchmark_evidence = benchmark_evidence or {}
         self.prompts = resources.prompts or PromptRegistry.bundled()
         self._mocked_tools: dict[str, list[Any]] = {}
-        self._ohlcv_by_request: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
-        self._ohlcv_provenance_by_request: dict[
-            tuple[str, str, str], dict[str, Any]
-        ] = {}
-        self._fundamentals_by_ticker: dict[str, dict[str, Any]] = {}
-        self._fundamental_provenance_by_ticker: dict[str, dict[str, Any]] = {}
+        self._ohlcv_by_request = _TtlCache(_ohlcv_ttl)
+        self._ohlcv_provenance_by_request = _TtlCache(_ohlcv_ttl)
+        self._fundamentals_by_ticker = _TtlCache(
+            lambda _key: FUNDAMENTALS_CACHE_TTL_SECONDS
+        )
+        self._fundamental_provenance_by_ticker = _TtlCache(
+            lambda _key: FUNDAMENTALS_CACHE_TTL_SECONDS
+        )
         self._technical_engine = TechnicalEngine()
+        self.turn_evidence_tools = 0
+        self.turn_facts: dict[str, EvidenceFact] = {}
 
     def set_mocked_tools(self, mocked_tools: list[dict[str, Any]]) -> None:
         """Install one-shot fixture responses for deterministic evaluation runs."""
@@ -271,7 +345,23 @@ class FinancialToolRunner:
             function["description"] = self.prompts.get(keys[function["name"]])
         return definitions
 
+    def reset_turn_evidence(self) -> None:
+        """Forget evidence recorded for the previous user turn."""
+        self.turn_evidence_tools = 0
+        self.turn_facts = {}
+
     async def execute(self, name: str, arguments: dict[str, Any]) -> Any:
+        result = await self._execute(name, arguments)
+        if name in _EVIDENCE_TOOL_NAMES:
+            self.turn_evidence_tools += 1
+            if isinstance(result, dict) and result.get("success", True) is not False:
+                try:
+                    self.turn_facts.update(extract_evidence_facts(result))
+                except ValueError:
+                    pass  # colliding facts are rejected by EvidenceAccounting
+        return result
+
+    async def _execute(self, name: str, arguments: dict[str, Any]) -> Any:
         value: Any
         fixture = self._mocked_tools.get(name)
         if fixture:
@@ -349,7 +439,9 @@ class FinancialToolRunner:
                     "error": "Market status provider is unavailable",
                 }
             try:
-                data = fetcher.fetch_market_status(str(arguments["exchange"]))
+                data = await _blocking(
+                    fetcher.fetch_market_status, str(arguments["exchange"])
+                )
             except UpstoxError as exc:
                 return {"success": False, "error": str(exc)}
             return {
@@ -368,7 +460,9 @@ class FinancialToolRunner:
                     "error": "Market holiday provider is unavailable",
                 }
             try:
-                data = fetcher.fetch_market_holidays(str(arguments["date"]))
+                data = await _blocking(
+                    fetcher.fetch_market_holidays, str(arguments["date"])
+                )
             except UpstoxError as exc:
                 return {"success": False, "error": str(exc)}
             return {
@@ -389,23 +483,22 @@ class FinancialToolRunner:
             data = self._fundamentals_by_ticker.get(ticker)
             provenance = dict(self._fundamental_provenance_by_ticker.get(ticker) or {})
             if data is None:
-                fetched_fundamentals = (
-                    self.resources.yf_fetcher.fetch_company_fundamentals(ticker)
+                fetched_fundamentals = await _blocking(
+                    self.resources.yf_fetcher.fetch_company_fundamentals, ticker
                 )
                 if self.resources.upstox_fetcher is not None:
                     try:
-                        matches = self.resources.upstox_fetcher.resolve_instrument(
-                            ticker
+                        matches = await _blocking(
+                            self.resources.upstox_fetcher.resolve_instrument, ticker
                         )
                         isin = next(
                             (item.get("isin") for item in matches if item.get("isin")),
                             None,
                         )
                         if isin:
-                            fetched_fundamentals = (
-                                self.resources.upstox_fetcher.fetch_fundamentals(
-                                    str(isin)
-                                )
+                            fetched_fundamentals = await _blocking(
+                                self.resources.upstox_fetcher.fetch_fundamentals,
+                                str(isin),
                             )
                             fetched_fundamentals["ticker"] = ticker
                     except UpstoxError:
@@ -444,7 +537,10 @@ class FinancialToolRunner:
                     "success": False,
                     "error": "No usable fundamental metrics provided",
                 }
-            return {**FundamentalScanner().scan(raw_data), "provenance": provenance}
+            return {
+                **await _blocking(FundamentalScanner().scan, raw_data),
+                "provenance": provenance,
+            }
 
         if name == "analysis:get_technical_overview":
             ticker = str(arguments.get("ticker", "")).strip()
@@ -461,52 +557,16 @@ class FinancialToolRunner:
             rows = self._ohlcv_by_request.get(key)
             provenance = dict(self._ohlcv_provenance_by_request.get(key) or {})
             if rows is None:
-                fetched: dict[str, Any]
-                if self.resources.upstox_fetcher is not None and interval == "1d":
-                    try:
-                        matches = self.resources.upstox_fetcher.resolve_instrument(
-                            ticker
-                        )
-                        instrument_key = next(
-                            (
-                                item.get("instrument_key")
-                                for item in matches
-                                if item.get("instrument_key")
-                            ),
-                            None,
-                        )
-                        if instrument_key:
-                            end = datetime.now(UTC)
-                            start = end - timedelta(days=365)
-                            rows = self.resources.upstox_fetcher.fetch_candles(
-                                str(instrument_key), start=start, end=end
-                            )
-                            quality_issues = validate_market_records(
-                                rows, ticker, utc_now()
-                            )
-                            if any(issue.blocking for issue in quality_issues):
-                                raise UpstoxError(
-                                    "Upstox OHLCV failed quality validation"
-                                )
-                            fetched = {
-                                "data": rows,
-                                "provenance": {
-                                    "source": "upstox",
-                                    "instrument": instrument_key,
-                                },
-                            }
-                        else:
-                            fetched = self.resources.yf_fetcher.fetch_stock_price(
-                                ticker, period, interval
-                            )
-                    except UpstoxError:
-                        fetched = self.resources.yf_fetcher.fetch_stock_price(
-                            ticker, period, interval
-                        )
-                else:
-                    fetched = self.resources.yf_fetcher.fetch_stock_price(
-                        ticker, period, interval
-                    )
+                fetched = await self._fetch_ohlcv(ticker, period, interval)
+                if any(
+                    isinstance(issue, dict) and issue.get("blocking", True)
+                    for issue in fetched.get("quality_issues") or []
+                ):
+                    return {
+                        "success": False,
+                        "error": "Market data failed deterministic quality validation",
+                        "quality_issues": fetched.get("quality_issues"),
+                    }
                 rows = fetched.get("data") if isinstance(fetched, dict) else None
                 provenance = (
                     dict(fetched.get("provenance") or {})
@@ -520,7 +580,8 @@ class FinancialToolRunner:
                     }
                 self._ohlcv_by_request[key] = rows
                 self._ohlcv_provenance_by_request[key] = provenance
-            snapshot = self._technical_engine.analyze(
+            snapshot = await _blocking(
+                self._technical_engine.analyze,
                 pd.DataFrame(rows),
                 ticker=ticker,
                 interval=interval,
@@ -529,7 +590,9 @@ class FinancialToolRunner:
             output = snapshot.model_dump(mode="json")
             if self.resources.upstox_fetcher is not None and interval == "1d":
                 try:
-                    matches = self.resources.upstox_fetcher.resolve_instrument(ticker)
+                    matches = await _blocking(
+                        self.resources.upstox_fetcher.resolve_instrument, ticker
+                    )
                     underlying = next(
                         (
                             item.get("instrument_key")
@@ -545,8 +608,9 @@ class FinancialToolRunner:
                     )
                     if underlying and has_derivatives:
                         output["metadata"]["derivatives_context"] = (
-                            self.resources.upstox_fetcher.fetch_derivatives(
-                                str(underlying)
+                            await _blocking(
+                                self.resources.upstox_fetcher.fetch_derivatives,
+                                str(underlying),
                             )
                         )
                 except UpstoxError as exc:
@@ -568,8 +632,11 @@ class FinancialToolRunner:
             key = (ticker, period, interval)
             rows = self._ohlcv_by_request.get(key)
             if rows is None:
-                fetched = self.resources.yf_fetcher.fetch_stock_price(
-                    ticker, period, interval
+                fetched = await _blocking(
+                    self.resources.yf_fetcher.fetch_stock_price,
+                    ticker,
+                    period,
+                    interval,
                 )
                 rows = fetched.get("data") if isinstance(fetched, dict) else None
                 provenance = (
@@ -586,7 +653,8 @@ class FinancialToolRunner:
                 self._ohlcv_provenance_by_request[key] = provenance
             else:
                 provenance = dict(self._ohlcv_provenance_by_request.get(key) or {})
-            snapshot = self._technical_engine.analyze(
+            snapshot = await _blocking(
+                self._technical_engine.analyze,
                 pd.DataFrame(rows),
                 ticker=ticker,
                 interval=interval,
@@ -602,50 +670,7 @@ class FinancialToolRunner:
             ticker = str(arguments.get("ticker", "")).strip()
             period = str(arguments.get("period", "1y"))
             interval = str(arguments.get("interval", "1d"))
-            if self.resources.upstox_fetcher is not None and interval == "1d":
-                try:
-                    matches = self.resources.upstox_fetcher.resolve_instrument(ticker)
-                    instrument_key = next(
-                        (
-                            item.get("instrument_key")
-                            for item in matches
-                            if item.get("instrument_key")
-                        ),
-                        None,
-                    )
-                    if not instrument_key:
-                        raise UpstoxError("No Upstox instrument matched the ticker")
-                    end = datetime.now(UTC)
-                    rows = self.resources.upstox_fetcher.fetch_candles(
-                        str(instrument_key),
-                        start=end - timedelta(days=_period_days(period)),
-                        end=end,
-                    )
-                    issues = validate_market_records(rows, ticker, utc_now())
-                    if any(issue.blocking for issue in issues):
-                        raise UpstoxError("Upstox OHLCV failed quality validation")
-                    value = {
-                        "ticker": ticker,
-                        "period": period,
-                        "interval": interval,
-                        "data": rows,
-                        "provenance": _provider_provenance(
-                            "historical_prices",
-                            ticker,
-                            end,
-                            source="upstox",
-                            version="upstox-v3",
-                            source_url="https://api.upstox.com",
-                        ),
-                    }
-                except UpstoxError:
-                    value = self.resources.yf_fetcher.fetch_stock_price(
-                        ticker, period, interval
-                    )
-            else:
-                value = self.resources.yf_fetcher.fetch_stock_price(
-                    ticker, period, interval
-                )
+            value = await self._fetch_ohlcv(ticker, period, interval)
             raw_value = value.get("provenance") if isinstance(value, dict) else None
             raw_provenance = (
                 dict(raw_value)
@@ -712,14 +737,18 @@ class FinancialToolRunner:
             source = "yfinance"
             if self.resources.upstox_fetcher is not None:
                 try:
-                    matches = self.resources.upstox_fetcher.resolve_instrument(ticker)
+                    matches = await _blocking(
+                        self.resources.upstox_fetcher.resolve_instrument, ticker
+                    )
                     isin = next(
                         (item.get("isin") for item in matches if item.get("isin")),
                         None,
                     )
                     if not isin:
                         raise UpstoxError("No Upstox ISIN matched the ticker")
-                    value = self.resources.upstox_fetcher.fetch_fundamentals(str(isin))
+                    value = await _blocking(
+                        self.resources.upstox_fetcher.fetch_fundamentals, str(isin)
+                    )
                     if not isinstance(value, dict) or not any(
                         value.get(key) is not None
                         for key in (
@@ -737,9 +766,13 @@ class FinancialToolRunner:
                     value["ticker"] = ticker
                     source = "upstox"
                 except UpstoxError:
-                    value = self.resources.yf_fetcher.fetch_company_fundamentals(ticker)
+                    value = await _blocking(
+                        self.resources.yf_fetcher.fetch_company_fundamentals, ticker
+                    )
             else:
-                value = self.resources.yf_fetcher.fetch_company_fundamentals(ticker)
+                value = await _blocking(
+                        self.resources.yf_fetcher.fetch_company_fundamentals, ticker
+                    )
             if isinstance(value, dict) and "error" not in value:
                 self._fundamentals_by_ticker[str(value.get("ticker") or ticker)] = value
         elif name == "news:fetch_news":
@@ -749,7 +782,9 @@ class FinancialToolRunner:
             company_name = str(fundamentals.get("name") or ticker).strip()
             if company_name == ticker and self.resources.upstox_fetcher is not None:
                 try:
-                    matches = self.resources.upstox_fetcher.resolve_instrument(ticker)
+                    matches = await _blocking(
+                        self.resources.upstox_fetcher.resolve_instrument, ticker
+                    )
                     match: dict[str, Any] = next(
                         (
                             item
@@ -906,6 +941,71 @@ class FinancialToolRunner:
                 sort_keys=True,
             )
         return result
+
+    async def _fetch_ohlcv(
+        self, ticker: str, period: str, interval: str
+    ) -> dict[str, Any]:
+        """Fetch OHLCV honouring ``period``; Upstox first for daily bars."""
+        if self.resources.upstox_fetcher is not None and interval == "1d":
+            try:
+                return await self._fetch_upstox_ohlcv(ticker, period)
+            except UpstoxError:
+                pass
+        return cast(
+            dict[str, Any],
+            await _blocking(
+                self.resources.yf_fetcher.fetch_stock_price, ticker, period, interval
+            ),
+        )
+
+    async def _fetch_upstox_ohlcv(self, ticker: str, period: str) -> dict[str, Any]:
+        """Upstox daily bars with the same quality gates as the yfinance path."""
+        fetcher = self.resources.upstox_fetcher
+        if fetcher is None:
+            raise UpstoxError("Upstox is not configured")
+        matches = await _blocking(fetcher.resolve_instrument, ticker)
+        instrument_key = next(
+            (item.get("instrument_key") for item in matches if item.get("instrument_key")),
+            None,
+        )
+        if not instrument_key:
+            raise UpstoxError("No Upstox instrument matched the ticker")
+        end = datetime.now(UTC)
+        rows = await _blocking(
+            fetcher.fetch_candles,
+            str(instrument_key),
+            start=end - timedelta(days=_period_days(period)),
+            end=end,
+        )
+        if not rows:
+            raise UpstoxError("Upstox returned no candles")
+        observed_at = _parse_timestamp(rows[-1].get("timestamp")) or end
+        observed_at = min(observed_at, end)
+        issues = [
+            *validate_market_records(rows, ticker, utc_now()),
+            *validate_market_freshness(
+                observed_at=observed_at,
+                as_of=end,
+                max_age_days=settings.MARKET_DATA_MAX_AGE_DAYS,
+            ),
+        ]
+        if any(issue.blocking for issue in issues):
+            raise UpstoxError("Upstox OHLCV failed quality validation")
+        return {
+            "ticker": ticker,
+            "period": period,
+            "interval": "1d",
+            "data": rows,
+            "provenance": _provider_provenance(
+                "historical_prices",
+                ticker,
+                observed_at,
+                source="upstox",
+                version="upstox-v3",
+                source_url="https://api.upstox.com",
+            ),
+            "quality_issues": [],
+        }
 
     def _archive(
         self, operation: str, payload: Any, provenance: dict[str, Any]

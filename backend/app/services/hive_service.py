@@ -185,7 +185,7 @@ class HiveService(LLMServiceInterface):
             raise HiveProviderError(
                 f"{self.provider_name.upper()}_API_KEY is not configured"
             )
-        if not self._circuit.can_execute():
+        if not self._circuit.try_acquire():
             from app.core.circuit_breaker import CircuitBreakerOpen
 
             raise CircuitBreakerOpen(f"Circuit '{self.provider_name}' is open")
@@ -531,6 +531,7 @@ class HiveService(LLMServiceInterface):
                             "usage": usage,
                         },
                     }
+                    self._circuit.record_failure()
                     raise HiveProviderError(
                         f"Hive transport failed after the response had started: "
                         f"{type(exc).__name__}"
@@ -551,6 +552,7 @@ class HiveService(LLMServiceInterface):
                                 "usage": usage,
                             },
                         }
+                        self._circuit.record_failure()
                         raise HiveProviderError(
                             f"Hive transport failure: {type(exc).__name__}"
                         ) from exc
@@ -578,6 +580,7 @@ class HiveService(LLMServiceInterface):
                         "usage": usage,
                     },
                 }
+                self._circuit.record_failure()
                 raise HiveProviderError(f"Hive transport failure: {exc}") from exc
             except HiveProviderError as exc:
                 latency_ms = round((time.perf_counter() - started) * 1000, 2)

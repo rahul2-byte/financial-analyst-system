@@ -11,6 +11,15 @@ from uuid import UUID
 
 from app.config import settings
 from app.core.agent_loop import AgentLoop, AgentLoopConfig, FinancialToolRunner
+from app.core.agent_loop.evidence import valid_provenance
+from app.core.agent_loop.publication import (
+    # Private on purpose: publication.py is owned elsewhere; reuse its exact
+    # numeric-claim definition so freeform and report grounding cannot drift.
+    _NUMBER,
+    EvidenceFact,
+    report_validation_fallback,
+)
+from app.core.agent_loop.tool_execution import ToolExecutor
 from app.core.instrument_resolution import InstrumentResolution, resolve_instrument
 from app.core.prompts import PromptRegistry
 from app.core.query_scope import normalize_research_scope
@@ -301,13 +310,21 @@ class ResearchRunner:
             ),
             **loop_kwargs,
         )
-        async for event in runtime.run(
+        stream = runtime.run(
             runtime_history,
             conversation_id=conversation_id,
             approved_tool_ids=approved_tool_ids,
             checkpoint_writer=checkpoint_writer,
-            message_writer=message_writer,
-        ):
+            message_writer=(
+                _grounded_message_writer(self.tool_runner, message_writer)
+                if answer_contract == "freeform"
+                else message_writer
+            ),
+        )
+        if answer_contract == "freeform":
+            self.tool_runner.reset_turn_evidence()
+            stream = _ground_freeform_stream(self.tool_runner, stream)
+        async for event in stream:
             yield event
 
     def _resolve_instrument_context(
@@ -505,18 +522,11 @@ async def _run_direct_tool(
     )
     yield factory.make(StageStarted, stage="route", label="Using a direct data tool")
     yield factory.make(ToolStarted, tool=tool, tool_id="direct-route")
-    try:
-        payload = await tool_runner.execute(tool, arguments)
-    except Exception as exc:  # noqa: BLE001 - direct route must terminate safely
-        yield factory.make(
-            ToolFailed, tool=tool, tool_id="direct-route", message=str(exc)
-        )
-        yield factory.make(
-            RunCompleted,
-            terminal_status="insufficient_data",
-            duration_ms=round((time.perf_counter() - started) * 1000, 2),
-        )
-        return
+    # Same allowlist, argument validation, timeout and error normalisation as
+    # tools called by the AgentLoop.
+    payload = await ToolExecutor(tool_runner, set(route.allowed_tools)).execute(
+        tool, arguments
+    )
     if payload.get("success", True) is False:
         yield factory.make(
             ToolFailed,
@@ -537,6 +547,7 @@ async def _run_direct_tool(
         or not isinstance(provenance, dict)
         or not provenance.get("source")
         or not (provenance.get("observed_at") or provenance.get("as_of"))
+        or not valid_provenance(payload)
     ):
         yield factory.make(
             ToolFailed,
@@ -568,8 +579,139 @@ async def _run_direct_tool(
         RunCompleted,
         terminal_status="completed",
         duration_ms=round((time.perf_counter() - started) * 1000, 2),
-        evidence_status="complete",
+        evidence_status=(
+            "limited" if provenance.get("quality_status") == "degraded" else "complete"
+        ),
     )
+
+
+_MONTH = (
+    r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|"
+    r"Dec(?:ember)?)"
+)
+_ISO_DATE = re.compile(r"\d{4}-\d{2}-\d{2}(?:[T ][\d:.+-]+Z?)?")
+_LIST_MARKER = re.compile(r"(?m)^\s*(?:[-*]\s+)?\d{1,2}[.)]\s")
+_CURRENCY_PREFIX = re.compile(r"(?:₹|\bRs\.?|\bINR)\s*", re.IGNORECASE)
+_DAY_MONTH = re.compile(
+    rf"\b\d{{1,2}}(?:st|nd|rd|th)?\s+{_MONTH}\b\.?(?:,?\s+\d{{4}})?"
+    rf"|\b{_MONTH}\b\.?\s+\d{{1,2}}(?:st|nd|rd|th)?\b(?:,?\s+\d{{4}})?",
+    re.IGNORECASE,
+)
+_TIME = re.compile(r"(?<![\d.])\d{1,2}:\d{2}(?::\d{2})?\b")
+# Standalone 1990-2100 (also after FY/CY/Q1-4); never part of 2,050 or 2050.5.
+_YEAR = re.compile(r"(?<![\d.,])(?:19[9]\d|20\d\d|2100)(?![\d]|\.\d|,\d)")
+_PERIOD_WORD = re.compile(
+    r"(?<![\d.])\d+(?:\.\d+)?[\s-]*(?:days?|weeks?|wks?|months?|mos?|years?|yrs?|"
+    r"periods?|sessions?|DMA|SMA|EMA)\b",
+    re.IGNORECASE,
+)
+_INDICATOR_PARAMS = re.compile(
+    r"\b(?:SMA|EMA|DMA|WMA|RSI|MACD|ATR|ADX|ROC|CCI|BB|MA)\s*\(?\s*"
+    r"\d+(?![\d.]\d)(?:\s*[/,]\s*\d+(?![\d.]\d))*\s*\)?",
+    re.IGNORECASE,
+)
+_THOUSANDS = re.compile(r"(?<=\d),(?=\d{3}(?!\d))")
+_NUMBER_SCALES = {
+    "tn": 1e12, "bn": 1e9, "b": 1e9, "mn": 1e6, "m": 1e6, "cr": 1e7,
+    "crore": 1e7, "crores": 1e7, "lakh": 1e5, "lakhs": 1e5, "k": 1e3,
+}  # fmt: skip
+
+
+def _claim_numbers(text: str) -> list[str]:
+    """Numbers in ``text`` that read as financial claims, not dates or parameters."""
+    text = re.sub(r"\[\[fact:[^\]]*\]\]", "", text)
+    for pattern in (
+        _ISO_DATE, _DAY_MONTH, _TIME, _YEAR, _PERIOD_WORD, _INDICATOR_PARAMS,
+        _LIST_MARKER,
+    ):  # fmt: skip
+        text = pattern.sub(" ", text)
+    text = _CURRENCY_PREFIX.sub("", _THOUSANDS.sub("", text))
+    return _NUMBER.findall(text)
+
+
+def _number_is_bound(token: str, facts: dict[str, EvidenceFact]) -> bool:
+    match = re.fullmatch(r"([+-]?[\d.]+)(%|[A-Za-z]*)", token)
+    if match is None:
+        return True
+    try:
+        number = abs(float(match.group(1)))
+    except ValueError:
+        return True
+    suffix = match.group(2).lower()
+    if not suffix and number == int(number) and number <= 10:
+        return True  # counts such as "three risks" are not financial claims
+    if suffix == "%":
+        scales = (1.0, 0.01)
+    else:
+        scales = (_NUMBER_SCALES.get(suffix, 1.0), 1.0)
+    for fact in facts.values():
+        if isinstance(fact.value, str):
+            continue
+        value = abs(float(fact.value))
+        for scale in scales:
+            for candidate in (value / scale, value * 100 / scale):
+                if abs(candidate - number) <= max(abs(candidate) * 0.01, 0.01):
+                    return True
+    return False
+
+
+def _grounded_text(tool_runner: FinancialToolRunner, text: str) -> str:
+    """Fail closed when a freeform answer shows numbers no tool evidence supports."""
+    if tool_runner.turn_evidence_tools == 0:
+        return text
+    facts = tool_runner.turn_facts
+    if all(_number_is_bound(token, facts) for token in _claim_numbers(text)):
+        return text
+    return report_validation_fallback(facts, ("numeric_claim_unbound",))
+
+
+def _grounded_message_writer(
+    tool_runner: FinancialToolRunner,
+    writer: Callable[[Message], None] | None,
+) -> Callable[[Message], None] | None:
+    if writer is None:
+        return None
+
+    def write(message: Message) -> None:
+        if message.role == "assistant" and isinstance(message.content, str):
+            message = message.model_copy(
+                update={"content": _grounded_text(tool_runner, message.content)}
+            )
+        writer(message)
+
+    return write
+
+
+async def _ground_freeform_stream(
+    tool_runner: FinancialToolRunner, stream: AsyncIterator[ResearchEvent]
+) -> AsyncIterator[ResearchEvent]:
+    """Hold answer text once evidence tools ran, so it can be checked before display."""
+    held: list[TextDelta] = []
+
+    def flush() -> list[ResearchEvent]:
+        if not held:
+            return []
+        text = "".join(event.text for event in held)
+        grounded = _grounded_text(tool_runner, text)
+        events: list[ResearchEvent] = (
+            [held[0].model_copy(update={"text": grounded})]
+            if grounded != text
+            else list(held)
+        )
+        held.clear()
+        return events
+
+    async for event in stream:
+        if isinstance(event, TextDelta) and tool_runner.turn_evidence_tools:
+            held.append(event)
+            continue
+        if isinstance(event, RunCompleted):
+            for item in flush():
+                yield item
+        yield event
+    for item in flush():
+        yield item
 
 
 def _research_planning_context(context: dict[str, Any]) -> str:

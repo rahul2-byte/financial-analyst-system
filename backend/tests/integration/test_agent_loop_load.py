@@ -1,5 +1,6 @@
 import asyncio
 import time
+from typing import Any
 from uuid import uuid4
 
 import pytest
@@ -49,11 +50,20 @@ async def _collect(loop: AgentLoop) -> list:
 
 @pytest.mark.asyncio
 async def test_agent_loop_handles_cancellation_without_leaking_the_task() -> None:
-    task = asyncio.create_task(_collect(AgentLoop(_SlowModel(), _Tools())))
+    events: list[Any] = []
+
+    async def consume() -> None:
+        async for event in AgentLoop(_SlowModel(), _Tools()).run(
+            [Message(role="user", content="hello")], conversation_id=uuid4()
+        ):
+            events.append(event)
+
+    task = asyncio.create_task(consume())
     await asyncio.sleep(0)
     task.cancel()
 
-    events = await task
+    with pytest.raises(asyncio.CancelledError):
+        await task
 
     assert events[-1].type == "run.cancelled"
 

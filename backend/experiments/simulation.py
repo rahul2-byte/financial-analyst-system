@@ -94,13 +94,16 @@ def simulate(
     rejections: list[dict[str, Any]] = []
     equity: list[dict[str, Any]] = []
     previous_weights: dict[str, float] = {}
+    last_mark: dict[str, float] = {}
     for timestamp in sorted(set(bars["timestamp"])):
         current = bars[bars["timestamp"] == timestamp]
         pending = targets[targets["timestamp"] == timestamp]
         if not pending.empty:
             prices = {str(row.ticker): float(row.open) for row in current.itertuples()}
+            # Held positions without a bar are valued at the last known close.
             total_equity = cash + sum(
-                holdings.get(ticker, 0.0) * prices.get(ticker, 0.0)
+                holdings.get(ticker, 0.0)
+                * prices.get(ticker, last_mark.get(ticker, 0.0))
                 for ticker in holdings
             )
             requested = {
@@ -171,15 +174,24 @@ def simulate(
                     )
                 )
         mark = {str(row.ticker): float(row.close) for row in current.itertuples()}
+        last_mark.update(mark)
+        # A held ticker with no bar is carried at its last known close, never
+        # zero, and the bar is flagged stale.
+        stale = sorted(
+            ticker
+            for ticker, quantity in holdings.items()
+            if quantity != 0 and ticker not in mark
+        )
         equity.append(
             {
                 "timestamp": str(timestamp),
                 "cash": cash,
                 "equity": cash
                 + sum(
-                    holdings.get(ticker, 0.0) * mark.get(ticker, 0.0)
-                    for ticker in holdings
+                    quantity * last_mark.get(ticker, 0.0)
+                    for ticker, quantity in holdings.items()
                 ),
+                "stale_tickers": stale,
             }
         )
     return SimulationResult(tuple(fills), tuple(equity), cash, tuple(rejections))

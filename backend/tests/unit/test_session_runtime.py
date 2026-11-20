@@ -359,7 +359,13 @@ def test_runner_executes_direct_market_route_without_model_call() -> None:
                 ],
                 "provenance": {
                     "source": "test",
+                    "dataset": "historical_prices",
+                    "instrument": "TCS.NS",
                     "observed_at": "2026-01-02T00:00:00+00:00",
+                    "ingested_at": "2026-01-02T00:00:00+00:00",
+                    "version": "test-v1",
+                    "quality_status": "verified",
+                    "as_of": "2026-01-02T00:00:00+00:00",
                 },
             }
 

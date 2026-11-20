@@ -36,6 +36,7 @@ class ModelStreaming:
         report_repair_max_tokens: int = 8192,
         report_repair_timeout_seconds: float = 120.0,
         structured_output: bool | None = None,
+        first_round_max_tokens: int = 1024,
     ) -> None:
         self._client = client
         self._model = model
@@ -48,6 +49,7 @@ class ModelStreaming:
         self._report_max_tokens = report_max_tokens
         self._report_repair_max_tokens = report_repair_max_tokens
         self._report_repair_timeout_seconds = report_repair_timeout_seconds
+        self._first_round_max_tokens = first_round_max_tokens
 
     @observe("llm.round", as_type="llm_round")
     async def stream(
@@ -77,7 +79,7 @@ class ModelStreaming:
                 if self._publish_reports and round_number > 1
                 else self._max_tokens
                 if round_number > 1
-                else min(self._max_tokens, 1024)
+                else min(self._max_tokens, self._first_round_max_tokens)
             ),
             temperature=0.1,
             run_id=str(factory.run_id),

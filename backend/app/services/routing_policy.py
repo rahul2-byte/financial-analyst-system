@@ -143,8 +143,9 @@ class RoutingPolicy:
             return NextAction.GENERATE_TEXT
         try:
             return await self._jev.review_output(context)
-        except Exception:  # noqa: BLE001 - output review must fail open to bounded code
-            return NextAction.GENERATE_TEXT
+        except Exception:  # noqa: BLE001 - output review fails closed
+            logger.warning("Jev output review failed; withholding output")
+            return NextAction.DENY
 
     @staticmethod
     def _deterministic_route(

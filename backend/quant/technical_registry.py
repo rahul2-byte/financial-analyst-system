@@ -201,4 +201,28 @@ CORE_REGISTRY: tuple[IndicatorSpec, ...] = (
         20,
         ("1d", "1w", "1h"),
     ),
+    IndicatorSpec(
+        "BBANDS_PCT_B_20_2",
+        "derived",
+        "volatility",
+        (("period", 20), ("stddev", 2.0)),
+        ("close",),
+        20,
+        ("1d", "1w", "1h"),
+    ),
+    IndicatorSpec(
+        "HIGH_52W", "derived", "range", (("bars", 252),), ("high",), 252, ("1d",)
+    ),
+    IndicatorSpec(
+        "LOW_52W", "derived", "range", (("bars", 252),), ("low",), 252, ("1d",)
+    ),
+    IndicatorSpec(
+        "REL_VOLUME_20",
+        "derived",
+        "volume",
+        (("period", 20),),
+        ("volume",),
+        21,
+        ("1d", "1w", "1h"),
+    ),
 )

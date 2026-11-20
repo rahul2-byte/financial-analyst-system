@@ -91,6 +91,14 @@ class CircuitBreaker:
             return self._half_open_calls < self.half_open_max_calls
         return False  # OPEN
 
+    def try_acquire(self) -> bool:
+        """Reserve a call slot; counts half-open probes."""
+        if not self.can_execute():
+            return False
+        if self._state == CircuitState.HALF_OPEN:
+            self._half_open_calls += 1
+        return True
+
     def __call__(self, func: Callable) -> Callable:
         """Use as decorator."""
 

@@ -6,6 +6,7 @@ import asyncio
 import base64
 import hashlib
 import json
+import os
 import secrets
 import time
 import urllib.parse
@@ -48,12 +49,36 @@ class CodexCredentialStore:
         return value if isinstance(value, dict) else None
 
     def save(self, value: dict[str, Any]) -> None:
-        self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.path.write_text(json.dumps(value, sort_keys=True), encoding="utf-8")
-        self.path.chmod(0o600)
+        parent = self.path.parent
+        parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        tmp = self.path.with_name(f".{self.path.name}.{secrets.token_hex(6)}.tmp")
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                handle.write(json.dumps(value, sort_keys=True))
+            os.replace(tmp, self.path)
+        except BaseException:
+            tmp.unlink(missing_ok=True)
+            raise
 
     def delete(self) -> None:
         self.path.unlink(missing_ok=True)
+
+
+def _is_definitive_auth_rejection(response: httpx.Response) -> bool:
+    """True only when the token endpoint definitively rejected the refresh token."""
+    if response.status_code == 401:
+        return True
+    if response.status_code != 400:
+        return False
+    try:
+        body = response.json()
+    except ValueError:
+        return False
+    error = body.get("error") if isinstance(body, dict) else None
+    if isinstance(error, dict):
+        error = error.get("code")
+    return error == "invalid_grant"
 
 
 class ChatGPTCodexService(LLMServiceInterface):
@@ -172,10 +197,22 @@ class ChatGPTCodexService(LLMServiceInterface):
             try:
                 request = (await reader.read(8192)).decode(errors="replace")
                 target = request.split(" ", 2)[1]
-                query = urllib.parse.parse_qs(urllib.parse.urlsplit(target).query)
+                split = urllib.parse.urlsplit(target)
+                query = urllib.parse.parse_qs(split.query)
                 code = query.get("code", [""])[0]
                 state = query.get("state", [""])[0]
-                code, verifier = self.validate_callback(code, state)
+                if split.path != "/auth/callback":
+                    # Stray request (favicon, probe): ignore, keep waiting.
+                    writer.write(b"HTTP/1.1 404 Not Found\r\n\r\n")
+                    await writer.drain()
+                    return
+                try:
+                    code, verifier = self.validate_callback(code, state)
+                except OAuthStateError:
+                    # Mismatched state must not abort the genuine login.
+                    writer.write(b"HTTP/1.1 400 Bad Request\r\n\r\nInvalid state")
+                    await writer.drain()
+                    return
                 credentials = await self.exchange_code(code, verifier, redirect_uri)
                 if not result.done():
                     result.set_result(credentials)
@@ -230,8 +267,12 @@ class ChatGPTCodexService(LLMServiceInterface):
         if float(credentials.get("expires_at", 0)) <= time.time() + 60:
             try:
                 credentials = await self.refresh(credentials)
+            except httpx.HTTPStatusError as exc:
+                if _is_definitive_auth_rejection(exc.response):
+                    self.credential_store.delete()
+                return None
             except (httpx.HTTPError, ChatGPTCodexError):
-                self.credential_store.delete()
+                # Transient failure: keep stored credentials for a later retry.
                 return None
         return credentials
 
@@ -308,16 +349,20 @@ class ChatGPTCodexService(LLMServiceInterface):
                 yield event
             return
         stream_started = False
+        deadline = _positive_float(kwargs.get("timeout_seconds"))
+        if deadline is None:
+            deadline = self.timeout_seconds
         try:
-            async for event in self._stream_request(
-                credentials, messages, model, **kwargs
-            ):
-                stream_started = stream_started or event.get("event") in {
-                    "provider_stream_started",
-                    "token",
-                    "chunk",
-                }
-                yield event
+            async with asyncio.timeout(deadline):
+                async for event in self._stream_request(
+                    credentials, messages, model, **kwargs
+                ):
+                    stream_started = stream_started or event.get("event") in {
+                        "provider_stream_started",
+                        "token",
+                        "chunk",
+                    }
+                    yield event
         except (ChatGPTCodexError, httpx.HTTPError, TimeoutError) as exc:
             if stream_started:
                 raise
@@ -339,6 +384,13 @@ class ChatGPTCodexService(LLMServiceInterface):
             "stream": True,
             "store": False,
         }
+        # The ChatGPT Codex backend rejects unsupported sampling/limit
+        # parameters (max_output_tokens, temperature) with HTTP 400, so neither
+        # is sent. temperature is ignored; max_tokens is enforced client-side
+        # below by estimating streamed output tokens and stopping cleanly.
+        max_tokens = kwargs.get("max_tokens")
+        token_budget = int(max_tokens) if max_tokens else None
+        streamed_tokens = 0
         if kwargs.get("tools"):
             payload["tools"] = [_response_tool(tool) for tool in kwargs["tools"]]
         trace = kwargs.get("_model_call_trace")
@@ -374,7 +426,8 @@ class ChatGPTCodexService(LLMServiceInterface):
             self.endpoint,
             json=payload,
             headers=headers,
-            timeout=self.timeout_seconds,
+            timeout=_positive_float(kwargs.get("timeout_seconds"))
+            or self.timeout_seconds,
         ) as response:
             if response.status_code != 200:
                 body = (await response.aread()).decode(errors="replace")
@@ -414,6 +467,28 @@ class ChatGPTCodexService(LLMServiceInterface):
                                 (time.perf_counter() - started) * 1000, 2
                             )
                         yield {"event": "token", "data": delta}
+                        streamed_tokens += _estimate_tokens(delta)
+                        if token_budget is not None and streamed_tokens >= token_budget:
+                            self.last_telemetry = {
+                                "provider": "chatgpt_codex",
+                                "truncated": True,
+                            }
+                            yield {
+                                "event": "provider_completed",
+                                "data": {
+                                    "provider": "chatgpt_codex",
+                                    "attempts": 1,
+                                    "duration_ms": round(
+                                        (time.perf_counter() - started) * 1000, 2
+                                    ),
+                                    "first_token_ms": first_token_ms,
+                                    "model_id": model,
+                                    "usage": _normalize_usage(None),
+                                    "truncated": True,
+                                    "finish_reason": "length",
+                                },
+                            }
+                            return
                 elif current_event == "response.output_item.added":
                     item = data.get("item", {})
                     if item.get("type") == "function_call":
@@ -685,3 +760,16 @@ def _chatgpt_account_id(token: str) -> str | None:
         return str(value) if value else None
     except (ValueError, KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError):
         return None
+
+
+def _positive_float(value: Any) -> float | None:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return None
+    return number if number > 0 else None
+
+
+def _estimate_tokens(text: str) -> int:
+    """Approximate token count (about four characters per token)."""
+    return max(1, (len(text) + 3) // 4)

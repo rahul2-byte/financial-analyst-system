@@ -81,6 +81,9 @@ class ExperimentSpec(BaseModel):
     limits: PortfolioLimits
     validation: ValidationSpec
     seed: int | None = None
+    # Annual risk-free rate used for Sharpe (e.g. 0.07 for a 7% INR T-bill).
+    # Default 0.0: Sharpe is computed on raw, unexcess returns.
+    risk_free_rate: float = Field(default=0.0, ge=-0.5, le=1.0)
 
     @model_validator(mode="after")
     def coherent(self) -> ExperimentSpec:

@@ -31,10 +31,10 @@ Merge: apply each worktree diff onto `phase0-fixes`, then run ruff + mypy + full
 ### Wave 1 (parallel, worktrees)
 | Agent | Findings | Owns | Status |
 |---|---|---|---|
-| P1-A1 tools/evidence | F-05, F-06, F-31, F-34, F-35, F-36, F-52 | agent_loop/tool_runner.py, tool_execution.py, evidence.py, finai/session_runtime.py | running |
-| P1-A2 services/safety | F-25, F-26, F-27, F-28, F-32, F-33, RT-20/21/26/28 | agent_loop/runtime.py, model_streaming.py, app/services/**, guardrails.py, security/** | running |
+| P1-A1 tools/evidence | F-05, F-06, F-31, F-34, F-35, F-36, F-52 | agent_loop/tool_runner.py, tool_execution.py, evidence.py, finai/session_runtime.py | merged after 1 rework (F-05 non-claim exemptions) |
+| P1-A2 services/safety | F-25, F-26, F-27, F-28, F-32, F-33, RT-20/21/26/28 | agent_loop/runtime.py, model_streaming.py, app/services/**, guardrails.py, security/** | merged after 1 rework (Codex params client-side; cancel path checked) |
 | P1-B data/news | F-47 (adapter), F-48, F-49, F-50, F-51, F-53, F-54, F-55, F-56, F-57 | backend/data/**, quant/fundamentals.py, app/config/models.py | running |
-| P1-C quant/experiments | F-19, F-37, F-38, F-39, F-40, F-42, F-44, F-45, F-47 (engine) | backend/quant/** except fundamentals.py, backend/experiments/** | running |
+| P1-C quant/experiments | F-19, F-37, F-38, F-39, F-40, F-42, F-44, F-45, F-47 (engine) | backend/quant/** except fundamentals.py, backend/experiments/** | merged (DQ-10 skipped) |
 
 ### Wave 2 (after wave 1 merges)
 | Agent | Findings | Owns |
@@ -44,3 +44,5 @@ Merge: apply each worktree diff onto `phase0-fixes`, then run ruff + mypy + full
 | P1-F evals | F-23 gold numbers + grounding score in CI | evals/** |
 
 Deferred to wave 3 / Phase 3: F-20 (peer/benchmark analytics), F-41 (point-in-time universe).
+
+**Wave 1 checkpoint (A1+A2+C):** ruff clean · mypy clean (211 files) · 685 passed. `ruff format --check` has 36 pre-existing unformatted files (handled by P1-D).
