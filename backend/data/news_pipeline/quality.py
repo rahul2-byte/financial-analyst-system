@@ -1,7 +1,12 @@
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import ClassVar
+from zoneinfo import ZoneInfo
+
+IST = ZoneInfo("Asia/Kolkata")
+FUTURE_TOLERANCE = timedelta(minutes=10)
+PAYWALL_QUALITY_CAP = 30.0
 
 
 class SourceClassifier:
@@ -59,21 +64,28 @@ class QualityScorer:
         relevance_check: bool,
         word_count: int | None,
         is_duplicate: bool,
+        paywall_detected: bool = False,
     ) -> float:
         score = 0.0
         score += cls.SOURCE_POINTS.get(source_tier, 10)
         score += cls.EXTRACTION_POINTS.get(extraction_status, 0)
 
-        days_old = 7.0
+        # Undated and future-dated items earn no recency points.
+        recency = 0.0
         if publish_time is not None:
-            days_old = max(
-                0.0, (datetime.now(UTC) - publish_time).total_seconds() / 86400.0
-            )
-        score += max(0.0, 20.0 - (days_old / 7.0) * 20.0)
+            if publish_time.tzinfo is None:
+                publish_time = publish_time.replace(tzinfo=IST)
+            now = datetime.now(UTC)
+            if publish_time <= now + FUTURE_TOLERANCE:
+                days_old = max(0.0, (now - publish_time).total_seconds() / 86400.0)
+                recency = max(0.0, 20.0 - (days_old / 7.0) * 20.0)
+        score += recency
 
         score += 15.0 if relevance_check else 0.0
         score += min(10.0, (word_count or 0) / 80.0)
 
         if is_duplicate:
             score *= 0.2
+        if paywall_detected:
+            score = min(score, PAYWALL_QUALITY_CAP)
         return round(score, 2)

@@ -15,6 +15,10 @@ Usage:
     ohlcv_data = fetcher.fetch_ohlcv("RELIANCE.NS", start_date, end_date)
 """
 
+import functools
+import logging
+import math
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
@@ -28,15 +32,60 @@ from app.core.ticker import Ticker, parse_ticker
 from app.observability.provider_archive import ProviderArchive
 from data.interfaces.fetcher import IDataFetcher
 from data.quality import (
+    IST,
+    DataQualityIssue,
+    is_partial_daily_bar,
+    parse_timestamp,
     utc_now,
     validate_market_freshness,
     validate_market_records,
 )
+from data.retry import (
+    call_with_retry,
+    call_with_timeout,
+    provider_retry_kwargs,
+)
 from data.schemas.market import OHLCVData
 from data.schemas.text import NewsArticle
 
+logger = logging.getLogger(__name__)
+
 INDIAN_STOCK_SUFFIX = ".NS"
 DEFAULT_TICKER_SUFFIXES = [".NS", ".BO", ".SS"]
+_INR_CRORE = 10_000_000
+
+
+def _is_indian(ticker: str) -> bool:
+    return ticker.endswith((".NS", ".BO"))
+
+
+def _localize(value: Any, ticker: str) -> datetime | None:
+    """Return a timezone-aware datetime; naive values get the exchange timezone.
+
+    Indian tickers are localised to Asia/Kolkata regardless of the host timezone;
+    other tickers default naive values to UTC.
+    """
+    if value is None:
+        return None
+    try:
+        stamp = pd.Timestamp(value)
+    except (TypeError, ValueError):
+        return None
+    if pd.isna(stamp):
+        return None
+    if stamp.tzinfo is None:
+        stamp = stamp.tz_localize(IST if _is_indian(ticker) else UTC)
+    elif _is_indian(ticker):
+        stamp = stamp.tz_convert(IST)
+    return stamp.to_pydatetime(warn=False)  # type: ignore[no-any-return]
+
+
+def _finite(value: Any) -> float | None:
+    try:
+        converted = float(value)
+    except (TypeError, ValueError):
+        return None
+    return converted if math.isfinite(converted) else None
 
 
 class ReplayYFinanceFetcher:
@@ -83,6 +132,13 @@ class YFinanceFetcher(IDataFetcher):
     - Error handling for missing data
     """
 
+    def __init__(self, clock: Callable[[], datetime] = utc_now) -> None:
+        self._clock = clock
+        self.last_ohlcv_provenance: dict[str, Any] = {}
+
+    def _call(self, function: Callable[[], Any]) -> Any:
+        return call_with_retry(function, provider="yfinance", **provider_retry_kwargs())
+
     def _format_ticker(self, ticker: str | Ticker) -> str:
         """
         Auto-append .NS for Indian stocks if no suffix is provided.
@@ -117,7 +173,9 @@ class YFinanceFetcher(IDataFetcher):
 
         return df
 
-    def _safe_get_value(self, row: pd.Series, col: str, default: float = 0.0) -> float:
+    def _safe_get_value(
+        self, row: pd.Series, col: str, default: float | None = None
+    ) -> float | None:
         """
         Safely extract a value from a DataFrame row.
 
@@ -127,7 +185,7 @@ class YFinanceFetcher(IDataFetcher):
             default: Default value if not found
 
         Returns:
-            Float value
+            Float value, or ``default`` (None unless given) when missing or NaN
         """
         if col not in row:
             return default
@@ -145,7 +203,9 @@ class YFinanceFetcher(IDataFetcher):
 
         return float(val)
 
-    def _safe_get_date(self, row: pd.Series) -> datetime | None:
+    def _safe_get_date(
+        self, row: pd.Series, ticker: str = INDIAN_STOCK_SUFFIX
+    ) -> datetime | None:
         """
         Safely extract date from a DataFrame row.
 
@@ -173,10 +233,7 @@ class YFinanceFetcher(IDataFetcher):
         if date_val is None:
             return None
 
-        if not isinstance(date_val, datetime):
-            return pd.to_datetime(date_val).to_pydatetime()
-
-        return date_val
+        return _localize(date_val, ticker)
 
     @observe(name="Tool:YFinance:FetchOHLCV")
     def fetch_ohlcv(
@@ -184,6 +241,13 @@ class YFinanceFetcher(IDataFetcher):
     ) -> list[OHLCVData]:
         """
         Fetch historical OHLCV data.
+
+        Rows with any missing OHLC/volume value are dropped (never zero-filled)
+        and the remainder is run through the market-data quality validator;
+        blocking findings raise ``ValueError``. Prices are unadjusted
+        (``auto_adjust=False``); the
+        adjusted close is carried separately. Provenance for the last call is in
+        ``last_ohlcv_provenance``.
 
         Args:
             ticker: Stock ticker symbol
@@ -197,7 +261,15 @@ class YFinanceFetcher(IDataFetcher):
         start_str = start_date.strftime("%Y-%m-%d")
         end_str = end_date.strftime("%Y-%m-%d")
 
-        df = yf.download(formatted_ticker, start=start_str, end=end_str, progress=False)
+        df = self._call(
+            lambda: yf.download(
+                formatted_ticker,
+                start=start_str,
+                end=end_str,
+                progress=False,
+                auto_adjust=False,
+            )
+        )
 
         if df is None or df.empty:
             return []
@@ -205,29 +277,76 @@ class YFinanceFetcher(IDataFetcher):
         df = self._parse_dataframe(df)
 
         results: list[OHLCVData] = []
+        validation_rows: list[dict[str, Any]] = []
+        dropped = 0
 
         for _, row in df.iterrows():
-            date_val = self._safe_get_date(row)
-
-            if date_val is None:
+            date_val = self._safe_get_date(row, formatted_ticker)
+            fields = {
+                name: self._safe_get_value(row, name)
+                for name in ("Open", "High", "Low", "Close", "Volume")
+            }
+            if date_val is None or any(value is None for value in fields.values()):
+                dropped += 1
                 continue
-
-            data = OHLCVData(
-                ticker=formatted_ticker,
-                date=date_val,
-                open=self._safe_get_value(row, "Open"),
-                high=self._safe_get_value(row, "High"),
-                low=self._safe_get_value(row, "Low"),
-                close=self._safe_get_value(row, "Close"),
-                volume=int(self._safe_get_value(row, "Volume")),
-                adjusted_close=(
-                    self._safe_get_value(row, "Adj Close")
-                    if "Adj Close" in row.index
-                    else None
-                ),
+            adjusted = (
+                self._safe_get_value(row, "Adj Close")
+                if "Adj Close" in row.index
+                else None
             )
-            results.append(data)
+            open_, high, low, close, volume = (
+                float(fields[name])  # type: ignore[arg-type]
+                for name in ("Open", "High", "Low", "Close", "Volume")
+            )
+            validation_rows.append(
+                {
+                    "ticker": formatted_ticker,
+                    "Date": date_val.isoformat(),
+                    "open": open_,
+                    "high": high,
+                    "low": low,
+                    "close": close,
+                    "volume": volume,
+                }
+            )
+            results.append(
+                OHLCVData(
+                    ticker=formatted_ticker,
+                    date=date_val,
+                    open=open_,
+                    high=high,
+                    low=low,
+                    close=close,
+                    volume=int(volume),
+                    adjusted_close=adjusted,
+                )
+            )
 
+        now = self._clock()
+        issues = (
+            validate_market_records(
+                validation_rows,
+                formatted_ticker,
+                results[-1].date if results else now,
+                interval="1d",
+            )
+            if results
+            else ()
+        )
+        self.last_ohlcv_provenance = {
+            "source": "yfinance",
+            "instrument": formatted_ticker,
+            "auto_adjust": False,
+            "adjustment": "unadjusted_ohlc_with_separate_adjusted_close",
+            "timezone": "Asia/Kolkata" if _is_indian(formatted_ticker) else "UTC",
+            "dropped_rows": dropped,
+            "ingested_at": now.isoformat(),
+            "quality_issues": [issue.model_dump(mode="json") for issue in issues],
+        }
+        blocking = [issue for issue in issues if issue.blocking]
+        if blocking:
+            codes = sorted({issue.code for issue in blocking})
+            raise ValueError(f"yfinance OHLCV rejected by quality validator: {codes}")
         return results
 
     @observe(name="Tool:YFinance:FetchPrice")
@@ -236,6 +355,10 @@ class YFinanceFetcher(IDataFetcher):
     ) -> dict[str, Any]:
         """
         Fetch stock price by period and interval.
+
+        Naive timestamps are localised to Asia/Kolkata for Indian tickers (never
+        the host timezone). A daily bar dated today before the 15:30 IST close is
+        flagged ``partial_session``.
 
         Args:
             ticker: Stock ticker
@@ -247,12 +370,14 @@ class YFinanceFetcher(IDataFetcher):
         """
         formatted_ticker = self._format_ticker(ticker)
 
-        df = yf.download(
-            formatted_ticker,
-            period=period,
-            interval=interval,
-            progress=False,
-            auto_adjust=False,
+        df = self._call(
+            lambda: yf.download(
+                formatted_ticker,
+                period=period,
+                interval=interval,
+                progress=False,
+                auto_adjust=False,
+            )
         )
 
         if df is None or df.empty:
@@ -267,7 +392,12 @@ class YFinanceFetcher(IDataFetcher):
             if "Datetime" in df.columns
             else df.columns[0]
         )
-        df[date_col] = df[date_col].astype(str)
+        localized = df[date_col].map(lambda value: _localize(value, formatted_ticker))
+        df[date_col] = [
+            str(stamp) if stamp is not None else str(raw)
+            for stamp, raw in zip(localized, df[date_col], strict=True)
+        ]
+        last_bar = next((stamp for stamp in reversed(list(localized)) if stamp), None)
 
         records = df.to_dict(orient="records")
         normalized_records = [
@@ -282,26 +412,48 @@ class YFinanceFetcher(IDataFetcher):
             }
             for row in records
         ]
-        ingested_at = utc_now()
+        ingested_at = self._clock()
         observed_at = ingested_at
         if normalized_records and isinstance(normalized_records[-1].get("Date"), str):
-            try:
-                observed_at = datetime.fromisoformat(
-                    normalized_records[-1]["Date"]
-                ).astimezone(UTC)
-            except ValueError:
-                pass
-        quality_issues = validate_market_records(
-            normalized_records, formatted_ticker, observed_at
+            parsed = parse_timestamp(normalized_records[-1]["Date"])
+            if parsed is not None:
+                observed_at = parsed.astimezone(UTC)
+        partial_session = bool(
+            _is_indian(formatted_ticker)
+            and interval == "1d"
+            and last_bar is not None
+            and is_partial_daily_bar(last_bar, ingested_at)
+        )
+        quality_issues: list[DataQualityIssue] = list(
+            validate_market_records(
+                normalized_records,
+                formatted_ticker,
+                observed_at,
+                interval=interval,
+            )
         )
         quality_issues += validate_market_freshness(
             observed_at=observed_at,
             as_of=ingested_at,
             max_age_days=settings.MARKET_DATA_MAX_AGE_DAYS,
+            interval=interval,
         )
-        has_adjusted_close = all(
-            row.get("Adj Close") is not None for row in records
-        )
+        if partial_session:
+            records[-1]["partial_session"] = True
+            quality_issues.append(
+                DataQualityIssue(
+                    code="PARTIAL_SESSION",
+                    message="latest daily bar is today's session and is not yet closed (before 15:30 IST)",
+                    blocking=False,
+                )
+            )
+        has_adjusted_close = all(row.get("Adj Close") is not None for row in records)
+        if any(issue.blocking for issue in quality_issues):
+            quality_status = "rejected"
+        elif quality_issues:
+            quality_status = "degraded"
+        else:
+            quality_status = "verified"
 
         return {
             "ticker": formatted_ticker,
@@ -315,16 +467,14 @@ class YFinanceFetcher(IDataFetcher):
                 "observed_at": observed_at.isoformat(),
                 "ingested_at": ingested_at.isoformat(),
                 "version": "yfinance-live-v1",
-                "quality_status": "verified" if not quality_issues else "rejected",
-                "currency": "INR"
-                if formatted_ticker.endswith((".NS", ".BO"))
-                else None,
-                "timezone": "Asia/Kolkata"
-                if formatted_ticker.endswith((".NS", ".BO"))
-                else "UTC",
+                "quality_status": quality_status,
+                "currency": "INR" if _is_indian(formatted_ticker) else None,
+                "timezone": "Asia/Kolkata" if _is_indian(formatted_ticker) else "UTC",
+                "auto_adjust": False,
                 "adjustment": (
                     "adjusted_close_available" if has_adjusted_close else "unadjusted"
                 ),
+                "partial_session": partial_session,
                 "as_of": observed_at.isoformat(),
                 "source_url": f"https://finance.yahoo.com/quote/{quote(formatted_ticker, safe='^=.-')}/history/",
             },
@@ -336,7 +486,12 @@ class YFinanceFetcher(IDataFetcher):
     @observe(name="Tool:YFinance:FetchFundamentals")
     def fetch_company_fundamentals(self, ticker: str) -> dict[str, Any]:
         """
-        Fetch company fundamental data.
+        Fetch company fundamental data with normalised units and provenance.
+
+        Normalisation: ``debtToEquity`` is returned as a ratio (yfinance reports
+        a percent), ``marketCap`` stays raw INR and ``marketCapCrore`` adds INR
+        crore for INR-quoted tickers. ``units``, ``as_of`` and ``source`` describe
+        every value. ``info`` is fetched with a timeout and bounded retries.
 
         Args:
             ticker: Stock ticker
@@ -346,10 +501,31 @@ class YFinanceFetcher(IDataFetcher):
         """
         formatted_ticker = self._format_ticker(ticker)
         ticker_obj = yf.Ticker(formatted_ticker)
-        info = ticker_obj.info
+        timeout = float(settings.YFINANCE_INFO_TIMEOUT_SECONDS)
+        info = self._call(lambda: call_with_timeout(lambda: ticker_obj.info, timeout))
 
         if not info:
             return {"error": "No fundamental info found", "ticker": formatted_ticker}
+
+        currency = str(
+            info.get("currency") or ("INR" if _is_indian(formatted_ticker) else "")
+        ).upper()
+        market_cap = _finite(info.get("marketCap"))
+        debt_percent = _finite(info.get("debtToEquity"))
+        units = {
+            "marketCap": currency or "unknown",
+            "marketCapCrore": "INR crore",
+            "debtToEquity": "ratio",
+            "returnOnEquity": "fraction",
+            "profitMargins": "fraction",
+            "revenueGrowth": "fraction",
+            "earningsGrowth": "fraction",
+            "dividendYield": "provider_reported",
+            "currentPrice": currency or "unknown",
+            "targetMeanPrice": currency or "unknown",
+            "fiftyTwoWeekHigh": currency or "unknown",
+            "fiftyTwoWeekLow": currency or "unknown",
+        }
 
         return {
             "ticker": formatted_ticker,
@@ -357,11 +533,19 @@ class YFinanceFetcher(IDataFetcher):
             "industry": info.get("industry", ""),
             "sector": info.get("sector", ""),
             "marketCap": info.get("marketCap"),
+            "marketCapCrore": (
+                market_cap / _INR_CRORE
+                if market_cap is not None and currency == "INR"
+                else None
+            ),
             "peRatio": info.get("trailingPE"),
             "forwardPE": info.get("forwardPE"),
             "pegRatio": info.get("pegRatio"),
             "priceToBook": info.get("priceToBook"),
-            "debtToEquity": info.get("debtToEquity"),
+            # yfinance reports debtToEquity as a percent (45.3 means 0.453x).
+            "debtToEquity": (
+                debt_percent / 100.0 if debt_percent is not None else None
+            ),
             "returnOnEquity": info.get("returnOnEquity"),
             "profitMargins": info.get("profitMargins"),
             "revenueGrowth": info.get("revenueGrowth"),
@@ -371,6 +555,10 @@ class YFinanceFetcher(IDataFetcher):
             "targetMeanPrice": info.get("targetMeanPrice"),
             "fiftyTwoWeekHigh": info.get("fiftyTwoWeekHigh"),
             "fiftyTwoWeekLow": info.get("fiftyTwoWeekLow"),
+            "currency": currency or None,
+            "units": units,
+            "as_of": self._clock().isoformat(),
+            "source": "yfinance",
         }
 
     @observe(name="Tool:YFinance:FetchFinancials")
@@ -416,32 +604,47 @@ class YFinanceFetcher(IDataFetcher):
         Fetch key macro indicators for Indian markets.
 
         Returns:
-            Dictionary with macro indicator values
+            ``{name: {value, as_of, currency, source, unit}}``. A failed indicator
+            has ``value`` None plus an ``error`` string (and is logged).
         """
-        macros: dict[str, str] = {
-            "NIFTY_50": "^NSEI",
-            "INDIA_VIX": "^INDIAVIX",
-            "USD_INR": "INR=X",
-            "CRUDE_OIL": "CL=F",
-            "GOLD": "GC=F",
+        # name -> (symbol, currency, unit)
+        macros: dict[str, tuple[str, str | None, str]] = {
+            "NIFTY_50": ("^NSEI", None, "index_points"),
+            "INDIA_VIX": ("^INDIAVIX", None, "index_points"),
+            "USD_INR": ("INR=X", "INR", "INR_per_USD"),
+            "CRUDE_OIL": ("CL=F", "USD", "USD_per_barrel"),
+            "GOLD": ("GC=F", "USD", "USD_per_troy_ounce"),
         }
 
-        results: dict[str, float | None] = {}
+        results: dict[str, Any] = {}
 
-        for name, ticker in macros.items():
+        for name, (symbol, currency, unit) in macros.items():
+            entry: dict[str, Any] = {
+                "value": None,
+                "as_of": None,
+                "currency": currency,
+                "unit": unit,
+                "source": "yfinance",
+            }
             try:
-                ticker_obj = yf.Ticker(ticker)
-                history = ticker_obj.history(period="1d")
-
-                if not history.empty:
+                history = self._call(
+                    functools.partial(yf.Ticker(symbol).history, period="5d")
+                )
+                if history is not None and not history.empty:
                     close_price = history["Close"].iloc[-1]
                     if isinstance(close_price, pd.Series):
                         close_price = close_price.iloc[0]
-                    results[name] = float(close_price)
+                    entry["value"] = _finite(close_price)
+                    stamp = pd.Timestamp(history.index[-1])
+                    if stamp.tzinfo is None:
+                        stamp = stamp.tz_localize(UTC)
+                    entry["as_of"] = stamp.tz_convert(UTC).isoformat()
                 else:
-                    results[name] = None
-            except Exception:  # noqa: BLE001 - one field must not fail the snapshot
-                results[name] = None
+                    entry["error"] = "no data returned"
+            except Exception as exc:  # noqa: BLE001 - one field must not fail the snapshot
+                logger.warning("Macro indicator %s (%s) failed: %s", name, symbol, exc)
+                entry["error"] = f"{type(exc).__name__}: {exc}"
+            results[name] = entry
 
         return results
 

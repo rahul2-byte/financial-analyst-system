@@ -70,12 +70,16 @@ class FundamentalScanner:
         return " ".join(eval_text)
 
     @staticmethod
-    def evaluate_health(debt_to_equity: float | None) -> str:
+    def evaluate_health(
+        debt_to_equity: float | None, *, unit: str | None = None
+    ) -> str:
         """
         Evaluates financial risk and debt levels.
 
         Args:
-            debt_to_equity: Debt-to-Equity ratio
+            debt_to_equity: Debt-to-Equity value
+            unit: ``"ratio"`` when the adapter normalised the value to a ratio
+                (printed as ``0.45x``); None keeps the legacy unlabelled value.
 
         Returns:
             Human-readable financial health analysis
@@ -84,6 +88,10 @@ class FundamentalScanner:
 
         if debt_to_equity is None:
             eval_text.append("Debt data is unavailable.")
+        elif unit == "ratio":
+            eval_text.append(
+                f"Debt-to-equity is {debt_to_equity:.2f}x; interpretation requires a sector-specific peer baseline."
+            )
         else:
             eval_text.append(
                 f"Debt-to-equity is {debt_to_equity}; interpretation requires a sector-specific peer baseline."
@@ -135,6 +143,8 @@ class FundamentalScanner:
         pe = data.get(pe_key)
         pb = data.get("priceToBook")
         debt_eq = data.get("debtToEquity")
+        raw_units = data.get("units")
+        units: dict[str, Any] = raw_units if isinstance(raw_units, dict) else {}
 
         margin = data.get("profitMargins")
         roe = data.get("returnOnEquity")
@@ -152,6 +162,15 @@ class FundamentalScanner:
         margin_val = finite(margin)
         roe_val = finite(roe)
 
+        crore = finite(data.get("marketCapCrore"))
+        if crore is not None:
+            market_cap_text = f"INR {crore:,.0f} crore"
+        else:
+            market_cap_text = str(data.get("marketCap", "Unknown"))
+            cap_unit = units.get("marketCap")
+            if cap_unit and data.get("marketCap") is not None:
+                market_cap_text += f" {cap_unit}"
+
         return {
             "valuation_analysis": cls.evaluate_valuation(
                 pe_val,
@@ -159,7 +178,13 @@ class FundamentalScanner:
                 sector=str(data.get("sector") or ""),
                 pe_basis="trailing" if pe_key == "peRatio" else "forward",
             ),
-            "financial_health_analysis": cls.evaluate_health(debt_val),
+            "financial_health_analysis": cls.evaluate_health(
+                debt_val, unit=units.get("debtToEquity")
+            ),
             "profitability_analysis": cls.evaluate_profitability(margin_val, roe_val),
-            "raw_data_context": f"Company: {data.get('name', 'Unknown')}, Sector: {data.get('sector', 'Unknown')}, Market Cap: {data.get('marketCap', 'Unknown')}",
+            "raw_data_context": (
+                f"Company: {data.get('name', 'Unknown')}, "
+                f"Sector: {data.get('sector', 'Unknown')}, "
+                f"Market Cap: {market_cap_text}"
+            ),
         }

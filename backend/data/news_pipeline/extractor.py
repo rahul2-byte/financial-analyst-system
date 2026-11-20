@@ -73,6 +73,9 @@ class ArticleExtractor:
             and word_count < 100
         ):
             extraction_status = "partial"
+        if paywall_detected and extraction_status == "full":
+            # A paywall stub is not the full article.
+            extraction_status = "partial"
 
         return ExtractionResult(
             article_text=cleaned,

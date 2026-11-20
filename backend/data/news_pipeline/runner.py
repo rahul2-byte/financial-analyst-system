@@ -42,14 +42,16 @@ async def _run_sync(
     function: Callable[..., Result], /, *args: Any, **kwargs: Any
 ) -> Result:
     executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="news-pipeline")
-    concurrent_future = executor.submit(
-        contextvars.copy_context().run,
-        functools.partial(function, *args, **kwargs),
-    )
-    while not concurrent_future.done():
-        await asyncio.sleep(0.001)
-    executor.shutdown(wait=False)
-    return concurrent_future.result()
+    try:
+        concurrent_future = executor.submit(
+            contextvars.copy_context().run,
+            functools.partial(function, *args, **kwargs),
+        )
+        # wrap_future needs no polling and is cancel-safe; the finally block
+        # releases the executor even when the caller times out.
+        return await asyncio.wrap_future(concurrent_future)
+    finally:
+        executor.shutdown(wait=False, cancel_futures=True)
 
 
 class NewsPipelineRunner:
@@ -257,6 +259,7 @@ class NewsPipelineRunner:
                 relevance_check=record.relevance_check,
                 word_count=record.word_count,
                 is_duplicate=record.is_duplicate,
+                paywall_detected=record.paywall_detected,
             )
             updated = replace(record, quality_score=quality_score)
             if self.apply_quality_filter and record.relevance_check:
@@ -283,6 +286,20 @@ class NewsPipelineRunner:
         else:
             final_list = scored[: self.max_articles_per_company]
 
+        connector_stats = [
+            getattr(connector, "last_run_stats", {}) for connector in self.connectors
+        ]
+        unavailable_reasons = [
+            str(reason)
+            for stats in connector_stats
+            if stats.get("status") == "unavailable"
+            for reason in (stats.get("failure_reasons") or [stats.get("reason")])
+            if reason
+        ]
+        # A missing key or outage must read as "unavailable", not "no news".
+        all_connectors_unavailable = bool(self.connectors) and all(
+            stats.get("status") == "unavailable" for stats in connector_stats
+        )
         self.last_run_stats = {
             "quality_filtering": self.apply_quality_filter,
             "raw_count": len(raw_results),
@@ -304,15 +321,21 @@ class NewsPipelineRunner:
                 for connector in self.connectors
             ),
             "extraction_failures": extraction_failures,
+            "undated_count": sum(item.publish_time is None for item in final_list),
+            "unavailable_reasons": unavailable_reasons,
             "status": (
                 "available"
                 if final_list
+                else "unavailable"
+                if all_connectors_unavailable and not raw_results
                 else "degraded"
                 if raw_results or connector_failures
                 else "empty"
             ),
         }
-        if timeout or degraded_fallback_count:
+        if (timeout or degraded_fallback_count) and (
+            self.last_run_stats["status"] != "unavailable"
+        ):
             self.last_run_stats["status"] = "degraded"
 
         run_context.update_current_span(

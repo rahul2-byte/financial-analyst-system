@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import math
 import re
 from datetime import UTC, datetime, timedelta
 from email.utils import parsedate_to_datetime
@@ -9,6 +10,7 @@ from pathlib import Path
 from time import monotonic, struct_time
 from typing import Any
 from urllib.parse import urlparse
+from zoneinfo import ZoneInfo
 
 import httpx
 from app.config import settings
@@ -21,8 +23,13 @@ from data.news_pipeline.query_templates import (
 )
 from data.news_pipeline.tinyfish_client import TinyFishSearchClient
 from data.providers.upstox import UpstoxError, UpstoxFetcher
+from data.retry import ProviderUnavailable
 
 logger = logging.getLogger(__name__)
+
+IST = ZoneInfo("Asia/Kolkata")
+# Epoch values at or above this are milliseconds (1e11 s is year 5138; 1e11 ms is 1973).
+_EPOCH_MS_THRESHOLD = 1e11
 
 
 class _ProviderSearchError(Exception):
@@ -40,11 +47,19 @@ def _parse_datetime(value: Any) -> datetime | None:
     if value is None:
         return None
     if isinstance(value, datetime):
-        return value if value.tzinfo else value.replace(tzinfo=UTC)
+        return value if value.tzinfo else value.replace(tzinfo=IST)
     if isinstance(value, struct_time):
         return datetime(*value[:6], tzinfo=UTC)
+    if isinstance(value, bool):
+        return None
     if isinstance(value, (int, float)):
-        return datetime.fromtimestamp(value / 1000, tz=UTC)
+        if not math.isfinite(value) or value <= 0:
+            return None
+        seconds = value / 1000 if value >= _EPOCH_MS_THRESHOLD else value
+        try:
+            return datetime.fromtimestamp(seconds, tz=UTC)
+        except (OverflowError, OSError, ValueError):
+            return None
     if isinstance(value, str):
         stripped = value.strip()
         if not stripped:
@@ -60,7 +75,7 @@ def _parse_datetime(value: Any) -> datetime | None:
         for parser in (datetime.fromisoformat, parsedate_to_datetime):
             try:
                 parsed = parser(stripped)
-                return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+                return parsed if parsed.tzinfo else parsed.replace(tzinfo=IST)
             except (TypeError, ValueError):
                 continue
     return None
@@ -100,6 +115,8 @@ def _source_domain(url: str) -> str:
 
 
 def _retryable_search_error(exc: Exception) -> bool:
+    if isinstance(exc, ProviderUnavailable):
+        return False  # the client already exhausted its bounded retries
     if isinstance(exc, (_ProviderSearchError, TimeoutError, OSError, ConnectionError)):
         return True
     return isinstance(exc, httpx.HTTPStatusError) and exc.response.status_code in {
@@ -179,8 +196,9 @@ class UpstoxNewsConnector:
             payload = await asyncio.to_thread(
                 self.fetcher.fetch_news, [instrument_key], page_size=30
             )
-        except (UpstoxError, OSError, ConnectionError) as exc:
+        except (UpstoxError, ProviderUnavailable, OSError, ConnectionError) as exc:
             self.last_run_stats = {
+                "query_failures": 1,
                 "status": "unavailable",
                 "reason": _provider_error_reason(exc),
                 "elapsed_ms": round((monotonic() - started) * 1000, 2),
@@ -189,6 +207,7 @@ class UpstoxNewsConnector:
             return []
         data = payload.get("data", {}) if isinstance(payload, dict) else {}
         results: list[RawSearchResult] = []
+        undated = 0
         items = (
             [item for group in data.values() for item in group]
             if isinstance(data, dict)
@@ -204,6 +223,7 @@ class UpstoxNewsConnector:
             publish_time = _parse_datetime(item.get("published_time"))
             if not _within_window(publish_time, time_window_days):
                 continue
+            undated += publish_time is None
             results.append(
                 RawSearchResult(
                     ticker=company.ticker,
@@ -223,6 +243,7 @@ class UpstoxNewsConnector:
         self.last_run_stats = {
             "status": "available" if results else "empty",
             "result_count": len(results),
+            "undated_count": undated,
             "elapsed_ms": round((monotonic() - started) * 1000, 2),
         }
         return results
@@ -275,8 +296,9 @@ class TinyFishSearchConnector:
     ) -> list[RawSearchResult]:
         if isinstance(self.client, TinyFishSearchClient) and not self.client.api_key:
             self.last_run_stats = {
+                "status": "unavailable",
                 "query_count": 0,
-                "query_failures": 0,
+                "query_failures": 1,
                 "failure_reasons": ["api_key_missing"],
             }
             logger.warning("TINYFISH_API_KEY is not configured; skipping news search")
@@ -306,6 +328,7 @@ class TinyFishSearchConnector:
         portal_pages_detected = 0
         malformed_items_dropped = 0
         candidates_emitted = 0
+        undated_count = 0
         query_failures = 0
         failure_reasons: list[str] = []
 
@@ -351,6 +374,7 @@ class TinyFishSearchConnector:
                     break
                 except (
                     _ProviderSearchError,
+                    ProviderUnavailable,
                     OSError,
                     ConnectionError,
                     httpx.HTTPError,
@@ -435,6 +459,7 @@ class TinyFishSearchConnector:
                         continue
                     seen_result_keys.add(result_key)
                     candidates_emitted += 1
+                    undated_count += candidate_publish_time is None
                     results.append(
                         RawSearchResult(
                             ticker=company.ticker,
@@ -458,6 +483,7 @@ class TinyFishSearchConnector:
             "failure_reasons": failure_reasons,
             "raw_items_seen": raw_items_seen,
             "candidates_emitted": candidates_emitted,
+            "undated_count": undated_count,
         }
         logger.info(
             "TinyFish connector normalized results",

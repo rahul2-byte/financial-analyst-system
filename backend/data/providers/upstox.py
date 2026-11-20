@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 from app.config import settings
 from app.core.quota import QuotaExceeded, RequestQuota
+from data.retry import ProviderUnavailable, call_with_retry, provider_retry_kwargs
 
 _USE_CONFIGURED_TOKEN = object()
 
@@ -52,13 +53,10 @@ class UpstoxFetcher:
             "Accept": "application/json",
             "Authorization": f"Bearer {self.access_token}",
         }
-        try:
-            try:
-                self.quota.reserve("upstox")
-            except QuotaExceeded as exc:
-                raise UpstoxError(
-                    "Upstox local request budget exhausted", path=path
-                ) from exc
+
+        def request() -> Any:
+            # Each attempt consumes local quota; QuotaExceeded is not retried.
+            self.quota.reserve("upstox")
             response = httpx.get(
                 f"{self.base_url}{path}",
                 headers=headers,
@@ -66,7 +64,22 @@ class UpstoxFetcher:
                 timeout=self.timeout,
             )
             response.raise_for_status()
-            payload = response.json()
+            return response.json()
+
+        try:
+            payload = call_with_retry(
+                request, provider="upstox", **provider_retry_kwargs()
+            )
+        except QuotaExceeded as exc:
+            raise UpstoxError(
+                "Upstox local request budget exhausted", path=path
+            ) from exc
+        except ProviderUnavailable as exc:
+            raise UpstoxError(
+                f"Upstox request failed: {path} ({exc.reason})",
+                status_code=exc.status_code,
+                path=path,
+            ) from exc
         except httpx.HTTPStatusError as exc:
             raise UpstoxError(
                 f"Upstox request failed: {path}",
@@ -235,7 +248,9 @@ class UpstoxFetcher:
         """Return exchange holiday records, optionally filtered to one date."""
         params = {"date": date} if date else None
         value = self._get("/v2/market/holidays", params).get("data")
-        if not isinstance(value, list) or any(not isinstance(item, dict) for item in value):
+        if not isinstance(value, list) or any(
+            not isinstance(item, dict) for item in value
+        ):
             raise UpstoxError("Upstox returned invalid market holidays")
         return value
 

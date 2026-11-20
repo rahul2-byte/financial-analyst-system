@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import hashlib
+import re
 from dataclasses import replace
 from datetime import timedelta
-from difflib import SequenceMatcher
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 
 import httpx
@@ -22,6 +22,22 @@ TRACKING_PARAMS = {
     "fbclid",
     "gclid",
 }
+
+
+_TOKEN = re.compile(r"[a-z0-9&]+(?:[.,][0-9]+)*%?")
+TITLE_SIMILARITY_THRESHOLD = 80.0
+
+
+def _title_tokens(title: str) -> tuple[set[str], set[str]]:
+    """Split a title into (word tokens, numeric tokens); numeric includes Q3, 12%."""
+    words: set[str] = set()
+    numbers: set[str] = set()
+    for token in _TOKEN.findall(title.lower()):
+        if any(char.isdigit() for char in token):
+            numbers.add(token.replace(",", ""))
+        else:
+            words.add(token)
+    return words, numbers
 
 
 class URLNormalizer:
@@ -104,16 +120,27 @@ class DuplicateDetector:
                 hours=24
             ):
                 continue
-            if self._title_similarity(existing.title, candidate.title) >= 85:
+            similarity = self._title_similarity(existing.title, candidate.title)
+            if similarity >= TITLE_SIMILARITY_THRESHOLD:
                 return index
         return None
 
     def _title_similarity(self, first: str, second: str) -> float:
-        normalized_first = " ".join(sorted(first.lower().split()))
-        normalized_second = " ".join(sorted(second.lower().split()))
-        return (
-            SequenceMatcher(None, normalized_first, normalized_second).ratio() * 100.0
-        )
+        """Dice similarity of title token sets; 0 when numeric tokens differ.
+
+        Titles that differ only in a number ("12%" vs "21%", "Q3" vs "Q4")
+        describe different facts and must never be merged.
+        """
+        first_words, first_numbers = _title_tokens(first)
+        second_words, second_numbers = _title_tokens(second)
+        if first_numbers != second_numbers:
+            return 0.0
+        first_set = first_words | first_numbers
+        second_set = second_words | second_numbers
+        if not first_set or not second_set:
+            return 0.0
+        overlap = len(first_set & second_set)
+        return 200.0 * overlap / (len(first_set) + len(second_set))
 
     def _prefer_more_complete(
         self,

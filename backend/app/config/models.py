@@ -60,7 +60,13 @@ class EnvSettings(BaseSettings):
     FINAI_CONTEXT_MAX_TOKENS: int = 250_000
     FINAI_CONTEXT_COMPACTION_RATIO: float = 0.9
     MIN_QUALITY_SCORE: float = 40.0
-    MARKET_DATA_MAX_AGE_DAYS: int = 7
+    # Trading days (weekends excluded; no exchange holiday list) for daily bars.
+    MARKET_DATA_MAX_AGE_DAYS: int = 3
+    MARKET_DATA_MAX_GAP_TRADING_DAYS: int = 5
+    YFINANCE_INFO_TIMEOUT_SECONDS: float = 15.0
+    PROVIDER_RETRY_ATTEMPTS: int = 3
+    PROVIDER_RETRY_BASE_SECONDS: float = 0.5
+    PROVIDER_RETRY_MAX_SECONDS: float = 8.0
     VENDOR_MAX_RELATIVE_DIFFERENCE: float = 0.02
     MAX_ARTICLES_PER_COMPANY: int = 50
     PIPELINE_VERSION: str = "1.0.0"

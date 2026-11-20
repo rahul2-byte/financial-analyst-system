@@ -8,6 +8,7 @@ from typing import Any
 from app.config import settings
 from app.core.quota import RequestQuota
 from app.observability.provider_archive import ProviderArchive, ProviderSnapshot
+from data.retry import ProviderUnavailable, acall_with_retry, provider_retry_kwargs
 
 
 class TinyFishSearchClient:
@@ -44,22 +45,29 @@ class TinyFishSearchClient:
         start_published_date: datetime,
     ) -> list[dict[str, Any]]:
         if not self.api_key:
-            return []
+            # Must read as "news unavailable", never as "no news".
+            raise ProviderUnavailable("tinyfish", "api_key_missing")
         params = {
             "query": query,
             "limit": num_results,
             "domain_type": "news",
             "after_date": start_published_date.date().isoformat(),
         }
-        async with self.client_factory(self.timeout) as client:
-            self.quota.reserve("tinyfish")
-            response = await client.get(
-                self.base_url,
-                headers={"X-API-Key": self.api_key},
-                params=params,
-            )
-            response.raise_for_status()
-            payload = response.json()
+
+        async def request() -> Any:
+            async with self.client_factory(self.timeout) as client:
+                self.quota.reserve("tinyfish")
+                response = await client.get(
+                    self.base_url,
+                    headers={"X-API-Key": self.api_key},
+                    params=params,
+                )
+                response.raise_for_status()
+                return response.json()
+
+        payload = await acall_with_retry(
+            request, provider="tinyfish", **provider_retry_kwargs()
+        )
         if self.archive is not None:
             snapshot = self.archive.store(
                 ProviderSnapshot(
