@@ -682,7 +682,11 @@ class FinancialToolRunner:
             if not rows:
                 return {
                     "success": False,
-                    "error": "No evidence returned for data:fetch_stock_data",
+                    "error": (
+                        f"No price data for {ticker}; the symbol may have changed "
+                        "(e.g. after a demerger) or been delisted."
+                    ),
+                    "provenance": raw_provenance,
                 }
             issues = value.get("quality_issues", []) if isinstance(value, dict) else []
             vendor_values = (

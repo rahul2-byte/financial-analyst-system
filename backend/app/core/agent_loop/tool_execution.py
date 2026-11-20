@@ -60,7 +60,13 @@ class ToolExecutor:
         return default_tool_timeout()
 
     @observe("tool.execute", as_type="tool")
-    async def execute(self, name: str, arguments: dict[str, Any]) -> dict[str, Any]:
+    async def execute(
+        self,
+        name: str,
+        arguments: dict[str, Any],
+        *,
+        max_seconds: float | None = None,
+    ) -> dict[str, Any]:
         try:
             if self._allowed_tools is not None and name not in self._allowed_tools:
                 return {
@@ -85,6 +91,8 @@ class ToolExecutor:
                         "error": f"Invalid arguments for {name}: {exc}",
                     }
             timeout = self._timeout_for(name)
+            if max_seconds is not None and timeout is not None:
+                timeout = min(timeout, max_seconds)
             try:
                 async with asyncio.timeout(timeout):
                     raw = await self._runner.execute(name, arguments)

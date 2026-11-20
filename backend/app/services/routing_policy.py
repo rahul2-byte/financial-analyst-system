@@ -138,14 +138,27 @@ class RoutingPolicy:
                 normalized, available_tools, available_skills, "router_failure"
             )
 
+    @property
+    def review_available(self) -> bool:
+        """True only when a reviewer exists and is usable (e.g. has a key)."""
+        jev = self._jev
+        return (
+            jev is not None
+            and hasattr(jev, "review_output")
+            and bool(getattr(jev, "api_key", True))
+        )
+
     async def review_output(self, context: dict[str, Any]) -> NextAction:
-        if self._jev is None or not hasattr(self._jev, "review_output"):
+        """Return the reviewer verdict.
+
+        Reviewer outages (network, timeout, HTTP errors) propagate to the
+        caller, which must treat them as "review unavailable" rather than a
+        DENY verdict; only a real DENY verdict blocks output.
+        """
+        if not self.review_available:
             return NextAction.GENERATE_TEXT
-        try:
-            return await self._jev.review_output(context)
-        except Exception:  # noqa: BLE001 - output review fails closed
-            logger.warning("Jev output review failed; withholding output")
-            return NextAction.DENY
+        assert self._jev is not None
+        return await self._jev.review_output(context)
 
     @staticmethod
     def _deterministic_route(

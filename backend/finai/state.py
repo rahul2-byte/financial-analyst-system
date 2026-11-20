@@ -32,6 +32,13 @@ from app.events.models import (
     ToolStarted,
 )
 
+from .plain import (
+    REVIEW_UNAVAILABLE_NOTE,
+    friendly_error,
+    provider_notice,
+    review_unavailable,
+)
+
 
 class PresentationPhase(StrEnum):
     IDLE = "idle"
@@ -71,6 +78,12 @@ class PresentationState:
     active_tools: tuple[str, ...] = ()
     activities: dict[str, ActivityState] = field(default_factory=dict)
     sources: list[dict[str, str]] = field(default_factory=list)
+
+
+def _short_detail(detail: str | None, limit: int = 120) -> str | None:
+    if detail and len(detail) > limit:
+        return detail[: limit - 1] + "…"
+    return detail
 
 
 def _phase_for_stage(stage: str) -> PresentationPhase:
@@ -162,10 +175,15 @@ def reduce_event(state: PresentationState, event: ResearchEvent) -> Presentation
         if isinstance(event, ProviderCompleted):
             detail = f"{event.attempts} attempt(s) · {event.duration_ms / 1000:.1f}s"
             status = "completed"
+            label = "Hive provider"
         else:
-            detail = event.message
+            detail = friendly_error(event.message)
             status = "failed"
-        activities["provider"] = ActivityState("Hive provider", status, detail)
+            label = "Hive provider"
+            notice = provider_notice(event)
+            if notice:
+                label, detail = notice, None
+        activities["provider"] = ActivityState(label, status, detail)
         return replace(state, activities=activities, current_operation=None)
     if isinstance(event, ToolProgress):
         key = f"tool:{event.tool_id}"
@@ -213,7 +231,11 @@ def reduce_event(state: PresentationState, event: ResearchEvent) -> Presentation
             activities[key] = replace(
                 activity,
                 status="failed" if isinstance(event, ToolFailed) else "completed",
-                detail=event.message if isinstance(event, ToolFailed) else event.detail,
+                detail=_short_detail(
+                    friendly_error(event.message)
+                    if isinstance(event, ToolFailed)
+                    else event.detail
+                ),
             )
         active_tools = tuple(tool for tool in state.active_tools if tool != tool_key)
         current = (
@@ -247,6 +269,10 @@ def reduce_event(state: PresentationState, event: ResearchEvent) -> Presentation
             else item
             for key, item in state.activities.items()
         }
+        if review_unavailable(event):
+            activities["output_review"] = ActivityState(
+                REVIEW_UNAVAILABLE_NOTE, "completed"
+            )
         return replace(
             state,
             phase=PresentationPhase.COMPLETE,

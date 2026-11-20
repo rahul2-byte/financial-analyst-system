@@ -34,6 +34,11 @@ class RunCompleted(BaseModel):
     evidence_status: str | None = None
     evidence_availability: list[dict[str, object]] = Field(default_factory=list)
     completion_reason: str | None = None
+    # "unavailable" (reviewer errored/timed out) or "not_configured" (no
+    # reviewer key); None when the review ran normally or no reviewer exists.
+    output_review: str | None = None
+    # Routing reason codes (e.g. "router_failure") for the run's route.
+    route_reason_codes: list[str] = Field(default_factory=list)
 
 
 class RunFailed(BaseModel):
@@ -173,6 +178,12 @@ class ProviderFailed(BaseModel):
     partial_output: bool | None = None
     model_id: str | None = None
     usage: TokenUsage | None = None
+    # Fallback visibility: set when the primary provider failed and another
+    # provider takes over. reason in {quota, auth, rate_limit, timeout, error}.
+    fallback: bool | None = None
+    reason: str | None = None
+    next_provider: str | None = None
+    next_model: str | None = None
 
 
 class ToolProgress(BaseModel):

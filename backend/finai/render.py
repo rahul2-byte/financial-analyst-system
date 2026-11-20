@@ -9,6 +9,7 @@ from rich.style import Style
 from rich.text import Text
 from rich.theme import Theme
 
+from .plain import source_label
 from .safety import sanitize_terminal_text
 from .state import PresentationState
 from .theme import COLORS
@@ -173,9 +174,7 @@ def render_context(
 def render_sources(sources: list[dict[str, str]]) -> Text:
     output = Text("Sources\n", style="bold")
     for index, source in enumerate(sources, 1):
-        title = sanitize_terminal_text(
-            source.get("title") or source.get("source") or "Untitled source"
-        )
+        title = sanitize_terminal_text(source_label(source))
         source_type = sanitize_terminal_text(source.get("source_type", "source"))
         url = source.get("url", "")
         marker = (

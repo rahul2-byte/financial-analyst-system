@@ -81,6 +81,25 @@ def _is_definitive_auth_rejection(response: httpx.Response) -> bool:
     return error == "invalid_grant"
 
 
+def classify_fallback_reason(message: str, *, timed_out: bool = False) -> str:
+    """Map a ChatGPT failure message to quota/auth/rate_limit/timeout/error."""
+    text = message.casefold()
+    if timed_out or "timed out" in text or "timeout" in text:
+        return "timeout"
+    if "usage_limit" in text or "usage limit" in text or "quota" in text:
+        return "quota"
+    if "http 429" in text or "rate limit" in text:
+        return "rate_limit"
+    if (
+        "http 401" in text
+        or "http 403" in text
+        or "credentials unavailable" in text
+        or "unauthorized" in text
+    ):
+        return "auth"
+    return "error"
+
+
 class ChatGPTCodexService(LLMServiceInterface):
     """Use the OpenCode-compatible Codex endpoint with Hive fallback."""
 
@@ -277,7 +296,13 @@ class ChatGPTCodexService(LLMServiceInterface):
         return credentials
 
     async def _fallback_stream(
-        self, messages: list[Message], model: str, reason: str, **kwargs: Any
+        self,
+        messages: list[Message],
+        model: str,
+        reason: str,
+        *,
+        timed_out: bool = False,
+        **kwargs: Any,
     ) -> AsyncGenerator[dict[str, Any], None]:
         self.last_telemetry = {"provider": "chatgpt_codex", "fallback_reason": reason}
         trace = kwargs.get("_model_call_trace")
@@ -290,6 +315,11 @@ class ChatGPTCodexService(LLMServiceInterface):
                 "message": reason,
                 "partial_output": False,
                 "fallback": True,
+                "reason": classify_fallback_reason(reason, timed_out=timed_out),
+                "next_provider": "hive" if self.fallback is not None else None,
+                "next_model": self.fallback_model
+                if self.fallback is not None
+                else None,
             },
         }
         if self.fallback is None:
@@ -367,7 +397,11 @@ class ChatGPTCodexService(LLMServiceInterface):
             if stream_started:
                 raise
             async for event in self._fallback_stream(
-                messages, model, str(exc), **kwargs
+                messages,
+                model,
+                str(exc) or type(exc).__name__,
+                timed_out=isinstance(exc, (TimeoutError, httpx.TimeoutException)),
+                **kwargs,
             ):
                 yield event
 

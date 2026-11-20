@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from app.config import settings
+from app.core.diagnostics import diagnostics_enabled
 from app.security.policy import redact_secrets
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,9 @@ def initialize_tracing() -> TracingHandle:
                 project_name=settings.FINAI_PHOENIX_PROJECT,
                 batch=True,
                 auto_instrument=False,
+                # verbose=True prints the Phoenix banner; only show it when
+                # FINAI diagnostics are explicitly on.
+                verbose=diagnostics_enabled(),
             )
     except Exception:
         logger.exception("Phoenix tracing setup failed; continuing without tracing")

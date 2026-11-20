@@ -297,13 +297,14 @@ async def test_f32_approved_output_is_published_after_review() -> None:
 
 
 @pytest.mark.asyncio
-async def test_f32_router_review_fails_closed() -> None:
+async def test_f32_router_review_outage_propagates_not_denies() -> None:
     class Broken:
         async def review_output(self, context: dict[str, Any]) -> NextAction:
             raise RuntimeError("down")
 
     policy = RoutingPolicy(Broken())  # type: ignore[arg-type]
-    assert await policy.review_output({}) is NextAction.DENY
+    with pytest.raises(RuntimeError):
+        await policy.review_output({})
 
 
 # ---- F-33 -----------------------------------------------------------------

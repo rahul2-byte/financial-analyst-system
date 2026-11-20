@@ -162,7 +162,7 @@ class AgentLoopError(RuntimeError):
 @dataclass(frozen=True)
 class AgentLoopConfig:
     max_rounds: int = 12
-    max_run_seconds: float = 300.0
+    max_run_seconds: float = 150.0
     emergency_max_tool_calls: int = 128
     max_input_tokens: int = 32_000
     duplicate_reuse_limit: int = 1
@@ -218,6 +218,42 @@ class AgentLoop:
         input_queue: asyncio.Queue[Message] | None = None,
         checkpoint_writer: Any | None = None,
         message_writer: Any | None = None,
+    ) -> AsyncIterator[ResearchEvent]:
+        notes: dict[str, Any] = {}
+        async for event in self._run(
+            messages,
+            conversation_id=conversation_id,
+            approved_tool_ids=approved_tool_ids,
+            input_queue=input_queue,
+            checkpoint_writer=checkpoint_writer,
+            message_writer=message_writer,
+            notes=notes,
+        ):
+            if isinstance(event, RunCompleted):
+                update: dict[str, Any] = {}
+                route = self.config.route_plan
+                if route is not None and route.reason_codes:
+                    update["route_reason_codes"] = list(route.reason_codes)
+                if notes.get("output_review"):
+                    update["output_review"] = notes["output_review"]
+                if notes.get("budget_wrapup") and not event.completion_reason:
+                    update["completion_reason"] = (
+                        "run time budget reached; answered from evidence collected"
+                    )
+                if update:
+                    event = event.model_copy(update=update)
+            yield event
+
+    async def _run(
+        self,
+        messages: list[Message],
+        *,
+        conversation_id: UUID,
+        approved_tool_ids: set[str] | None,
+        input_queue: asyncio.Queue[Message] | None,
+        checkpoint_writer: Any | None,
+        message_writer: Any | None,
+        notes: dict[str, Any],
     ) -> AsyncIterator[ResearchEvent]:
         started = time.perf_counter()
         answer_contract = self._answer_contract()
@@ -290,6 +326,12 @@ class AgentLoop:
         availability_context_snapshot: str | None = None
         controller_route: RoutePlan | None = None
         stop_reason: str | None = None
+        budget_wrapup = False
+        provider = self.config.decision_provider
+        review_enabled = provider is not None and hasattr(provider, "review_output")
+        if review_enabled and not getattr(provider, "review_available", True):
+            review_enabled = False
+            notes["output_review"] = "not_configured"
         tool_executor = ToolExecutor(
             self.tool_runner, self._allowed_tool_names(selected_skills)
         )
@@ -397,8 +439,25 @@ class AgentLoop:
         try:
             for round_number in range(1, self.config.max_rounds + 1):
                 if time.perf_counter() - started >= self.config.max_run_seconds:
-                    stop_reason = "run time budget reached"
-                    break
+                    if budget_wrapup:
+                        stop_reason = "run time budget reached"
+                        break
+                    # Out of time: stop calling tools and answer from the
+                    # evidence already collected (one final bounded round).
+                    budget_wrapup = True
+                    tools_disabled = True
+                    notes["budget_wrapup"] = True
+                    history.append(
+                        Message(
+                            role="system",
+                            content=(
+                                "The run time budget is exhausted. Do not call any "
+                                "tools. Answer now using only the evidence already "
+                                "collected, state clearly what is missing, and do "
+                                "not infer unavailable figures."
+                            ),
+                        )
+                    )
                 if diagnostics_enabled():
                     logger.debug(
                         "agent round start run_id=%s round=%s messages=%s tools=%s",
@@ -456,11 +515,7 @@ class AgentLoop:
                     # Freeform text is held back until the output safety review
                     # passes, so unsafe text is never published and then
                     # "reviewed". Without a reviewer, text streams live.
-                    review_gate = (
-                        not structured_output
-                        and self.config.decision_provider is not None
-                        and hasattr(self.config.decision_provider, "review_output")
-                    )
+                    review_gate = not structured_output and review_enabled
                     provider_stream_started = False
                     try:
                         async for item in self._stream_model(
@@ -576,20 +631,30 @@ class AgentLoop:
                     if (
                         not assistant.tool_calls
                         and not structured_output
-                        and self.config.decision_provider
-                        and hasattr(self.config.decision_provider, "review_output")
+                        and review_enabled
                     ):
                         review_context = _output_review_context(
                             history, assistant.content
                         )
                         review_context["run_id"] = str(factory.run_id)
                         review_context["conversation_id"] = str(factory.conversation_id)
-                        review = await self.config.decision_provider.review_output(
-                            review_context
-                        )
+                        try:
+                            assert provider is not None
+                            review = await provider.review_output(review_context)
+                        except asyncio.CancelledError:
+                            raise
+                        except Exception as exc:  # noqa: BLE001 - outage is not a verdict
+                            logger.warning(
+                                "Output reviewer unavailable (%s); continuing with "
+                                "deterministic checks only",
+                                type(exc).__name__,
+                            )
+                            notes["output_review"] = "unavailable"
+                            review = NextAction.GENERATE_TEXT
                         if review is NextAction.DENY:
                             raise AgentLoopError(
-                                "generated output failed safety review",
+                                "generated output failed safety review "
+                                "(reviewer verdict: deny)",
                                 category="output_policy",
                             )
                         if (
@@ -958,6 +1023,12 @@ class AgentLoop:
                     return
 
                 for call in assistant.tool_calls:
+                    if (
+                        time.perf_counter() - started >= self.config.max_run_seconds
+                        and not budget_wrapup
+                    ):
+                        _append_skipped_tool_results(history, assistant, message_writer)
+                        break
                     tool_calls_seen += 1
                     if tool_calls_seen > self.config.emergency_max_tool_calls:
                         stop_reason = "emergency tool-call safety ceiling reached"
@@ -1101,7 +1172,15 @@ class AgentLoop:
                             else "omitted",
                         )
                     try:
-                        payload = await tool_executor.execute(name, arguments)
+                        payload = await tool_executor.execute(
+                            name,
+                            arguments,
+                            max_seconds=max(
+                                1.0,
+                                self.config.max_run_seconds
+                                - (time.perf_counter() - started),
+                            ),
+                        )
                     except asyncio.CancelledError:
                         yield factory.make(RunCancelled, reason="cancelled by user")
                         raise

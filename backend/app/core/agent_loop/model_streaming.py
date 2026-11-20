@@ -139,6 +139,10 @@ class ModelStreaming:
                     partial_output=data.get("partial_output"),
                     model_id=data.get("model_id"),
                     usage=usage or _parse_usage(data.get("usage")),
+                    fallback=data.get("fallback"),
+                    reason=data.get("reason"),
+                    next_provider=data.get("next_provider"),
+                    next_model=data.get("next_model"),
                 )
             elif event_name == "usage":
                 usage = _parse_usage(event.get("data"))

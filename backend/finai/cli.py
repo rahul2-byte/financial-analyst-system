@@ -134,6 +134,7 @@ _STDERR_EVENTS = frozenset(
         "tool.started",
         "tool.completed",
         "tool.failed",
+        "provider.failed",
         "run.failed",
         "run.cancelled",
         "run.completed",

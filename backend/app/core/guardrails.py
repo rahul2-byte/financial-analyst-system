@@ -6,10 +6,10 @@ import re
 from datetime import date
 from typing import Any
 
+from app.core.ticker import is_valid_ticker_value
 from app.models.routing import PromptInjectionRisk
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 
-_TICKER = re.compile(r"^[A-Za-z0-9._|:-]{1,64}$")
 _PERIODS = {"1d", "5d", "1mo", "3mo", "6mo", "1y", "2y", "5y"}
 _INTERVALS = {"1d", "1wk", "1h", "4h", "15m", "5m", "1m"}
 _EXCHANGES = {"NSE", "BSE"}
@@ -175,8 +175,8 @@ class ToolArguments(BaseModel):
     @classmethod
     def valid_ticker(cls, value: str) -> str:
         value = value.strip().upper()
-        if not _TICKER.fullmatch(value):
-            raise ValueError("ticker contains unsupported characters")
+        if not is_valid_ticker_value(value):
+            raise ValueError(f'Ticker "{value[:24]}" has unsupported characters')
         return value
 
     @field_validator("period")
@@ -234,7 +234,10 @@ def validate_tool_arguments(name: str, arguments: dict[str, Any]) -> dict[str, A
         "analysis:get_technical_overview",
     }:
         raise ValueError(f"tool is not permitted: {name}")
-    validated = ToolArguments.model_validate(arguments)
+    try:
+        validated = ToolArguments.model_validate(arguments)
+    except ValidationError as exc:
+        raise ValueError(_short_validation_message(exc)) from None
     if name in {"data:fetch_fundamentals", "analysis:run_fundamental_scan"} and (
         validated.period is not None
         or validated.interval is not None
@@ -246,3 +249,15 @@ def validate_tool_arguments(name: str, arguments: dict[str, Any]) -> dict[str, A
     ):
         raise ValueError("news tool accepts ticker and limit only")
     return validated.model_dump(exclude_none=True)
+
+
+def _short_validation_message(exc: ValidationError) -> str:
+    """One plain line for the user instead of a pydantic dump."""
+    error = exc.errors()[0]
+    message = str(error.get("msg", "invalid value")).removeprefix("Value error, ")
+    field = ".".join(str(part) for part in error.get("loc", ()))
+    return (
+        message
+        if field == "ticker" and "Ticker" in message
+        else (f"Invalid tool argument {field}: {message}" if field else message)
+    )

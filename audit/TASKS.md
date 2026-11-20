@@ -54,4 +54,16 @@ Deferred to wave 3 / Phase 3: F-20 (peer/benchmark analytics), F-41 (point-in-ti
 ## Phase 1.5 — hands-on usage test
 | Agent | Scope | Status | Output |
 |---|---|---|---|
-| sonnet usage tester | 12 one-shot + 3 TUI live queries, numbers cross-checked vs yfinance | running | `audit/05-usage-test.md`, `audit/usage/runs/` |
+| sonnet usage tester | 12 one-shot + 3 TUI live queries, numbers cross-checked vs yfinance | done | `audit/05-usage-test.md`, `audit/usage/runs/` |
+
+**Usage test result (2026-11-20):** 3/10 in a degraded environment (ChatGPT quota exhausted → hive/glm fallback). 1/12 usable answers. Spot-checked: M&M rejected at guardrails.py:179; TCS direct route prints raw JSON. Root cause of "failed safety review": F-32 made reviewer *errors* return DENY (routing_policy.py:141-148).
+
+## Phase 1.6 — usage fixes (parallel worktrees)
+| Agent | Scope | Owns | Status |
+|---|---|---|---|
+| U1 sonnet | reviewer outage ≠ DENY, provider-fallback event fields, whole-run deadline, router reason, tracing banner | backend/app/** except guardrails.py, ticker.py, resolver | merged (diff reviewed) |
+| U2 sonnet | M&M guardrail, INFY/ambiguity resolution, human direct-route answer, fallback + review notices, source labels, delisted message | backend/finai/**, guardrails.py, ticker.py, resolver | merged after 1 rework (fallback must not auto-resolve non-exact hits) |
+| U3 sonnet | delisted/empty price message | tool_runner.py | merged |
+| Re-test | rerun the 12 queries after merge (TUI needs tmux) | — | queued |
+
+**Phase 1.6 complete:** ruff + format clean · mypy clean (219 files) · 793 passed · coverage 85.89% · evals.validate valid · finai --help OK.

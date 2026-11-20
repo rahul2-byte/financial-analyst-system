@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import contextlib
+import datetime
 import json
 import re
 import time
@@ -189,6 +191,7 @@ class ResearchRunner:
                     "execution_mode": ExecutionMode.DETERMINISTIC,
                     "next_action": NextAction.ASK_CLARIFICATION,
                     "reason": resolution.reason or "Instrument identity is unresolved.",
+                    "escalation_reason": resolution.reason,
                     "required_tools": [],
                     "allowed_tools": set(),
                 }
@@ -210,6 +213,7 @@ class ResearchRunner:
                         "next_action": NextAction.ASK_CLARIFICATION,
                         "reason": resolution.reason
                         or "Instrument identity is ambiguous.",
+                        "escalation_reason": resolution.reason,
                         "required_tools": [],
                         "allowed_tools": set(),
                     }
@@ -580,19 +584,21 @@ async def _run_direct_tool(
             duration_ms=round((time.perf_counter() - started) * 1000, 2),
         )
         return
-    text = json.dumps(
+    full_json = json.dumps(
         {"data": payload.get("data", {}), "provenance": provenance},
         default=str,
         sort_keys=True,
     )
+    text = format_direct_answer(tool, data, provenance) or full_json
     yield factory.make(
         ToolCompleted,
         tool=tool,
         tool_id="direct-route",
+        detail=full_json,
         duration_ms=round((time.perf_counter() - started) * 1000, 2),
     )
     if message_writer:
-        message_writer(Message(role="assistant", content=text))
+        message_writer(Message(role="assistant", content=full_json))
     yield factory.make(TextDelta, text=text)
     yield factory.make(
         RunCompleted,
@@ -601,6 +607,59 @@ async def _run_direct_tool(
         evidence_status=(
             "limited" if provenance.get("quality_status") == "degraded" else "complete"
         ),
+    )
+
+
+_PERIOD_LABELS = {
+    "1d": "1-day", "5d": "5-day", "1mo": "1-month", "3mo": "3-month",
+    "6mo": "6-month", "1y": "1-year", "2y": "2-year", "5y": "5-year",
+}  # fmt: skip
+_SOURCE_LABELS = {"yfinance": "Yahoo Finance", "upstox": "Upstox"}
+
+
+def _signed_pct(value: float) -> str:
+    sign = "+" if value >= 0 else "\u2212"
+    return f"{sign}{abs(value):.1f}%"
+
+
+def format_direct_answer(
+    tool: str, data: Any, provenance: dict[str, Any]
+) -> str | None:
+    """One-sentence answer for a price lookup, formatted from payload fields only."""
+    if tool != "data:fetch_stock_data" or not isinstance(data, dict):
+        return None
+    latest = data.get("latest")
+    if not isinstance(latest, dict) or not isinstance(latest.get("Close"), int | float):
+        return None
+    ticker = str(data.get("ticker") or provenance.get("instrument") or "").strip()
+    if not ticker:
+        return None
+    currency = provenance.get("currency")
+    symbol = {"INR": "\u20b9", "USD": "$"}.get(str(currency), "")
+    price = f"{symbol}{latest['Close']:,.2f}" + (
+        f" {currency}" if currency and not symbol else ""
+    )
+    when = ""
+    raw_date = str(latest.get("Date") or "")[:10]
+    with contextlib.suppress(ValueError):
+        when = f" on {datetime.date.fromisoformat(raw_date):%d %b %Y}"
+    changes = []
+    day = data.get("day_change_pct")
+    if isinstance(day, int | float):
+        changes.append(f"{_signed_pct(float(day))} on the day")
+    period_return = data.get("period_return_pct")
+    if isinstance(period_return, int | float):
+        label = _PERIOD_LABELS.get(
+            str(data.get("period")), str(data.get("period") or "")
+        )
+        changes.append(f"{label} {_signed_pct(float(period_return))}".strip())
+    suffix = f" ({'; '.join(changes)})" if changes else ""
+    source = _SOURCE_LABELS.get(
+        str(provenance.get("source")), str(provenance.get("source"))
+    )
+    as_of = provenance.get("as_of") or provenance.get("observed_at")
+    return (
+        f"{ticker} last close {price}{when}{suffix}. Source: {source}, as of {as_of}."
     )
 
 

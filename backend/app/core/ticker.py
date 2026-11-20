@@ -84,10 +84,19 @@ def parse_ticker(raw: str | Ticker) -> Ticker:
     return Ticker(canonical=canonical, exchange_suffix=exchange_suffix)
 
 
+def is_valid_ticker_value(value: str) -> bool:
+    """Single source of truth for allowed ticker characters (already upper-cased)."""
+    return bool(
+        _VALID_TICKER_RE.fullmatch(value)
+        and _HAS_ALNUM_RE.search(value)
+        and ".." not in value
+    )
+
+
 def _validate_ticker_value(value: str) -> None:
     if not value:
         raise ValueError("Ticker is required")
-    if not _VALID_TICKER_RE.fullmatch(value) or not _HAS_ALNUM_RE.search(value):
+    if not is_valid_ticker_value(value):
         raise ValueError("Invalid ticker format")
 
 
