@@ -5,7 +5,6 @@ from __future__ import annotations
 from typing import Any
 
 from app.config import settings
-from rich.markdown import Markdown
 from rich.markup import escape
 from textual.containers import VerticalScroll
 from textual.widgets import Static
@@ -19,6 +18,7 @@ from .app_commands import (
 )
 from .context_budget import ContextBudget
 from .render import (
+    FinMarkdown,
     render_command,
     render_debug,
     render_sources,
@@ -48,6 +48,7 @@ class CommandDispatchMixin:
     session_callback: Any
     push_screen: Any
     _run_task: Any
+    _last_artifact: str | None
     _last_query: str | None
     _mount_user: Any
     _start_run: Any
@@ -56,7 +57,8 @@ class CommandDispatchMixin:
 
     async def _note(self, text: str, classes: str = "activity") -> None:
         conversation = self.query_one("#conversation", VerticalScroll)
-        await conversation.mount(Static(escape(text), classes=classes))
+        marker = "✗" if classes == "error" else "⎿"
+        await conversation.mount(Static(f"  {marker} {escape(text)}", classes=classes))
 
     async def _show_sessions(self) -> None:
         root = self.session_store.root if self.session_store else None
@@ -82,6 +84,7 @@ class CommandDispatchMixin:
         self._response_widget = None
         self._activity_widget = None
         self._last_query = None
+        self._last_artifact = None
         history = self.session_store.load_history() if self.session_store else []
         for message in history:
             if message.role == "user":
@@ -95,7 +98,7 @@ class CommandDispatchMixin:
             elif message.role == "assistant":
                 await conversation.mount(
                     AssistantMessage(
-                        Markdown(sanitize_terminal_text(message.content)),
+                        FinMarkdown(sanitize_terminal_text(message.content)),
                         classes="message assistant-message",
                     )
                 )
@@ -132,21 +135,28 @@ class CommandDispatchMixin:
             CommandMessage(render_command(name, args), classes="command-message")
         )
         if name == "help":
-            await conversation.mount(Static("\n" + self.registry.help_text()))
+            await conversation.mount(
+                Static(self.registry.help_text(), classes="trace-panel")
+            )
         elif name in {"clear", "new"}:
             await conversation.remove_children()
             self.state = PresentationState()
             self._response_widget = None
             self._activity_widget = None
             self._last_query = None
+            self._last_artifact = None
             if name == "new" and self.new_session_callback:
                 self.new_session_callback()
                 self._refresh_chrome()
                 self._refresh_sessions()
         elif name == "status":
-            await conversation.mount(Static(status_text(self.state)))
+            await conversation.mount(
+                Static(status_text(self.state), classes="trace-panel")
+            )
         elif name == "debug":
-            await conversation.mount(Static(render_debug(self.state, self._event_log)))
+            await conversation.mount(
+                Static(render_debug(self.state, self._event_log), classes="trace-panel")
+            )
         elif name == "sources":
             await conversation.mount(
                 Static(render_sources(self.state.sources), classes="sources-message")
@@ -161,9 +171,18 @@ class CommandDispatchMixin:
                     classes="trace-panel",
                 )
             )
+        elif name == "artifact":
+            await self._note(
+                f"Run artifact · {self._last_artifact}"
+                if self._last_artifact
+                else "No run artifact yet."
+            )
         elif name == "logs":
             await conversation.mount(
-                Static("\nRun artifacts: .finai/sessions/<session>/runs/")
+                Static(
+                    "Run artifacts: .finai/sessions/<session>/runs/",
+                    classes="trace-panel",
+                )
             )
         elif name == "mode":
             if not args:

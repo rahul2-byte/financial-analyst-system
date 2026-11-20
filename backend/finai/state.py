@@ -34,6 +34,7 @@ from app.events.models import (
 
 from .plain import (
     REVIEW_UNAVAILABLE_NOTE,
+    dedupe_sources,
     friendly_error,
     provider_notice,
     review_unavailable,
@@ -78,6 +79,10 @@ class PresentationState:
     active_tools: tuple[str, ...] = ()
     activities: dict[str, ActivityState] = field(default_factory=dict)
     sources: list[dict[str, str]] = field(default_factory=list)
+    # Event sequences already applied. The runtime can emit a late-numbered
+    # event after a higher one (a response.delta numbered below the preceding
+    # model.response.completed), so ordering alone cannot detect duplicates.
+    seen_sequences: frozenset[int] = frozenset()
 
 
 def _short_detail(detail: str | None, limit: int = 120) -> str | None:
@@ -97,11 +102,20 @@ def _phase_for_stage(stage: str) -> PresentationPhase:
 
 
 def reduce_event(state: PresentationState, event: ResearchEvent) -> PresentationState:
-    """Apply one event; duplicate and late events are ignored."""
+    """Apply one event; duplicates (same sequence) are ignored.
+
+    Out-of-order sequences are applied, not dropped: dropping them lost the
+    whole report when its response.delta was numbered below an earlier event.
+    """
     sequence = event.meta.sequence
-    if sequence <= state.latest_sequence:
+    if sequence in state.seen_sequences:
         return state
-    state = replace(state, latest_sequence=sequence, last_event_type=event.type)
+    state = replace(
+        state,
+        latest_sequence=max(sequence, state.latest_sequence),
+        last_event_type=event.type,
+        seen_sequences=state.seen_sequences | {sequence},
+    )
 
     if isinstance(event, RunStarted):
         return replace(
@@ -255,7 +269,8 @@ def reduce_event(state: PresentationState, event: ResearchEvent) -> Presentation
             response_delta_count=state.response_delta_count + 1,
         )
     if isinstance(event, SourcesUpdated):
-        return replace(state, sources=list(event.sources))
+        # Each event may carry only the sources of one tool; accumulate them.
+        return replace(state, sources=dedupe_sources([*state.sources, *event.sources]))
     if isinstance(event, ApprovalRequested):
         return replace(state, phase=PresentationPhase.WAITING_FOR_APPROVAL)
     if isinstance(event, ClarificationRequested):

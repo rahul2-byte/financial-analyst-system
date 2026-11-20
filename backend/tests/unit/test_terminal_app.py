@@ -4,6 +4,7 @@ from uuid import uuid4
 
 from app.events.models import (
     ApprovalRequested,
+    ClarificationRequested,
     EventFactory,
     RunCompleted,
     RunStarted,
@@ -11,6 +12,11 @@ from app.events.models import (
     TextDelta,
 )
 from finai.app import Composer, FinAIApp
+from tests.fixtures.hdfc_run import (
+    chat_only_events,
+    hdfc_run_events,
+    partial_run_events,
+)
 from textual.widgets import Button, Static
 
 
@@ -240,8 +246,9 @@ def test_textual_app_refreshes_visible_status_while_run_is_active() -> None:
             await pilot.pause(0.1)
             status = app.query_one("#status", Static).content
             activity = app.query_one(".activity", Static).content
-            assert "researching" in str(status)
-            assert "processing" in str(activity)
+            assert "guided" in str(status)
+            assert "F1 help" in str(status)
+            assert "Searching filings" in str(activity)
 
     asyncio.run(scenario())
 
@@ -404,5 +411,141 @@ def test_approval_resubmits_as_approval_continuation() -> None:
             await pilot.press("y")
             await pilot.pause(0.1)
             assert calls == ["analyze INFY", "yes"]
+
+    asyncio.run(scenario())
+
+
+def _rendered(app: FinAIApp) -> str:
+    return "\n".join(str(widget.render()) for widget in app.query("Static"))
+
+
+def test_context_rail_is_hidden_by_default_and_f2_toggles_it() -> None:
+    async def scenario() -> None:
+        app = FinAIApp()
+        async with app.run_test(size=(160, 40)) as pilot:
+            rail = app.query_one("#context-rail")
+            assert not rail.display
+            await pilot.press("f2")
+            assert rail.display
+            await pilot.press("f2")
+            assert not rail.display
+
+    asyncio.run(scenario())
+
+
+def test_replayed_hdfc_run_renders_answer_one_sources_block_and_footer() -> None:
+    """The real run numbered its report below an already-applied event."""
+    events = hdfc_run_events()
+
+    async def stream(_query: str):
+        for event in events:
+            yield event
+
+    async def scenario() -> None:
+        app = FinAIApp(stream)
+        async with app.run_test(size=(140, 42)) as pilot:
+            await pilot.click("#composer")
+            await pilot.press(*"HDFCBANK", "enter")
+            await pilot.pause(0.5)
+            assert len(app.state.response_text) > 400
+            messages = list(app.query(".assistant-message"))
+            assert len(messages) == 1
+            body = messages[0].body.content  # type: ignore[attr-defined]
+            assert "Executive summary" in body.markup
+            assert len(list(app.query(".sources-message"))) == 1
+            assert len(list(app.query(".run-footer"))) == 1
+            text = _rendered(app)
+            assert "Run artifact" not in text
+            assert "✓ complete · 51.4s · 3 sources" in text
+            assert "Gathered evidence · 4 tools" in text
+            assert "⎿" not in text  # collapsed after completion
+            await pilot.press("ctrl+o")
+            await pilot.pause(0.1)
+            assert "Fetched fundamentals · received 17 fields" in _rendered(app)
+            await pilot.press("ctrl+o")
+            await pilot.pause(0.1)
+            assert "⎿" not in _rendered(app)
+            await pilot.press(*"/artifact", "enter")
+            await pilot.pause(0.1)
+            assert "run.json" in _rendered(app)
+
+    asyncio.run(scenario())
+
+
+def test_clarification_renders_as_assistant_answer_with_candidates() -> None:
+    prompt = (
+        "Which company did you mean?\n- HDFC Bank (HDFCBANK)\n- HDFC Life (HDFCLIFE)"
+    )
+
+    async def stream(_query: str):
+        factory = EventFactory(uuid4())
+        yield factory.make(RunStarted, query="hdfc")
+        yield factory.make(ClarificationRequested, prompt=prompt)
+        yield factory.make(RunCompleted, terminal_status="awaiting_clarification")
+
+    async def scenario() -> None:
+        app = FinAIApp(stream)
+        async with app.run_test(size=(100, 30)) as pilot:
+            await pilot.click("#composer")
+            await pilot.press(*"hdfc", "enter")
+            await pilot.pause(0.2)
+            messages = list(app.query(".assistant-message"))
+            assert len(messages) == 1
+            markup = messages[0].body.content.markup  # type: ignore[attr-defined]
+            assert "HDFCBANK" in markup and "HDFC Bank" in markup
+            assert "HDFCLIFE" in markup and "HDFC Life" in markup
+            assert "FIN-AI" not in markup
+            assert not list(app.query(".run-footer"))
+
+    asyncio.run(scenario())
+
+
+def test_chat_only_reply_shows_no_trail_and_no_disclaimer() -> None:
+    events = chat_only_events()
+
+    async def stream(_query: str):
+        for event in events:
+            yield event
+
+    async def scenario() -> None:
+        app = FinAIApp(stream)
+        async with app.run_test(size=(120, 36)) as pilot:
+            await pilot.click("#composer")
+            await pilot.press(*"Hello", "enter")
+            await pilot.pause(0.4)
+            text = _rendered(app)
+            assert "Hello! Ask me" in text or app.state.response_text
+            assert "Preparing research" not in text
+            assert "Gathered evidence" not in text
+            assert "limited to verified data" not in text
+            assert all(not w.display for w in app.query(".run-activity"))
+
+    asyncio.run(scenario())
+
+
+def test_partial_run_names_failure_in_footer_and_never_leaks_raw_ids() -> None:
+    events = partial_run_events()
+
+    async def stream(_query: str):
+        for event in events:
+            yield event
+
+    async def scenario() -> None:
+        app = FinAIApp(stream)
+        async with app.run_test(size=(140, 42)) as pilot:
+            await pilot.click("#composer")
+            await pilot.press(*"hdfc", "enter")
+            await pilot.pause(0.4)
+            text = _rendered(app)
+            assert "Gathered evidence · 3 tools · news unavailable" in text
+            assert "◐ partial · news unavailable · 58.1s · 2 sources" in text
+            assert "limited to verified data" not in text
+            await pilot.press("ctrl+o")
+            await pilot.pause(0.1)
+            text = _rendered(app)
+            assert "✗ News · no usable articles" in text
+            assert "news:" not in text
+            header = str(app.query_one("#topbar").render())
+            assert header.rstrip().endswith("HDFCBANK.NS")
 
     asyncio.run(scenario())

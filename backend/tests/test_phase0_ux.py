@@ -171,7 +171,7 @@ def test_mode_validates_and_sets_mode() -> None:
         async with app.run_test(size=(100, 30)) as pilot:
             await _submit(app, pilot, "/mode review")
             assert app.mode == "review"
-            assert "review" in _plain(app.query_one("#topbar", Static))
+            assert "review" in _plain(app.query_one("#status", Static))
             await _submit(app, pilot, "/mode bogus")
             assert app.mode == "review"
             assert "guided, review, autonomous" in _text(app)
@@ -239,9 +239,7 @@ def test_one_shot_clarification_exits_2(capsys: pytest.CaptureFixture[str]) -> N
 # F-13
 @pytest.mark.parametrize("width", [40, 60, 80, 120])
 def test_header_is_single_line(width: int) -> None:
-    text = render_header(
-        PresentationState(), mode="guided", session_id="1234567890", width=width
-    )
+    text = render_header(PresentationState(), instrument="HDFCBANK.NS", width=width)
     assert "\n" not in text.plain
     assert len(text.plain) <= width
 

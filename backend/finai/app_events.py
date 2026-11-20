@@ -25,7 +25,6 @@ ACTIVITY_EVENTS = frozenset(
     }
 )
 TERMINAL_EVENTS = frozenset({"run.completed", "run.cancelled", "run.failed"})
-TOOL_EVENTS = frozenset({"tool.started", "tool.progress"})
 
 
 def is_activity_event(event_type: str) -> bool:
@@ -34,7 +33,3 @@ def is_activity_event(event_type: str) -> bool:
 
 def is_terminal_event(event_type: str) -> bool:
     return event_type in TERMINAL_EVENTS
-
-
-def is_tool_event(event_type: str) -> bool:
-    return event_type in TOOL_EVENTS

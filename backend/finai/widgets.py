@@ -2,8 +2,12 @@
 
 from __future__ import annotations
 
+from typing import Any
+
+from rich.console import RenderableType
 from rich.text import Text
-from textual.containers import Vertical
+from textual.app import ComposeResult
+from textual.containers import Horizontal, Vertical
 from textual.message import Message as TextualMessage
 from textual.widgets import Button, Static, TextArea
 
@@ -12,12 +16,23 @@ class UserMessage(Static):
     """A stable, visually distinct user turn."""
 
 
-class AssistantMessage(Static):
-    """A single assistant turn updated as response deltas arrive."""
+class AssistantMessage(Horizontal):
+    """One assistant turn: a ledger bullet and a body updated as deltas arrive."""
+
+    def __init__(self, content: RenderableType = "", **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.body = Static(content, classes="assistant-body")
+
+    def compose(self) -> ComposeResult:
+        yield Static("●", classes="assistant-bullet")
+        yield self.body
+
+    def update(self, content: RenderableType) -> None:
+        self.body.update(content)
 
 
 class RunActivity(Static):
-    """One live activity view for one run; never duplicated per event."""
+    """One compact activity trail per run, updated in place."""
 
 
 class CommandMessage(Static):
@@ -25,7 +40,7 @@ class CommandMessage(Static):
 
 
 class AppHeader(Static):
-    """Persistent identity and run-status chrome."""
+    """One-line brand and session chrome."""
 
 
 class NavigationRail(Vertical):

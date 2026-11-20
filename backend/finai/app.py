@@ -10,30 +10,38 @@ import time
 from collections.abc import AsyncIterator, Callable
 from typing import ClassVar
 
+from app.config import settings
 from app.events.models import ResearchEvent
 from rich.markup import escape
 from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, VerticalScroll
-from textual.css.query import NoMatches
 from textual.message import Message
 from textual.timer import Timer
 from textual.widgets import Button, Static, TextArea
 
 from .app_dispatch import CommandDispatchMixin
-from .app_events import is_activity_event, is_terminal_event, is_tool_event
+from .app_events import is_activity_event, is_terminal_event
 from .commands import CommandRegistry, parse_command
+from .plain import friendly_error
 from .render import (
     FINAI_RICH_THEME,
+    SPINNER_FRAMES,
+    has_tool_trail,
+    instrument_from_sources,
     render_activity,
+    render_clarification,
     render_context,
+    render_footer,
     render_header,
+    render_hints,
     render_response,
     render_saved_report,
     render_sources,
-    render_status,
     render_user_message,
+    render_welcome,
 )
+from .safety import sanitize_terminal_text
 from .screens import ApprovalScreen, HelpScreen
 from .session_store import SessionStore
 from .state import PresentationPhase, PresentationState, reduce_event
@@ -47,35 +55,6 @@ from .widgets import (
     RunActivity,
     UserMessage,
 )
-
-WELCOME = """WELCOME TO
-
-FIN-AI
-
-Financial intelligence, grounded in evidence.
-
-Ask about companies, markets, financial statements, technical analysis,
-news, sectors, and macroeconomic trends.
-
-YOUR RESEARCH ASSISTANT
-
-Ask about companies, markets, or financial data. I'll research, analyze,
-and provide evidence-based insights from trusted sources.
-
-TRY ONE OF THESE EXAMPLES
-
-→ Analyse HDFC Bank for the last 1 year
-→ Summarize TCS's latest quarterly results
-→ Compare Reliance vs Infosys fundamentals
-→ Analyse the Indian banking sector outlook
-→ Latest news affecting IT stocks
-→ Calculate HDFC Bank key ratios
-
-CAPABILITIES
-
-Stock & Market Data  ·  Fundamental Analysis  ·  Technical Analysis
-News & Sentiment      ·  Research & Reports"""
-
 
 # Streaming markdown is re-parsed on every render, so deltas are coalesced.
 RENDER_INTERVAL_S = 0.08
@@ -104,6 +83,8 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         ("ctrl+n", "new_research", "New research"),
         ("ctrl+k", "sessions", "Sessions"),
         ("ctrl+b", "toggle_sidebar", "Toggle sidebar"),
+        ("f2", "toggle_context", "Toggle context panel"),
+        ("ctrl+o", "toggle_trail", "Expand evidence trail"),
         ("ctrl+e", "export", "Export"),
         ("ctrl+c", "cancel_or_exit", "Cancel / Exit"),
         ("ctrl+shift+c", "copy_text", "Copy selection"),
@@ -138,7 +119,10 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         self._run_task: asyncio.Task[None] | None = None
         self._spinner_index = 0
         self._response_widget: AssistantMessage | None = None
+        self._clarified = False
+        self._last_artifact: str | None = None
         self._activity_widget: RunActivity | None = None
+        self._trail_expanded = False
         self._run_started_at: float | None = None
         self._event_log: list[str] = []
         self._command_selection = 0
@@ -156,17 +140,15 @@ class FinAIApp(CommandDispatchMixin, App[None]):
             yield NavigationRail(
                 id="navigation",
             )
-            yield VerticalScroll(Static(WELCOME, id="welcome"), id="conversation")
+            yield VerticalScroll(
+                Static(render_welcome(), id="welcome"), id="conversation"
+            )
             yield ContextRail(id="context-rail")
-        yield Static("FIN-AI · ready", id="status")
-        with Horizontal(id="composer-row"):
-            yield Composer(placeholder="Ask FIN-AI...", id="composer")
-            yield Button("Send", variant="primary", id="send")
         yield Static("", id="command-menu")
-        yield Static(
-            "Enter send · Shift+Enter newline · / commands · Esc cancel · F1 help",
-            id="hints",
-        )
+        with Horizontal(id="composer-row"):
+            yield Composer(placeholder="Ask FIN-AI…", id="composer")
+            yield Button("Send", variant="primary", id="send")
+        yield Static("", id="status")
 
     def get_theme_variable_defaults(self) -> dict[str, str]:
         return CSS_VARIABLES
@@ -194,6 +176,14 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         active = self.session_store.session_id if self.session_store else None
         sessions = SessionStore.list_sessions(root) if root else []
         self.query_one("#navigation", NavigationRail).show_sessions(sessions, active)
+
+    def action_toggle_trail(self) -> None:
+        """Expand or collapse the latest answer's evidence trail."""
+        self._trail_expanded = not self._trail_expanded
+        self._render_trail()
+
+    def action_toggle_context(self) -> None:
+        self.query_one("#context-rail").toggle_class("visible")
 
     def action_toggle_sidebar(self) -> None:
         self.query_one("#navigation").display = not self.query_one(
@@ -227,31 +217,46 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         self.query_one("#topbar", AppHeader).update(
             render_header(
                 self.state,
+                instrument=instrument_from_sources(self.state.sources),
+                width=self.size.width - 2,
+            )
+        )
+        model = settings.OPENROUTER_MODEL.rsplit("/", 1)[-1]
+        self.query_one("#status", Static).update(
+            render_hints(
                 mode=self.mode,
+                model=model,
                 session_id=session_id,
-                width=self.size.width,
+                width=self.size.width - 6,
             )
         )
         self.query_one("#context-rail", ContextRail).update(
             render_context(self.state, mode=self.mode, session_id=session_id)
         )
 
-    def _tick_activity(self) -> None:
-        if not self._run_task or self._run_task.done():
+    def _render_trail(self) -> None:
+        """Re-render the run's single activity line group in place."""
+        widget = self._activity_widget
+        if widget is None or not widget.is_attached:
             return
-        self._spinner_index = (self._spinner_index + 1) % 4
-        spinner = ("◉", "◌", "○", "◌")[self._spinner_index]
+        running = bool(self._run_task and not self._run_task.done())
         elapsed_s = (
             time.monotonic() - self._run_started_at if self._run_started_at else None
         )
-        try:
-            self.query_one("#status", Static).update(
-                render_status(self.state, spinner=spinner, elapsed_s=elapsed_s)
+        widget.update(
+            render_activity(
+                self.state,
+                spinner=SPINNER_FRAMES[self._spinner_index] if running else None,
+                elapsed_s=elapsed_s if running else None,
+                expanded=self._trail_expanded,
             )
-            self._refresh_chrome()
-        except NoMatches:
-            # Textual may tick once while its test/runtime screen is unmounting.
+        )
+
+    def _tick_activity(self) -> None:
+        if not self._run_task or self._run_task.done():
             return
+        self._spinner_index = (self._spinner_index + 1) % len(SPINNER_FRAMES)
+        self._render_trail()
 
     def on_text_area_changed(self, message: TextArea.Changed) -> None:
         if message.text_area.id == "composer":
@@ -290,7 +295,8 @@ class FinAIApp(CommandDispatchMixin, App[None]):
             self._mount_user(query)
             await self._mount(
                 Static(
-                    "Queued · will run after the current request", classes="activity"
+                    "  ⎿ Queued · will run after the current request",
+                    classes="activity",
                 )
             )
             return
@@ -328,13 +334,13 @@ class FinAIApp(CommandDispatchMixin, App[None]):
             conversation = self.query_one("#conversation", VerticalScroll)
             if self.session_store is None:
                 await conversation.mount(
-                    Static("No saved report is available.", classes="activity")
+                    Static("  ⎿ No saved report is available.", classes="activity")
                 )
                 return
             report = SessionStore.latest_saved_report(self.session_store.root)
             if report is None:
                 await conversation.mount(
-                    Static("No saved report is available.", classes="activity")
+                    Static("  ⎿ No saved report is available.", classes="activity")
                 )
                 return
             await conversation.mount(
@@ -384,23 +390,24 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         self._run_started_at = time.monotonic()
         self._event_log = []
         self._response_widget = None
-        self._activity_widget = RunActivity(
-            "◉ Preparing research...", classes="run-activity activity"
-        )
+        self._clarified = False
+        self._trail_expanded = False
+        self._delta_dirty = False
+        self._activity_widget = RunActivity("", classes="run-activity activity")
         self.query_one("#conversation", VerticalScroll).mount(self._activity_widget)
-        self.query_one("#status", Static).update("◉ FIN-AI · preparing research...")
         self._refresh_chrome()
         if self.event_stream:
             self._run_task = asyncio.create_task(
                 self._consume(self.event_stream(query), self._activity_widget)
             )
+        self._render_trail()
 
     def _at_bottom(self, conversation: VerticalScroll) -> bool:
         return (
             conversation.scroll_y >= conversation.max_scroll_y - SCROLL_BOTTOM_TOLERANCE
         )
 
-    def _flush_response(self, *, streaming: bool = True) -> None:
+    def _flush_response(self) -> None:
         """Render the accumulated response once and clear the dirty flag."""
         if self._delta_timer is not None:
             self._delta_timer.stop()
@@ -412,7 +419,7 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         self._delta_dirty = False
         self._last_delta_render = time.monotonic()
         self.response_render_count += 1
-        widget.update(render_response(self.state, streaming=streaming))
+        widget.update(render_response(self.state))
         conversation = self.query_one("#conversation", VerticalScroll)
         if self._follow_bottom:
             conversation.scroll_end(animate=False)
@@ -433,6 +440,67 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         if self._run_task is None and self._queued_prompts:
             self._start_run(self._queued_prompts.pop(0))
 
+    async def _ensure_response_widget(
+        self, conversation: VerticalScroll
+    ) -> AssistantMessage:
+        if self._response_widget is None:
+            self._response_widget = AssistantMessage(
+                classes="message assistant-message"
+            )
+            await conversation.mount(self._response_widget)
+        return self._response_widget
+
+    async def _finish_run(
+        self, event: ResearchEvent, conversation: VerticalScroll
+    ) -> None:
+        """Close one run: final answer, one sources block, one footer line."""
+        self._delta_dirty = False
+        if self._delta_timer is not None:
+            self._delta_timer.stop()
+            self._delta_timer = None
+        if self.state.response_text and not self._clarified:
+            widget = await self._ensure_response_widget(conversation)
+            widget.update(render_response(self.state))
+        if self._activity_widget is not None:
+            self._render_trail()
+            if not has_tool_trail(self.state):
+                self._activity_widget.display = False
+        duration_ms = getattr(event, "duration_ms", None)
+        elapsed_s = (
+            duration_ms / 1000
+            if duration_ms
+            else time.monotonic() - self._run_started_at
+            if self._run_started_at
+            else None
+        )
+        if event.type == "run.completed":
+            self._last_artifact = getattr(event, "artifact_path", None)
+        if self._clarified:
+            return
+        if event.type == "run.failed" and self.state.error:
+            await conversation.mount(
+                Static(
+                    "✗ "
+                    + escape(sanitize_terminal_text(friendly_error(self.state.error))),
+                    classes="error",
+                )
+            )
+        if self.state.sources:
+            await conversation.mount(
+                Static(render_sources(self.state.sources), classes="sources-message")
+            )
+        chat_only = (
+            not has_tool_trail(self.state)
+            and not self.state.sources
+            and event.type != "run.failed"
+            and self.state.phase.value != "failed"
+        )
+        if chat_only:
+            return
+        await conversation.mount(
+            Static(render_footer(self.state, elapsed_s=elapsed_s), classes="run-footer")
+        )
+
     async def _consume(
         self, events: AsyncIterator[ResearchEvent], activity: RunActivity | None
     ) -> None:
@@ -446,69 +514,26 @@ class FinAIApp(CommandDispatchMixin, App[None]):
                 self.state = reduce_event(self.state, event)
                 self._refresh_chrome()
                 if event.type == "response.delta":
-                    if self._response_widget is None:
-                        self._response_widget = AssistantMessage(
-                            classes="message assistant-message"
-                        )
-                        await conversation.mount(self._response_widget)
+                    await self._ensure_response_widget(conversation)
                     self._schedule_response_render()
                 elif is_activity_event(event.type):
-                    if self._activity_widget is not None:
-                        if is_tool_event(event.type):
-                            self._activity_widget.add_class("tool-event")
-                        elif event.type in {"tool.completed", "sources.updated"}:
-                            self._activity_widget.remove_class("tool-event")
-                            self._activity_widget.add_class("result-event")
-                    if (
-                        is_terminal_event(event.type)
-                        and self._activity_widget is not None
-                    ):
-                        self._activity_widget.display = False
-                    if self._activity_widget is not None:
-                        self._activity_widget.update(render_activity(self.state))
-                    if (
-                        event.type == "run.completed"
-                        and self._response_widget is not None
-                    ):
-                        self._delta_dirty = False
-                        self._response_widget.update(render_response(self.state))
-                    if event.type == "run.completed" and event.artifact_path:
-                        await conversation.mount(
-                            Static(
-                                f"Run artifact: {escape(event.artifact_path)}",
-                                classes="activity",
-                            )
-                        )
+                    self._render_trail()
+                    if is_terminal_event(event.type):
+                        await self._finish_run(event, conversation)
                 elif event.type == "approval.requested":
                     self.push_screen(
                         ApprovalScreen(event.prompt, event.details),
                         self._approval_result,
                     )
-                    if self._activity_widget is not None:
-                        self._activity_widget.update(render_activity(self.state))
+                    self._render_trail()
                 elif event.type == "clarification.requested":
+                    self._clarified = True
                     await conversation.mount(
                         AssistantMessage(
-                            f"FIN-AI\n\nNeeds clarification\n{escape(event.prompt)}",
+                            render_clarification(event.prompt),
                             classes="message assistant-message",
                         )
                     )
-                elif event.type == "sources.updated":
-                    await conversation.mount(
-                        Static(
-                            render_sources(self.state.sources),
-                            classes="sources-message",
-                        )
-                    )
-                elapsed_s = (
-                    time.monotonic() - self._run_started_at
-                    if self._run_started_at
-                    else None
-                )
-                self.query_one("#status", Static).update(
-                    render_status(self.state, elapsed_s=elapsed_s)
-                )
-                self._refresh_chrome()
                 if self._follow_bottom:
                     conversation.scroll_end(animate=False)
         except asyncio.CancelledError:
@@ -517,26 +542,29 @@ class FinAIApp(CommandDispatchMixin, App[None]):
                 query=self.state.query,
                 run_id=self.state.run_id,
                 response_text=self.state.response_text,
+                activities=self.state.activities,
+                sources=self.state.sources,
+                terminal_status="cancelled",
             )
             if self.is_attached:
-                self.query_one("#status", Static).update("FIN-AI · cancelled")
                 self._refresh_chrome()
             self._flush_response()
-            if activity is not None and activity.is_attached:
-                # Clear the "processing" indicator and leave a visible outcome.
+            if activity is not None and not self.state.activities:
                 activity.display = False
             if self.is_attached:
-                conversation.mount(Static("✓ Cancelled", classes="activity cancelled"))
+                self._render_trail()
+                conversation.mount(
+                    Static("· Cancelled", classes="run-footer cancelled")
+                )
                 conversation.scroll_end(animate=False)
         except Exception as exc:  # noqa: BLE001 - UI boundary must remain usable
             if self.is_attached:
                 await conversation.mount(
                     Static(
-                        f"✗ FIN-AI stopped unexpectedly\n\n  {escape(str(exc))}\n\n  /debug for the full local trace",
-                        classes="message error",
+                        f"✗ FIN-AI stopped unexpectedly: {escape(str(exc))} · /debug for the full local trace",
+                        classes="error",
                     )
                 )
-                self.query_one("#status", Static).update("FIN-AI · failed")
                 self._refresh_chrome()
         finally:
             self._flush_response()
@@ -563,9 +591,9 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         if self.clear_pending_callback:
             self.clear_pending_callback()
         self.state = PresentationState()
-        self.query_one("#status", Static).update("FIN-AI · ready")
+        self._refresh_chrome()
         self.query_one("#conversation", VerticalScroll).mount(
-            Static("✓ Approval rejected", classes="activity")
+            Static("  ⎿ Approval rejected", classes="activity")
         )
 
     def action_cancel_run(self) -> None:
@@ -576,7 +604,7 @@ class FinAIApp(CommandDispatchMixin, App[None]):
                 query=self.state.query,
                 response_text=self.state.response_text,
             )
-            self.query_one("#status", Static).update("FIN-AI · cancelling...")
+            self._refresh_chrome()
             self._run_task.cancel()
 
     def action_cancel_or_exit(self) -> None:
@@ -591,4 +619,4 @@ class FinAIApp(CommandDispatchMixin, App[None]):
     async def action_clear_screen(self) -> None:
         conversation = self.query_one("#conversation", VerticalScroll)
         await conversation.remove_children()
-        await conversation.mount(Static(WELCOME, id="welcome"))
+        await conversation.mount(Static(render_welcome(), id="welcome"))

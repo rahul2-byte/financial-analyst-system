@@ -29,6 +29,7 @@ class CommandRegistry:
                     ("status", "Show current run status"),
                     ("debug", "Show last event and error details"),
                     ("trace", "Show the current execution trace"),
+                    ("artifact", "Show the last run's artifact path"),
                     ("logs", "Show local run artifact location"),
                     ("mode", "Choose guided, review, or autonomous mode"),
                     ("context", "Show context budget and compaction state"),

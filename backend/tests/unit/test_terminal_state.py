@@ -110,3 +110,20 @@ def test_reducer_keeps_unstarted_tool_failure_visible() -> None:
 
     assert state.activities["tool:call-bad"].status == "failed"
     assert state.activities["tool:call-bad"].detail == "invalid arguments"
+
+
+def test_reducer_applies_out_of_order_sequence_once() -> None:
+    factory = EventFactory(conversation_id=uuid4())
+    state = reduce_event(PresentationState(), factory.make(RunStarted, query="INFY"))
+    late = factory.make(TextDelta, text="report")
+    later = factory.make(RunCompleted, terminal_status="success")
+    later = later.model_copy(
+        update={"meta": later.meta.model_copy(update={"sequence": 50})}
+    )
+
+    state = reduce_event(state, later)
+    state = reduce_event(state, late)
+    state = reduce_event(state, late)
+
+    assert state.response_text == "report"
+    assert state.latest_sequence == 50

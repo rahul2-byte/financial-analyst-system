@@ -1,0 +1,270 @@
+[
+ {
+  "type": "run.started",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 1
+  },
+  "query": "HDFCBANK"
+ },
+ {
+  "type": "stage.started",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 3
+  },
+  "stage": "agent",
+  "label": "Preparing research"
+ },
+ {
+  "type": "model.response.completed",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 8
+  },
+  "round": 1,
+  "has_tool_calls": true
+ },
+ {
+  "type": "tool.started",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 9
+  },
+  "tool": "data:fetch_fundamentals",
+  "tool_id": "call_6a5506c9b1e44053b1ba869e26e1a83a",
+  "detail": null
+ },
+ {
+  "type": "tool.progress",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 10
+  },
+  "tool": "data:fetch_fundamentals",
+  "tool_id": "call_6a5506c9b1e44053b1ba869e26e1a83a",
+  "message": "Running data:fetch_fundamentals"
+ },
+ {
+  "type": "tool.completed",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 11
+  },
+  "tool": "data:fetch_fundamentals",
+  "tool_id": "call_6a5506c9b1e44053b1ba869e26e1a83a",
+  "detail": "received 17 fields",
+  "duration_ms": 1184.28
+ },
+ {
+  "type": "sources.updated",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 12
+  },
+  "sources": [
+   {
+    "name": "upstox",
+    "url": "https://api.upstox.com"
+   }
+  ]
+ },
+ {
+  "type": "tool.started",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 13
+  },
+  "tool": "analysis:get_technical_overview",
+  "tool_id": "call_383724b93e26433b863e21b45c92cd52",
+  "detail": null
+ },
+ {
+  "type": "tool.progress",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 14
+  },
+  "tool": "analysis:get_technical_overview",
+  "tool_id": "call_383724b93e26433b863e21b45c92cd52",
+  "message": "Running analysis:get_technical_overview"
+ },
+ {
+  "type": "tool.completed",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 15
+  },
+  "tool": "analysis:get_technical_overview",
+  "tool_id": "call_383724b93e26433b863e21b45c92cd52",
+  "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+  "duration_ms": 1665.63
+ },
+ {
+  "type": "sources.updated",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 16
+  },
+  "sources": [
+   {
+    "name": "yfinance",
+    "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+   }
+  ]
+ },
+ {
+  "type": "tool.started",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 17
+  },
+  "tool": "news:fetch_news",
+  "tool_id": "call_76a1f49219084abb844e421b45d0a28c",
+  "detail": null
+ },
+ {
+  "type": "tool.progress",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 18
+  },
+  "tool": "news:fetch_news",
+  "tool_id": "call_76a1f49219084abb844e421b45d0a28c",
+  "message": "Running news:fetch_news"
+ },
+ {
+  "type": "tool.completed",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 19
+  },
+  "tool": "news:fetch_news",
+  "tool_id": "call_76a1f49219084abb844e421b45d0a28c",
+  "detail": "{\"news_quality\": {\"below_threshold_count\": 2, \"connector_elapsed_ms\": 7885.61, \"connector_",
+  "duration_ms": 15943.78
+ },
+ {
+  "type": "sources.updated",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 20
+  },
+  "sources": [
+   {
+    "name": "upstox.com",
+    "url": "https://upstox.com/news/market-news/stocks/hdfc-bank-shares-fall-over-1-amid-market-weakness-stock-turns-positive-over-6-months/article-203405/"
+   }
+  ]
+ },
+ {
+  "type": "model.response.completed",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 25
+  },
+  "round": 2,
+  "has_tool_calls": true
+ },
+ {
+  "type": "tool.started",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 26
+  },
+  "tool": "analysis:run_fundamental_scan",
+  "tool_id": "call_131e7a59fba54c5b9883e0dc8191c1f2",
+  "detail": null
+ },
+ {
+  "type": "tool.progress",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 27
+  },
+  "tool": "analysis:run_fundamental_scan",
+  "tool_id": "call_131e7a59fba54c5b9883e0dc8191c1f2",
+  "message": "Running analysis:run_fundamental_scan"
+ },
+ {
+  "type": "tool.completed",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 28
+  },
+  "tool": "analysis:run_fundamental_scan",
+  "tool_id": "call_131e7a59fba54c5b9883e0dc8191c1f2",
+  "detail": "key values: peRatio=15.13, priceToBook=2.1, returnOnEquity=0.1375",
+  "duration_ms": 27.01
+ },
+ {
+  "type": "sources.updated",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 29
+  },
+  "sources": [
+   {
+    "name": "upstox",
+    "url": "https://api.upstox.com"
+   }
+  ]
+ },
+ {
+  "type": "model.response.completed",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 1361
+  },
+  "round": 4,
+  "has_tool_calls": false
+ },
+ {
+  "type": "response.delta",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 1330
+  },
+  "text": "## Research report\n\n### Executive summary\nHDFC Bank closed at **₹846.0**, about 11% above its 200-day average. Momentum is strong but stretched: RSI(14) is **77.9**, which is overbought.\n\n### Key figures\n| Metric | Value |\n| --- | ---: |\n| P/E ratio | 15.13 |\n| Price to book | 2.10 |\n| Return on equity | 13.75% |\n\n### Verdict\nFundamentals are reasonable and the trend is up, but an RSI near 78 argues for waiting on a pullback [3]. This is research, not investment advice.\n"
+ },
+ {
+  "type": "run.completed",
+  "meta": {
+   "run_id": "195e05a9-db73-4a04-a515-6230aa3ee924",
+   "conversation_id": "cf51ae03-6a06-4819-91eb-defa87e829f6",
+   "sequence": 1362
+  },
+  "terminal_status": "success",
+  "duration_ms": 51400.0,
+  "artifact_path": ".finai/sessions/demo/runs/run.json",
+  "evidence_status": "limited",
+  "evidence_availability": [],
+  "completion_reason": null,
+  "output_review": null,
+  "route_reason_codes": [
+   "jev_route"
+  ]
+ }
+]

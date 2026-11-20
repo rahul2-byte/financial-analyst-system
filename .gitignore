@@ -88,3 +88,6 @@ backend/mempalace.yaml
 
 # internal audit/work notes
 audit/
+
+# Intermediate SVGs from scripts/tui_screenshot.py (PNGs are kept)
+docs/design/screenshots/*.svg
