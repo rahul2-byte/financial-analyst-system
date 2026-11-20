@@ -16,6 +16,8 @@ from textual import events
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, VerticalScroll
 from textual.css.query import NoMatches
+from textual.message import Message
+from textual.timer import Timer
 from textual.widgets import Button, Static, TextArea
 
 from .app_dispatch import CommandDispatchMixin
@@ -75,6 +77,19 @@ Stock & Market Data  ·  Fundamental Analysis  ·  Technical Analysis
 News & Sentiment      ·  Research & Reports"""
 
 
+# Streaming markdown is re-parsed on every render, so deltas are coalesced.
+RENDER_INTERVAL_S = 0.08
+SCROLL_BOTTOM_TOLERANCE = 3
+
+
+class RunFinished(Message):
+    """Posted when a run task ends so the message loop can start queued work."""
+
+    def __init__(self, task: asyncio.Task[None] | None) -> None:
+        super().__init__()
+        self.task = task
+
+
 class FinAIApp(CommandDispatchMixin, App[None]):
     """Terminal application; domain code remains outside the UI."""
 
@@ -129,6 +144,11 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         self._command_selection = 0
         self._queued_prompts: list[str] = []
         self._last_query: str | None = None
+        self._follow_bottom = True
+        self._delta_dirty = False
+        self._delta_timer: Timer | None = None
+        self._last_delta_render = 0.0
+        self.response_render_count = 0
 
     def compose(self) -> ComposeResult:
         yield AppHeader(id="topbar")
@@ -372,13 +392,56 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         self._refresh_chrome()
         if self.event_stream:
             self._run_task = asyncio.create_task(
-                self._consume(self.event_stream(query))
+                self._consume(self.event_stream(query), self._activity_widget)
             )
 
-    async def _consume(self, events: AsyncIterator[ResearchEvent]) -> None:
+    def _at_bottom(self, conversation: VerticalScroll) -> bool:
+        return (
+            conversation.scroll_y >= conversation.max_scroll_y - SCROLL_BOTTOM_TOLERANCE
+        )
+
+    def _flush_response(self, *, streaming: bool = True) -> None:
+        """Render the accumulated response once and clear the dirty flag."""
+        if self._delta_timer is not None:
+            self._delta_timer.stop()
+            self._delta_timer = None
+        widget = self._response_widget
+        if not self._delta_dirty or widget is None or not widget.is_attached:
+            self._delta_dirty = False
+            return
+        self._delta_dirty = False
+        self._last_delta_render = time.monotonic()
+        self.response_render_count += 1
+        widget.update(render_response(self.state, streaming=streaming))
         conversation = self.query_one("#conversation", VerticalScroll)
+        if self._follow_bottom:
+            conversation.scroll_end(animate=False)
+
+    def _schedule_response_render(self) -> None:
+        self._delta_dirty = True
+        if self._delta_timer is not None:
+            return
+        wait = RENDER_INTERVAL_S - (time.monotonic() - self._last_delta_render)
+        if wait <= 0:
+            self._flush_response()
+        else:
+            self._delta_timer = self.set_timer(wait, self._flush_response)
+
+    async def on_run_finished(self, message: RunFinished) -> None:
+        if self._run_task is message.task:
+            self._run_task = None
+        if self._run_task is None and self._queued_prompts:
+            self._start_run(self._queued_prompts.pop(0))
+
+    async def _consume(
+        self, events: AsyncIterator[ResearchEvent], activity: RunActivity | None
+    ) -> None:
+        conversation = self.query_one("#conversation", VerticalScroll)
+        task = asyncio.current_task()
+        self._follow_bottom = True
         try:
             async for event in events:
+                self._follow_bottom = self._at_bottom(conversation)
                 self._event_log.append(f"#{event.meta.sequence} {event.type}")
                 self.state = reduce_event(self.state, event)
                 self._refresh_chrome()
@@ -388,9 +451,7 @@ class FinAIApp(CommandDispatchMixin, App[None]):
                             classes="message assistant-message"
                         )
                         await conversation.mount(self._response_widget)
-                    self._response_widget.update(
-                        render_response(self.state, streaming=True)
-                    )
+                    self._schedule_response_render()
                 elif is_activity_event(event.type):
                     if self._activity_widget is not None:
                         if is_tool_event(event.type):
@@ -409,6 +470,7 @@ class FinAIApp(CommandDispatchMixin, App[None]):
                         event.type == "run.completed"
                         and self._response_widget is not None
                     ):
+                        self._delta_dirty = False
                         self._response_widget.update(render_response(self.state))
                     if event.type == "run.completed" and event.artifact_path:
                         await conversation.mount(
@@ -447,8 +509,8 @@ class FinAIApp(CommandDispatchMixin, App[None]):
                     render_status(self.state, elapsed_s=elapsed_s)
                 )
                 self._refresh_chrome()
-                conversation.scroll_end(animate=False)
-                await asyncio.sleep(0.01)
+                if self._follow_bottom:
+                    conversation.scroll_end(animate=False)
         except asyncio.CancelledError:
             self.state = PresentationState(
                 phase=PresentationPhase.CANCELLED,
@@ -459,8 +521,13 @@ class FinAIApp(CommandDispatchMixin, App[None]):
             if self.is_attached:
                 self.query_one("#status", Static).update("FIN-AI · cancelled")
                 self._refresh_chrome()
-            if self._activity_widget is not None and self._activity_widget.is_attached:
-                self._activity_widget.update(render_activity(self.state))
+            self._flush_response()
+            if activity is not None and activity.is_attached:
+                # Clear the "processing" indicator and leave a visible outcome.
+                activity.display = False
+            if self.is_attached:
+                conversation.mount(Static("✓ Cancelled", classes="activity cancelled"))
+                conversation.scroll_end(animate=False)
         except Exception as exc:  # noqa: BLE001 - UI boundary must remain usable
             if self.is_attached:
                 await conversation.mount(
@@ -471,12 +538,10 @@ class FinAIApp(CommandDispatchMixin, App[None]):
                 )
                 self.query_one("#status", Static).update("FIN-AI · failed")
                 self._refresh_chrome()
-        if (
-            self._queued_prompts
-            and self.state.phase is not PresentationPhase.CANCELLING
-        ):
-            next_query = self._queued_prompts.pop(0)
-            self._start_run(next_query)
+        finally:
+            self._flush_response()
+            if self.is_attached:
+                self.post_message(RunFinished(task))
 
     def _approval_result(self, approved: bool | None) -> None:
         if self.session_store and self.state.run_id:

@@ -40,7 +40,7 @@ Merge: apply each worktree diff onto `phase0-fixes`, then run ruff + mypy + full
 | Agent | Findings | Owns |
 |---|---|---|
 | P1-D packaging/eng | F-21, F-71, F-72, F-73, F-76, QP-12..16 | pyproject.toml, .github/, .gitignore, README/docs install |
-| P1-E CLI/TUI streaming | F-11, F-16, F-17 | backend/finai/** except session_runtime.py |
+| P1-E CLI/TUI streaming | F-11, F-16, F-17 | backend/finai/** except session_runtime.py | merged (733 passed) |
 | P1-F evals | F-23 gold numbers + grounding score in CI | evals/** |
 
 Deferred to wave 3 / Phase 3: F-20 (peer/benchmark analytics), F-41 (point-in-time universe).
