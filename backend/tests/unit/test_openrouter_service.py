@@ -13,6 +13,7 @@ from app.services.openrouter_service import (
     OpenRouterService,
     _retry_delay,
     _retryable_status,
+    _wire_name,
     merge_tool_call_deltas,
 )
 
@@ -369,3 +370,182 @@ async def test_openrouter_referer_header_only_when_configured(
     assert seen["referer"] == app_url
     assert seen["title"] == "FIN-AI"
     await service.aclose()
+
+
+# Registered tool names: app/core/agent_loop/tool_runner.py:38,68,98,118,144,164,194,209,222
+_REGISTERED_TOOLS = [
+    "data:fetch_stock_data",
+    "analysis:get_technical_overview",
+    "data:fetch_fundamentals",
+    "news:fetch_news",
+    "analysis:run_fundamental_scan",
+    "analysis:run_technical_scan",
+    "interaction:ask_user",
+    "data:fetch_market_status",
+    "data:fetch_market_holidays",
+]
+_WIRE_RE = "^[a-zA-Z0-9_-]{1,64}$"
+
+
+def _tool_defs(names: list[str]) -> list[dict]:
+    return [
+        {
+            "type": "function",
+            "function": {"name": n, "description": "", "parameters": {}},
+        }
+        for n in names
+    ]
+
+
+async def _run_with_tools(
+    monkeypatch: pytest.MonkeyPatch, sse: bytes, messages, names, **extra
+):
+    import re
+
+    seen: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["payload"] = json.loads(request.content)
+        return httpx.Response(200, request=request, content=sse)
+
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "test-key")
+    service = OpenRouterService(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    )
+    events = [
+        e
+        async for e in service.generate_stream(
+            messages, settings.OPENROUTER_MODEL, tools=_tool_defs(names), **extra
+        )
+    ]
+    await service.aclose()
+    assert re  # keep import local
+    return seen["payload"], events
+
+
+@pytest.mark.asyncio
+async def test_tool_names_encoded_on_wire_and_decoded_back(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import re
+
+    def frame(delta: dict) -> bytes:
+        return (
+            b"data: " + json.dumps({"choices": [{"delta": delta}]}).encode() + b"\n\n"
+        )
+
+    sse = (
+        frame(
+            {
+                "tool_calls": [
+                    {
+                        "index": 0,
+                        "id": "c1",
+                        "function": {
+                            "name": "data__fetch_stock_data",
+                            "arguments": "{}",
+                        },
+                    },
+                    {"index": 1, "id": "c2", "function": {"name": "mystery__tool"}},
+                ]
+            }
+        )
+        + b"data: [DONE]\n\n"
+    )
+    history = [
+        Message(role="user", content="hi"),
+        Message(
+            role="assistant",
+            content="",
+            tool_calls=[
+                {
+                    "id": "c0",
+                    "type": "function",
+                    "function": {"name": "news:fetch_news", "arguments": "{}"},
+                }
+            ],
+        ),
+        Message(role="tool", content="{}", name="news:fetch_news", tool_call_id="c0"),
+    ]
+    payload, events = await _run_with_tools(
+        monkeypatch, sse, history, _REGISTERED_TOOLS
+    )
+
+    assert [t["function"]["name"] for t in payload["tools"]] == [
+        n.replace(":", "__") for n in _REGISTERED_TOOLS
+    ]
+    assert all(re.fullmatch(_WIRE_RE, t["function"]["name"]) for t in payload["tools"])
+    assert (
+        payload["messages"][1]["tool_calls"][0]["function"]["name"]
+        == "news__fetch_news"
+    )
+    assert payload["messages"][2]["name"] == "news__fetch_news"
+
+    merged: dict = {}
+    for event in events:
+        if event["event"] == "chunk":
+            merge_tool_call_deltas(
+                merged, event["data"]["choices"][0]["delta"]["tool_calls"]
+            )
+    assert merged[0]["function"]["name"] == "data:fetch_stock_data"
+    assert merged[1]["function"]["name"] == "mystery__tool"  # unknown passes through
+
+
+@pytest.mark.asyncio
+async def test_round_trip_every_registered_tool_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    deltas = [
+        {"index": i, "id": f"c{i}", "function": {"name": n.replace(":", "__")}}
+        for i, n in enumerate(_REGISTERED_TOOLS)
+    ]
+    sse = (
+        b"data: "
+        + json.dumps({"choices": [{"delta": {"tool_calls": deltas}}]}).encode()
+        + b"\n\ndata: [DONE]\n\n"
+    )
+    _, events = await _run_with_tools(
+        monkeypatch,
+        sse,
+        [Message(role="user", content="x")],
+        _REGISTERED_TOOLS,
+        tool_choice={"type": "function", "function": {"name": "data:fetch_stock_data"}},
+    )
+    chunk = next(e for e in events if e["event"] == "chunk")
+    decoded = [
+        c["function"]["name"]
+        for c in chunk["data"]["choices"][0]["delta"]["tool_calls"]
+    ]
+    assert decoded == _REGISTERED_TOOLS
+
+
+def test_wire_name_rejects_invalid_names() -> None:
+    with pytest.raises(OpenRouterProviderError, match="bad name!"):
+        _wire_name("bad name!")
+    with pytest.raises(OpenRouterProviderError):
+        _wire_name("x" * 65)
+
+
+@pytest.mark.asyncio
+async def test_http_error_message_is_one_line_with_provider_message(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    long_message = "Invalid 'tools[0].name': " + "x" * 500
+    body = json.dumps({"error": {"message": long_message, "code": 400}})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(400, request=request, text=body)
+
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "test-key")
+    service = OpenRouterService(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    )
+    with pytest.raises(OpenRouterProviderError) as info:
+        async for _ in service._stream_request(
+            [Message(role="user", content="x")], settings.OPENROUTER_MODEL
+        ):
+            pass
+    await service.aclose()
+    text = str(info.value)
+    assert text == f"OpenRouter HTTP 400 (Bad Request): {long_message[:300]}"
+    assert "\n" not in text and "{" not in text

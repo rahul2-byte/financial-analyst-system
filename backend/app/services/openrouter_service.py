@@ -4,6 +4,7 @@ import asyncio
 import json
 import logging
 import random
+import re
 import time
 from collections.abc import AsyncGenerator
 from dataclasses import dataclass
@@ -37,6 +38,94 @@ logger = logging.getLogger(__name__)
 
 class OpenRouterProviderError(RuntimeError):
     """A provider or stream protocol failure from OpenRouter."""
+
+
+_WIRE_NAME_RE = re.compile(r"^[a-zA-Z0-9_-]{1,64}$")
+_ERROR_MESSAGE_LIMIT = 300
+
+
+def _wire_name(name: str) -> str:
+    """Encode an internal tool name for the provider wire (``:`` -> ``__``)."""
+    encoded = name.replace(":", "__")
+    if not _WIRE_NAME_RE.fullmatch(encoded):
+        raise OpenRouterProviderError(
+            f"tool name {name!r} cannot be sent to OpenRouter: encoded name "
+            f"{encoded!r} must match ^[a-zA-Z0-9_-]{{1,64}}$"
+        )
+    return encoded
+
+
+def _with_function_name(item: dict[str, Any]) -> dict[str, Any]:
+    function = item.get("function")
+    if isinstance(function, dict) and isinstance(function.get("name"), str):
+        return {**item, "function": {**function, "name": _wire_name(function["name"])}}
+    return item
+
+
+def _build_tool_name_map(tools: Any) -> dict[str, str]:
+    """Map wire names back to internal names for the tools in one request."""
+    decode: dict[str, str] = {}
+    for tool in tools or []:
+        function = tool.get("function") if isinstance(tool, dict) else None
+        name = function.get("name") if isinstance(function, dict) else None
+        if not isinstance(name, str):
+            continue
+        encoded = _wire_name(name)
+        if decode.setdefault(encoded, name) != name:
+            raise OpenRouterProviderError(
+                f"tool names {decode[encoded]!r} and {name!r} collide after "
+                f"encoding as {encoded!r}"
+            )
+    return decode
+
+
+def _encode_messages(messages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    for message in messages:
+        calls = message.get("tool_calls")
+        if message.get("role") == "assistant" and isinstance(calls, list):
+            message = {
+                **message,
+                "tool_calls": [
+                    _with_function_name(c) if isinstance(c, dict) else c for c in calls
+                ],
+            }
+        elif message.get("role") == "tool" and isinstance(message.get("name"), str):
+            message = {**message, "name": _wire_name(message["name"])}
+        out.append(message)
+    return out
+
+
+def _decode_tool_names(chunk: Any, decode: dict[str, str]) -> None:
+    """Restore internal tool names in a parsed response chunk, in place."""
+    if not decode or not isinstance(chunk, dict):
+        return
+    for choice in chunk.get("choices") or []:
+        if not isinstance(choice, dict):
+            continue
+        for key in ("delta", "message"):
+            container = choice.get(key)
+            calls = container.get("tool_calls") if isinstance(container, dict) else None
+            for call in calls if isinstance(calls, list) else []:
+                function = call.get("function") if isinstance(call, dict) else None
+                if isinstance(function, dict) and isinstance(function.get("name"), str):
+                    function["name"] = decode.get(function["name"], function["name"])
+
+
+def _http_error_message(status_code: int, reason: str, body: str) -> str:
+    """One-line user-facing error: ``OpenRouter HTTP <code> (<reason>): <message>``."""
+    message = ""
+    try:
+        parsed = json.loads(body)
+        error = parsed.get("error") if isinstance(parsed, dict) else None
+        if isinstance(error, dict) and isinstance(error.get("message"), str):
+            message = error["message"]
+        elif isinstance(error, str):
+            message = error
+    except ValueError:
+        pass
+    message = " ".join((message or body).split())[:_ERROR_MESSAGE_LIMIT]
+    return f"OpenRouter HTTP {status_code} ({reason}): {message}"
 
 
 def _retryable_status(status_code: int) -> bool:
@@ -221,9 +310,12 @@ class OpenRouterService(LLMServiceInterface):
 
             raise CircuitBreakerOpen(f"Circuit '{self.provider_name}' is open")
         started = time.perf_counter()
+        tool_name_map = _build_tool_name_map(kwargs.get("tools"))
         payload: dict[str, Any] = {
             "model": self._model(model),
-            "messages": [message.model_dump(exclude_none=True) for message in messages],
+            "messages": _encode_messages(
+                [message.model_dump(exclude_none=True) for message in messages]
+            ),
             "stream": True,
             "max_tokens": kwargs.get(
                 "max_tokens", settings.OPENROUTER_MAX_OUTPUT_TOKENS
@@ -255,7 +347,15 @@ class OpenRouterService(LLMServiceInterface):
         )
         run_id = kwargs.get("run_id")
         if kwargs.get("tools"):
-            payload["tools"] = kwargs["tools"]
+            payload["tools"] = [
+                _with_function_name(tool) if isinstance(tool, dict) else tool
+                for tool in kwargs["tools"]
+            ]
+            if kwargs.get("tool_choice") is not None:
+                choice = kwargs["tool_choice"]
+                payload["tool_choice"] = (
+                    _with_function_name(choice) if isinstance(choice, dict) else choice
+                )
             tools_content, tools_truncated, tools_size = trace_content(payload["tools"])
             set_current_span_attributes(
                 {
@@ -392,8 +492,20 @@ class OpenRouterService(LLMServiceInterface):
                                     "usage": usage,
                                 },
                             }
+                            logger.debug(
+                                "OpenRouter HTTP error body",
+                                extra={
+                                    "status_code": response.status_code,
+                                    "body": body,
+                                },
+                            )
                             raise OpenRouterProviderError(
-                                f"OpenRouter HTTP {response.status_code}: {body[:500]}"
+                                _http_error_message(
+                                    response.status_code,
+                                    response.reason_phrase
+                                    or failure_reason(response.status_code),
+                                    body,
+                                )
                             )
                         saw_done = False
                         stream_started_emitted = False
@@ -423,6 +535,10 @@ class OpenRouterService(LLMServiceInterface):
                             parsed = self.parse_sse_line(line)
                             if not parsed:
                                 continue
+                            if parsed["event"] == "chunk":
+                                _decode_tool_names(parsed["data"], tool_name_map)
+                            if isinstance(parsed.get("chunk"), dict):
+                                _decode_tool_names(parsed["chunk"], tool_name_map)
                             if parsed["event"] == "usage":
                                 usage = parsed["data"]
                                 set_current_span_attributes(

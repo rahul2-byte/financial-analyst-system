@@ -376,8 +376,8 @@ def test_runner_executes_direct_market_route_without_model_call() -> None:
 
     response = next(event.text for event in events if event.type == "response.delta")
     assert "TCS" in response
-    assert "observed_at" in response
-    assert '"source": "test"' in response
+    assert '{"data"' not in response
+    assert "Source: test" in response
     assert events[-1].type == "run.completed"
 
 

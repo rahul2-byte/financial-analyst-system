@@ -132,6 +132,7 @@ def test_tracing_banner_goes_to_stderr(monkeypatch, capsys) -> None:
     monkeypatch.setattr(tracing.settings, "FINAI_OBSERVABILITY_ENABLED", True)
     monkeypatch.setattr(tracing, "_handle", tracing.TracingHandle(enabled=False))
     monkeypatch.setattr(tracing, "_instrument_httpx", lambda _p: None)
+    monkeypatch.setattr(tracing, "collector_reachable", lambda *_a, **_k: True)
     tracing.initialize_tracing()
     captured = capsys.readouterr()
     assert "Phoenix banner" not in captured.out

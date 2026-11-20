@@ -2,21 +2,43 @@
 
 from __future__ import annotations
 
+import atexit
 import contextlib
 import json
 import logging
 import os
+import socket
 import sys
+import threading
 from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
+from urllib.parse import urlparse
 
 from app.config import settings
 from app.core.diagnostics import diagnostics_enabled
 from app.security.policy import redact_secrets
 
 logger = logging.getLogger(__name__)
+
+_PROBE_TIMEOUT_SECONDS = 0.2
+_FLUSH_TIMEOUT_MILLIS = 500
+_SHUTDOWN_TIMEOUT_SECONDS = 0.5
+
+
+def collector_reachable(endpoint: str, timeout: float = _PROBE_TIMEOUT_SECONDS) -> bool:
+    """Return True when a TCP connection to the collector endpoint succeeds."""
+    try:
+        parsed = urlparse(endpoint)
+        host = parsed.hostname
+        if not host:
+            return False
+        port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except (OSError, ValueError):
+        return False
 
 
 def redact_trace_value(value: Any) -> Any:
@@ -52,11 +74,27 @@ class TracingHandle:
         return trace.get_tracer(name)
 
     def shutdown(self) -> None:
-        if self.provider is not None:
+        """Flush and shut down within roughly one second, never longer."""
+        provider = self.provider
+        if provider is None:
+            return
+
+        def _run() -> None:
             try:
-                self.provider.shutdown()
+                provider.force_flush(timeout_millis=_FLUSH_TIMEOUT_MILLIS)
+                provider.shutdown()
             except Exception:
                 logger.exception("Phoenix tracing shutdown failed")
+
+        worker = threading.Thread(target=_run, name="finai-trace-shutdown", daemon=True)
+        worker.start()
+        worker.join(_FLUSH_TIMEOUT_MILLIS / 1000 + _SHUTDOWN_TIMEOUT_SECONDS)
+        if worker.is_alive():
+            logger.debug("Tracing shutdown timed out; abandoning pending export")
+            # Stop the SDK's atexit hook from blocking interpreter exit again.
+            handler = getattr(provider, "_atexit_handler", None)
+            if handler is not None:
+                atexit.unregister(handler)
 
 
 class _NoopSpan:
@@ -92,6 +130,12 @@ def initialize_tracing() -> TracingHandle:
     """Initialize Phoenix tracing once; return a disabled handle on failure."""
     global _handle
     if _handle.enabled or not settings.FINAI_OBSERVABILITY_ENABLED:
+        return _handle
+    if not collector_reachable(settings.FINAI_PHOENIX_ENDPOINT):
+        logger.debug(
+            "Phoenix collector %s unreachable; tracing export disabled",
+            settings.FINAI_PHOENIX_ENDPOINT,
+        )
         return _handle
     try:
         from phoenix.otel import register

@@ -2,10 +2,17 @@
 
 from __future__ import annotations
 
+import os
 import socket
 from typing import Any
 
 import pytest
+
+# Settings() is built at import time (app/config/__init__.py:6) and reads the
+# developer's .env (app/config/models.py:96). Environment variables outrank the
+# env file, so pin a dummy key before any app import to keep tests hermetic.
+_TEST_OPENROUTER_KEY = "test-openrouter-key"
+os.environ["OPENROUTER_API_KEY"] = _TEST_OPENROUTER_KEY
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost", ""}
 # Phoenix and OTLP collector ports: never allow span export from tests.
@@ -41,3 +48,12 @@ def _block_network(request: pytest.FixtureRequest, monkeypatch: pytest.MonkeyPat
 
     monkeypatch.setattr(socket.socket, "connect", guarded_connect)
     monkeypatch.setattr(socket, "create_connection", guarded_create_connection)
+
+
+@pytest.fixture(autouse=True)
+def _dummy_openrouter_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Never depend on, or leak, a real OpenRouter key."""
+    from app.config import settings
+
+    monkeypatch.setenv("OPENROUTER_API_KEY", _TEST_OPENROUTER_KEY)
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", _TEST_OPENROUTER_KEY)

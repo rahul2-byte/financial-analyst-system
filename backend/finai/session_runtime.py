@@ -565,7 +565,9 @@ async def _run_direct_tool(
         default=str,
         sort_keys=True,
     )
-    text = format_direct_answer(tool, data, provenance) or full_json
+    text = format_direct_answer(
+        tool, data, provenance, payload.get("key_values")
+    ) or _compact_listing(data, provenance)
     yield factory.make(
         ToolCompleted,
         tool=tool,
@@ -598,11 +600,103 @@ def _signed_pct(value: float) -> str:
     return f"{sign}{abs(value):.1f}%"
 
 
-def format_direct_answer(
-    tool: str, data: Any, provenance: dict[str, Any]
+_TECH_TOOLS = {"analysis:get_technical_overview", "analysis:run_technical_scan"}
+_FUND_TOOLS = {"analysis:run_fundamental_scan", "data:fetch_fundamentals"}
+# Field names mirror tool_runner._technical_key_values / _fundamental_key_values.
+_TECH_FIELDS = (
+    ("SMA_20", "SMA20"), ("SMA_50", "SMA50"), ("SMA_200", "SMA200"),
+    ("MACD_12_26_9", "MACD"), ("MACD_SIGNAL_12_26_9", "MACD signal"),
+    ("BBANDS_UPPER_20_2", "BB upper"), ("BBANDS_LOWER_20_2", "BB lower"),
+)  # fmt: skip
+_FUND_FIELDS = (
+    ("peRatio", "P/E"), ("forwardPE", "Fwd P/E"), ("priceToBook", "P/B"),
+    ("returnOnEquity", "ROE"), ("debtToEquity", "Debt/Equity"),
+    ("marketCapCrore", "Mkt cap (Cr)"), ("marketCap", "Mkt cap"),
+)  # fmt: skip
+
+
+def _num(value: Any, digits: int = 2) -> str:
+    if isinstance(value, bool) or not isinstance(value, int | float):
+        return "n/a"
+    return f"{value:,.{digits}f}"
+
+
+def _source_line(provenance: dict[str, Any]) -> str:
+    source = _SOURCE_LABELS.get(
+        str(provenance.get("source")), str(provenance.get("source"))
+    )
+    as_of = provenance.get("as_of") or provenance.get("observed_at")
+    return f"Source: {source}, as of {as_of}."
+
+
+def _compact_listing(data: Any, provenance: dict[str, Any]) -> str:
+    """Fallback: top-level scalar fields as ``key: value`` lines, never raw JSON."""
+    items = data.items() if isinstance(data, dict) else []
+    lines = [
+        f"{k}: {v}"
+        for k, v in items
+        if v is None or isinstance(v, str | int | float | bool)
+    ][:8]
+    if not lines:
+        lines = ["Data retrieved; open the event detail for the full payload."]
+    return "\n".join([*lines, _source_line(provenance)])
+
+
+def _technical_answer(
+    data: dict[str, Any], provenance: dict[str, Any], key_values: Any
 ) -> str | None:
-    """One-sentence answer for a price lookup, formatted from payload fields only."""
-    if tool != "data:fetch_stock_data" or not isinstance(data, dict):
+    kv: dict[str, Any] = dict(key_values) if isinstance(key_values, dict) else {}
+    if not kv:
+        for item in data.get("measurements") or []:
+            if isinstance(item, dict) and item.get("indicator"):
+                kv[str(item["indicator"])] = item.get("value")
+        kv["as_of"] = data.get("as_of")
+    ticker = str(data.get("ticker") or provenance.get("instrument") or "").strip()
+    if not ticker or not kv:
+        return None
+    day = str(kv.get("as_of") or data.get("as_of") or "")[:10] or "n/a"
+    interval = {"1d": "daily", "1wk": "weekly", "1mo": "monthly"}.get(
+        str(data.get("interval")), str(data.get("interval") or "n/a")
+    )
+    rsi = kv.get("RSI_14")
+    rsi_text = f"RSI(14) {_num(rsi, 1)}"
+    if isinstance(rsi, int | float) and not isinstance(rsi, bool):
+        if rsi > 70:
+            rsi_text += " (overbought >70)"
+        elif rsi < 30:
+            rsi_text += " (oversold <30)"
+    close = f"close {_num(kv.get('close'))}"
+    if provenance.get("currency") == "INR" and isinstance(kv.get("close"), int | float):
+        close = f"close ₹{kv['close']:,.2f}"
+    parts = [close, rsi_text]
+    parts += [f"{lab} {_num(kv.get(key))}" for key, lab in _TECH_FIELDS]
+    head = f"{ticker} technicals as of {day} ({interval}): "
+    return "\n".join([head + " · ".join(parts), _source_line(provenance)])
+
+
+def _fundamental_answer(data: dict[str, Any], provenance: dict[str, Any]) -> str | None:
+    if not any(data.get(key) is not None for key, _ in _FUND_FIELDS):
+        return None
+    ticker = str(data.get("ticker") or provenance.get("instrument") or "").strip()
+    parts = [f"{lab} {_num(data.get(key))}" for key, lab in _FUND_FIELDS]
+    head = f"{ticker or 'Fundamentals'} key fundamentals: "
+    return "\n".join([head + " · ".join(parts), _source_line(provenance)])
+
+
+def format_direct_answer(
+    tool: str,
+    data: Any,
+    provenance: dict[str, Any],
+    key_values: Any = None,
+) -> str | None:
+    """Plain-text answer for a direct tool, formatted from payload fields only."""
+    if not isinstance(data, dict):
+        return None
+    if tool in _TECH_TOOLS:
+        return _technical_answer(data, provenance, key_values)
+    if tool in _FUND_TOOLS:
+        return _fundamental_answer(data, provenance)
+    if tool != "data:fetch_stock_data":
         return None
     latest = data.get("latest")
     if not isinstance(latest, dict) or not isinstance(latest.get("Close"), int | float):

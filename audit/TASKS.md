@@ -76,3 +76,13 @@ Deferred to wave 3 / Phase 3: F-20 (peer/benchmark analytics), F-41 (point-in-ti
 | Re-test 2 | rerun 12 queries | sonnet | queued |
 
 **Phase 1.7 complete:** ruff + format clean · mypy clean (221 files) · 808 passed · coverage 86.04% · evals.validate valid.
+
+## Phase 1.8 — OpenRouter-only + live fixes (parallel worktrees, base 72c43f0)
+| Agent | Scope | Owns | Status |
+|---|---|---|---|
+| F1 sonnet | tool names `:`→`__` on the wire (fixes HTTP 400 on every tool call), readable HTTP errors, hermetic test key | openrouter_service.py, tests/conftest.py | merged after 1 rework (tests depended on developer `.env`) |
+| F2 sonnet | human direct answers for technical/fundamental tools (no raw JSON) | finai/session_runtime.py | merged; follow-up: RELIANCE direct answer prints "close n/a" |
+| F3 sonnet | 200 ms collector probe + ≤1 s tracing shutdown (was ~17 s exit) | observability/tracing.py | merged |
+| Model compare | haiku-5.5 vs gpt-6.2-sol vs gpt-5.6-luna, 12 live runs | sonnet tester | done — `audit/09-model-compare.md`; sol only model with a synthesized compare report; haiku synthesis rejected → deterministic evidence dump |
+
+**Phase 1.8 complete:** ruff + format clean · mypy clean (222 files) · 802 passed · coverage ~85.8% · evals.validate valid · finai --help OK.
