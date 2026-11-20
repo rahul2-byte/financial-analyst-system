@@ -15,7 +15,6 @@ dependencies = [
     "pyyaml",
     "rich",
     "trafilatura",
-    "textual>=0.70.0",
     "uvicorn",
     "yfinance",
     "TA-Lib>=0.6.5,<0.7",

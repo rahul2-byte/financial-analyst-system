@@ -270,6 +270,7 @@ class _TtlCache:
         self._ttl = ttl
         self._clock = clock
         self._items: dict[Any, tuple[float, Any]] = {}
+        self.last_key: Any = None
 
     def get(self, key: Any, default: Any = None) -> Any:
         entry = self._items.get(key)
@@ -282,6 +283,7 @@ class _TtlCache:
 
     def __setitem__(self, key: Any, value: Any) -> None:
         self._items[key] = (self._clock() + self._ttl(key), value)
+        self.last_key = key
 
     def __contains__(self, key: Any) -> bool:
         return self.get(key) is not None
@@ -316,6 +318,16 @@ class FinancialToolRunner:
         self._technical_engine = TechnicalEngine()
         self.turn_evidence_tools = 0
         self.turn_facts: dict[str, EvidenceFact] = {}
+        # Read-only presentation handle: the latest deterministic snapshot.
+        self.last_technical_snapshot: dict[str, Any] | None = None
+
+    def latest_ohlcv(self) -> tuple[tuple[str, str, str], list[Any]] | None:
+        """Most recently fetched price rows as ``((ticker, period, interval), rows)``."""
+        key = self._ohlcv_by_request.last_key
+        rows = self._ohlcv_by_request.get(key) if key is not None else None
+        if not isinstance(key, tuple) or not isinstance(rows, list) or not rows:
+            return None
+        return key, rows
 
     def set_mocked_tools(self, mocked_tools: list[dict[str, Any]]) -> None:
         """Install one-shot fixture responses for deterministic evaluation runs."""
@@ -592,6 +604,7 @@ class FinancialToolRunner:
                 provenance=provenance,
             )
             output = snapshot.model_dump(mode="json")
+            self.last_technical_snapshot = output
             if self.resources.upstox_fetcher is not None and interval == "1d":
                 try:
                     matches = await _blocking(
@@ -670,6 +683,7 @@ class FinancialToolRunner:
                 provenance=provenance,
             )
             scan_output = snapshot.model_dump(mode="json")
+            self.last_technical_snapshot = scan_output
             key_values = _technical_key_values(scan_output, rows)
             return {
                 "success": True,

@@ -211,6 +211,8 @@ class AgentLoop:
         self.config = config or AgentLoopConfig()
         self.prompt_registry = prompt_registry or PromptRegistry.bundled()
         self.skill_registry = skill_registry
+        # Read-only handle on the latest run's evidence, for presentation only.
+        self.last_evidence: EvidenceAccounting | None = None
         self.last_report_result: dict[str, Any] = {
             "status": "not_requested",
             "draft": None,
@@ -327,6 +329,7 @@ class AgentLoop:
         failed_tools = 0
         successful_tools = 0
         evidence = EvidenceAccounting()
+        self.last_evidence = evidence
         evidence_warning_added = False
         report_parse_repair_attempts = 0
         all_stages: list[dict[str, Any]] = []

@@ -4,7 +4,7 @@
 
 The runtime emits typed events from `backend/app/events/models.py`. Important event types include route decisions, skill selection, provider attempts/retries/failures, tool lifecycle, source updates, response deltas, clarification, cancellation, and terminal completion/failure.
 
-`TraceLedger` persists semantic events under the session directory. `SessionStore.write_run()` writes a JSON run artifact containing the query, terminal status, events, creation time, and a feedback summary. The CLI exposes local inspection through `/debug`, `/logs`, and `/trace` commands in the Textual interface.
+`TraceLedger` persists semantic events under the session directory. `SessionStore.write_run()` writes a JSON run artifact containing the query, terminal status, events, creation time, and a feedback summary. The CLI exposes local inspection through `/debug`, `/logs`, and `/trace` commands in the terminal UI.
 
 ## Provider archives and replay
 

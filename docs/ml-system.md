@@ -32,7 +32,7 @@ The provider stream is OpenAI-compatible SSE for OpenRouter. Tool-call fragments
 7. Reviews or repairs structured output when configured.
 8. Publishes a report only when the evidence and schema checks pass; otherwise it emits an evidence-limited result.
 
-The loop yields `ResearchEvent` values rather than mutating the UI. The Textual UI, plain renderer, JSON renderer, and trace ledger consume that same stream.
+The loop yields `ResearchEvent` values rather than mutating the UI. The terminal UI (through the bridge), plain renderer, JSON renderer, and trace ledger consume that same stream.
 
 ## Evidence and publication
 

@@ -1,0 +1,327 @@
+{
+  "events": [
+    {
+      "display": null,
+      "event": {
+        "meta": {
+          "conversation_id": "354d1bd3-1bb7-5a87-9e7e-8c31cc74f4d2",
+          "event_id": "65bbbc32-4b0f-5622-a7d0-42b28140065f",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "f478a2d6-9487-5b1d-bde0-4f025c30e11b",
+          "sequence": 1
+        },
+        "query": "HDFC Bank",
+        "type": "run.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Preparing research",
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "label": "Preparing research",
+        "meta": {
+          "conversation_id": "354d1bd3-1bb7-5a87-9e7e-8c31cc74f4d2",
+          "event_id": "4ac30560-c075-53f7-b96d-7dfbceeb457a",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "f478a2d6-9487-5b1d-bde0-4f025c30e11b",
+          "sequence": 2
+        },
+        "stage": "agent",
+        "type": "stage.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching fundamentals",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamentals",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": null,
+        "meta": {
+          "conversation_id": "354d1bd3-1bb7-5a87-9e7e-8c31cc74f4d2",
+          "event_id": "cc21a0a4-f0ff-5ccd-a9c7-55263308d1ef",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "f478a2d6-9487-5b1d-bde0-4f025c30e11b",
+          "sequence": 3
+        },
+        "tool": "data:fetch_fundamentals",
+        "tool_id": "t1",
+        "type": "tool.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": "No usable data returned for fundamentals",
+        "failed_nouns": null,
+        "failure_detail": "no usable data",
+        "friendly": "No usable data returned for fundamentals",
+        "instrument": null,
+        "label": "Fetched fundamentals",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamentals",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "message": "No usable data returned for data:fetch_fundamentals",
+        "meta": {
+          "conversation_id": "354d1bd3-1bb7-5a87-9e7e-8c31cc74f4d2",
+          "event_id": "4562a826-9f3d-56f8-8498-ad2a14221018",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "f478a2d6-9487-5b1d-bde0-4f025c30e11b",
+          "sequence": 4
+        },
+        "tool": "data:fetch_fundamentals",
+        "tool_id": "t1",
+        "type": "tool.failed"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": "Provider returned an error: quota exceeded",
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "category": "internal",
+        "message": "Provider returned an error: quota exceeded",
+        "meta": {
+          "conversation_id": "354d1bd3-1bb7-5a87-9e7e-8c31cc74f4d2",
+          "event_id": "acd20568-d918-5d5c-8011-1446bcb06b5b",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "f478a2d6-9487-5b1d-bde0-4f025c30e11b",
+          "sequence": 5
+        },
+        "type": "run.failed"
+      }
+    }
+  ],
+  "final": {
+    "active_tools": [],
+    "activities": {
+      "agent": {
+        "detail": null,
+        "label": "Preparing research",
+        "status": "running"
+      },
+      "tool:t1": {
+        "detail": "No usable data returned for fundamentals",
+        "label": "data:fetch_fundamentals",
+        "status": "failed"
+      }
+    },
+    "current_operation": null,
+    "error": "Provider returned an error: quota exceeded",
+    "last_event_type": "run.failed",
+    "latest_sequence": 5,
+    "phase": "failed",
+    "query": "HDFC Bank",
+    "response_delta_count": 0,
+    "response_text": "",
+    "run_id": "f478a2d6-9487-5b1d-bde0-4f025c30e11b",
+    "seen_sequences": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "sources": [],
+    "terminal_status": "failed"
+  },
+  "snapshots": [
+    {
+      "after_sequence": 1,
+      "state": {
+        "active_tools": [],
+        "activities": {},
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "run.started",
+        "latest_sequence": 1,
+        "phase": "starting",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "f478a2d6-9487-5b1d-bde0-4f025c30e11b",
+        "seen_sequences": [
+          1
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 2,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          }
+        },
+        "current_operation": "Preparing research",
+        "error": null,
+        "last_event_type": "stage.started",
+        "latest_sequence": 2,
+        "phase": "researching",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "f478a2d6-9487-5b1d-bde0-4f025c30e11b",
+        "seen_sequences": [
+          1,
+          2
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 3,
+      "state": {
+        "active_tools": [
+          "t1"
+        ],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:t1": {
+            "detail": null,
+            "label": "data:fetch_fundamentals",
+            "status": "running"
+          }
+        },
+        "current_operation": "data:fetch_fundamentals",
+        "error": null,
+        "last_event_type": "tool.started",
+        "latest_sequence": 3,
+        "phase": "researching",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "f478a2d6-9487-5b1d-bde0-4f025c30e11b",
+        "seen_sequences": [
+          1,
+          2,
+          3
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 4,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:t1": {
+            "detail": "No usable data returned for fundamentals",
+            "label": "data:fetch_fundamentals",
+            "status": "failed"
+          }
+        },
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "tool.failed",
+        "latest_sequence": 4,
+        "phase": "researching",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "f478a2d6-9487-5b1d-bde0-4f025c30e11b",
+        "seen_sequences": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 5,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:t1": {
+            "detail": "No usable data returned for fundamentals",
+            "label": "data:fetch_fundamentals",
+            "status": "failed"
+          }
+        },
+        "current_operation": null,
+        "error": "Provider returned an error: quota exceeded",
+        "last_event_type": "run.failed",
+        "latest_sequence": 5,
+        "phase": "failed",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "f478a2d6-9487-5b1d-bde0-4f025c30e11b",
+        "seen_sequences": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "sources": [],
+        "terminal_status": "failed"
+      }
+    }
+  ]
+}

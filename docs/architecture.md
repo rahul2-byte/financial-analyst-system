@@ -8,7 +8,7 @@ FIN-AI is a local, CLI-first research application. The CLI constructs the resear
 
 | Component | Code | Responsibility |
 | --- | --- | --- |
-| CLI | `backend/finai/cli.py` | Parses options, chooses TUI/plain/JSON execution, and owns provider shutdown |
+| CLI | `backend/finai/cli.py` | Parses options, chooses terminal-UI/plain/JSON execution, and owns provider shutdown |
 | Session facade | `backend/finai/session.py` | Loads history, appends messages, streams events, and persists runs |
 | Research runner | `backend/finai/session_runtime.py:ResearchRunner` | Resolves instruments, builds router context, selects routes/providers, and constructs one `AgentLoop` |
 | Router | `backend/app/services/routing_policy.py:RoutingPolicy` | Applies safety and deterministic routes, then optionally asks Jev for a typed route |
@@ -16,7 +16,7 @@ FIN-AI is a local, CLI-first research application. The CLI constructs the resear
 | Tool boundary | `backend/app/core/agent_loop/tool_runner.py:FinancialToolRunner` | Exposes the registered data and analysis tools and joins provider data to deterministic analysis |
 | Providers | `backend/app/services/`, `backend/data/providers/`, `backend/data/news_pipeline/` | Model generation, routing, market data, fundamentals, and news retrieval |
 | Persistence | `backend/finai/session_store.py`, `backend/app/observability/provider_archive.py` | Stores transcripts, events, run artifacts, checkpoints, and content-addressed provider snapshots |
-| Presentation | `backend/finai/app.py`, `backend/finai/plain.py` | Reduces `ResearchEvent` values into TUI, plain text, or JSON output |
+| Presentation | `backend/finai/bridge/`, `frontend/`, `backend/finai/plain.py` | Streams `ResearchEvent` values to the Ink terminal UI over the bridge, or renders them as plain text or JSON (see [`frontend.md`](frontend.md)) |
 
 ## Request lifecycle
 
@@ -54,7 +54,7 @@ sequenceDiagram
     end
     L-->>S: ResearchEvent values
     S->>O: transcript, ledger, run artifact, snapshots
-    S-->>C: TUI/plain/JSON output
+    S-->>C: terminal UI/plain/JSON output
 ```
 
 ### Instrument resolution

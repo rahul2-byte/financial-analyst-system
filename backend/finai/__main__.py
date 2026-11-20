@@ -16,7 +16,7 @@ def main() -> None:
     try:
         from .cli import main as cli_main
     except ModuleNotFoundError as exc:
-        if exc.name in {"pydantic", "textual", "httpx", "fastapi"}:
+        if exc.name in {"pydantic", "httpx", "fastapi"}:
             print(
                 "FIN-AI dependencies are missing from this Python environment.\n"
                 "Run with the project environment: uv run python -m finai --help\n"

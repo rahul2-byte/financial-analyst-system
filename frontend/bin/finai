@@ -1,0 +1,17 @@
+#!/bin/sh
+# Launch the TypeScript FIN-AI UI from a checkout: bin/finai [options]
+# Needs node on PATH and frontend/dist/cli.js (npm --prefix frontend run build).
+set -eu
+
+here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+cli="$here/../dist/cli.js"
+
+if ! command -v node >/dev/null 2>&1; then
+  echo "finai: node is required for the terminal UI" >&2
+  exit 1
+fi
+if [ ! -f "$cli" ]; then
+  echo "finai: $cli is missing; run: npm --prefix frontend run build" >&2
+  exit 1
+fi
+exec node "$cli" "$@"

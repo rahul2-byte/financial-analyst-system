@@ -1,0 +1,319 @@
+{
+  "events": [
+    {
+      "display": null,
+      "event": {
+        "meta": {
+          "conversation_id": "48cacc60-9b13-5893-8367-14b7d15f063d",
+          "event_id": "a6321c4a-51df-5e8d-8bca-38dfcfc0e203",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "c874138b-c240-599b-9ac2-c9ebc3f68178",
+          "sequence": 1
+        },
+        "query": "HDFC Bank",
+        "type": "run.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": [
+          {
+            "host": "api.upstox.com",
+            "label": "Upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "host": "finance.yahoo.com",
+            "label": "Yahoo Finance · HDFCBANK.NS",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/"
+          }
+        ]
+      },
+      "event": {
+        "meta": {
+          "conversation_id": "48cacc60-9b13-5893-8367-14b7d15f063d",
+          "event_id": "2f205545-b2da-58ea-9cdf-02019618c248",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "c874138b-c240-599b-9ac2-c9ebc3f68178",
+          "sequence": 2
+        },
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "Yahoo Finance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/"
+          }
+        ],
+        "type": "sources.updated"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": [
+          {
+            "host": "api.upstox.com",
+            "label": "Upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "host": "finance.yahoo.com",
+            "label": "Yahoo Finance · HDFCBANK.NS",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/"
+          },
+          {
+            "host": "www.nseindia.com",
+            "label": "NSE · HDFCBANK",
+            "url": "https://www.nseindia.com/quote/HDFCBANK"
+          }
+        ]
+      },
+      "event": {
+        "meta": {
+          "conversation_id": "48cacc60-9b13-5893-8367-14b7d15f063d",
+          "event_id": "1efcdd53-c0b3-5266-9458-348a910d6f8c",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "c874138b-c240-599b-9ac2-c9ebc3f68178",
+          "sequence": 3
+        },
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "Yahoo Finance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/"
+          },
+          {
+            "name": "NSE",
+            "url": "https://www.nseindia.com/quote/HDFCBANK"
+          }
+        ],
+        "type": "sources.updated"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": [],
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": "HDFCBANK.NS",
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": false,
+        "sources": null
+      },
+      "event": {
+        "artifact_path": null,
+        "completion_reason": null,
+        "duration_ms": 4200.0,
+        "evidence_availability": [],
+        "evidence_status": null,
+        "meta": {
+          "conversation_id": "48cacc60-9b13-5893-8367-14b7d15f063d",
+          "event_id": "1b126d56-a6d6-5cc9-a59d-1070161af620",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "c874138b-c240-599b-9ac2-c9ebc3f68178",
+          "sequence": 4
+        },
+        "output_review": null,
+        "route_reason_codes": [],
+        "terminal_status": "completed",
+        "type": "run.completed"
+      }
+    }
+  ],
+  "final": {
+    "active_tools": [],
+    "activities": {},
+    "current_operation": null,
+    "error": null,
+    "last_event_type": "run.completed",
+    "latest_sequence": 4,
+    "phase": "complete",
+    "query": "HDFC Bank",
+    "response_delta_count": 0,
+    "response_text": "",
+    "run_id": "c874138b-c240-599b-9ac2-c9ebc3f68178",
+    "seen_sequences": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "sources": [
+      {
+        "name": "upstox",
+        "url": "https://api.upstox.com"
+      },
+      {
+        "name": "Yahoo Finance",
+        "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/"
+      },
+      {
+        "name": "NSE",
+        "url": "https://www.nseindia.com/quote/HDFCBANK"
+      }
+    ],
+    "terminal_status": "completed"
+  },
+  "snapshots": [
+    {
+      "after_sequence": 1,
+      "state": {
+        "active_tools": [],
+        "activities": {},
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "run.started",
+        "latest_sequence": 1,
+        "phase": "starting",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "c874138b-c240-599b-9ac2-c9ebc3f68178",
+        "seen_sequences": [
+          1
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 2,
+      "state": {
+        "active_tools": [],
+        "activities": {},
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "sources.updated",
+        "latest_sequence": 2,
+        "phase": "starting",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "c874138b-c240-599b-9ac2-c9ebc3f68178",
+        "seen_sequences": [
+          1,
+          2
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "Yahoo Finance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 3,
+      "state": {
+        "active_tools": [],
+        "activities": {},
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "sources.updated",
+        "latest_sequence": 3,
+        "phase": "starting",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "c874138b-c240-599b-9ac2-c9ebc3f68178",
+        "seen_sequences": [
+          1,
+          2,
+          3
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "Yahoo Finance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/"
+          },
+          {
+            "name": "NSE",
+            "url": "https://www.nseindia.com/quote/HDFCBANK"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 4,
+      "state": {
+        "active_tools": [],
+        "activities": {},
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "run.completed",
+        "latest_sequence": 4,
+        "phase": "complete",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "c874138b-c240-599b-9ac2-c9ebc3f68178",
+        "seen_sequences": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "Yahoo Finance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/"
+          },
+          {
+            "name": "NSE",
+            "url": "https://www.nseindia.com/quote/HDFCBANK"
+          }
+        ],
+        "terminal_status": "completed"
+      }
+    }
+  ]
+}

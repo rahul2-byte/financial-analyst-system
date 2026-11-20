@@ -1,6 +1,6 @@
-# TS frontend contract notes
+# Runtime contract notes
 
-Read-only investigation of the contract between the Textual UI (`backend/finai/`) and the Python runtime (`backend/app/`). Branch `feat/tui-redesign`. Line numbers refer to the working tree at investigation time.
+Notes on the contract between the Python runtime (`backend/app/`, `backend/finai/`) and any presentation layer, in particular the Ink UI reached through the bridge (see [`../frontend.md`](../frontend.md)). Line numbers refer to the working tree at investigation time and may have drifted.
 
 ## 1. Events (`backend/app/events/models.py`)
 
@@ -62,7 +62,7 @@ Notes:
 ### Union and schema
 
 - `ResearchEvent` (models.py:271-300) is `Annotated[A | B | ..., Field(discriminator="type")]`. It has **27 members** (`RouteDecisionMade` last). Pydantic v2 discriminated union. There is no named `TypeAdapter` in the events module.
-- **No JSON schema export** for events. The only `model_json_schema()` calls are for `LookupAnswerV1` and `ReportDraft` in `app/core/agent_loop/publication.py:710` and `runtime.py:297, 312`.
+- Event JSON schemas are exported by `finai/bridge/schema.py` (`TypeAdapter(ResearchEvent)`) into `protocol/schema/`. Other `model_json_schema()` calls are for `LookupAnswerV1` and `ReportDraft` in `app/core/agent_loop/publication.py:710` and `runtime.py:297, 312`.
 - Serialisation: `event.model_dump(mode="json")`. The ledger (`app/events/ledger.py:37-66`) wraps it as:
   `{schema_version: 1, event_id, run_id, conversation_id, sequence, occurred_at, event_type, payload, artifact_refs: []}`, with `payload` = the event minus `meta` and `type`. Payloads over 16,384 bytes are spilled to an artifact (`{stored_as_artifact: true}` plus `artifact_refs`). Values are passed through `_redact`.
 - `app/events/__init__.py` re-exports the classes.
@@ -76,31 +76,22 @@ Notes:
 - `FinAIRepl` (`finai/session.py:27`) is the facade. Key methods:
   - `typed_stream(query) -> AsyncIterator[ResearchEvent]` (session.py:120), which delegates to `_agent_loop_stream` (session.py:125-238).
   - `_agent_loop_stream` loads or resumes the pending state, appends the user message, calls `runtime.stream(...)`, and yields each event. It persists the trace (`store.append_trace_event`), `begin_run` on `run.started`, `write_pending` on `approval.requested`, and `write_run` in `finally`. On `run.completed` it rewrites `artifact_path` to `.finai/sessions/<id>/runs/<run_id>.json`.
-- Plain-mode REPL: `FinAIRepl.run()` (session.py:240) and `research()` (session.py:95). They print to stdout. These are not used by the TUI.
+- Line-oriented REPL: `FinAIRepl.run()` (session.py:240) and `research()` (session.py:95). They print to stdout and serve non-TTY input.
 
-### TUI wiring
+### Bridge wiring
 
-- `cli.build_app(repl)` (`finai/cli.py:209-236`) creates `FinAIApp(session_store=repl.store, compact_callback=repl.compact_context, mode=repl.mode)`. It sets `app.event_stream = stream` (cli.py:230-235), where `stream(query)` is an async generator that sets `repl.mode = app.mode` and then `async for event in repl.typed_stream(query): yield event`.
-- Callbacks set on the app (cli.py:225-228):
-  - `session_callback(session_id: str) -> None`
-  - `new_session_callback() -> None`
-  - `clear_pending_callback() -> None` (`repl.store.clear_pending()`)
-  - `compact_callback() -> dict[str, int|str]`
-- `FinAIApp.__init__` is at `finai/app.py:98-135`. The parameter is `event_stream: Callable[[str], AsyncIterator[ResearchEvent]]`.
-- Starting a run: `on_composer_submitted` (app.py:283-320) → `_start_run(query)` (`finai/app_dispatch.py:41-56`). This creates `asyncio.create_task(self._consume(self.event_stream(query), activity_widget))` and stores it in `self._run_task`.
-- `_consume` (app_dispatch.py:58-126) is an `async for` over the iterator. It calls `reduce_event` for each event, then renders. On exception it mounts an error and does not rethrow. In `finally` it posts `RunFinished(task)`. Queued prompts (`self._queued_prompts`) run after `RunFinished` (app_dispatch.py: `on_run_finished`, app.py:437-441).
-- The UI is **not** a callback model. It is pull-based, so the TS side must consume an event stream.
+- `finai.bridge.__main__` builds a `FinAIRepl` and hands it to `BridgeServer` (`finai/bridge/server.py`). `run.start` sets `repl.mode` and spawns one task that iterates `repl.typed_stream(query)`, reduces each event with `reduce_event` and forwards it as a `run.event` notification. `run.finished` is sent once in `finally`.
+- Session methods call `FinAIRepl.resume_session`, `new_session` and `compact_context`, plus `SessionStore.list_sessions`, `clear_pending` and the trace ledger.
+- The runtime is pull-based: a client consumes an async event stream. It is not a callback model.
 
 ### Cancellation (Esc)
 
-- `BINDINGS` in app.py:82-96 map `escape` → `cancel_run` and `ctrl+c` → `cancel_or_exit`. `ctrl+z` → `quit_app`.
-- `action_cancel_run` (app_dispatch.py:153-162) sets `PresentationPhase.CANCELLING` and calls `self._run_task.cancel()`.
-- Propagation: `CancelledError` is raised in the `async for`. In `_agent_loop_stream` (session.py:225-227) it sets `status="cancelled"` and re-raises. `finally` writes the run record with status `cancelled`. In `_consume` (app_dispatch.py:93-113) it sets the phase to `CANCELLED`, mounts "· Cancelled", and does not rethrow.
-- Esc is also bound in modals (`ApprovalScreen` reject, `SessionScreen` close, `HelpScreen` close). Those bindings take precedence when a modal is open.
+- The UI sends `run.cancel`; the bridge calls `task.cancel()` on the run task.
+- Propagation: `CancelledError` is raised in the `async for`. In `_agent_loop_stream` (session.py:225-227) it sets `status="cancelled"` and re-raises. `finally` writes the run record with status `cancelled`. The bridge catches the error and sends `run.finished` with outcome `cancelled`.
 
 ### Timeouts
 
-No timeout in the TUI itself. Runtime timeouts come from `backend/app/config/models.py`:
+No timeout in the UI itself. Runtime timeouts come from `backend/app/config/models.py`:
 
 | line | setting | value (s) |
 |---|---|---|
@@ -123,45 +114,41 @@ Enforcement sites: `app/core/agent_loop/model_streaming.py:200` (`asyncio.wait_f
 
 ### Approval (`approval.requested`)
 
-- Intended flow (UI side, all live in app):
-  1. `_consume` sees `approval.requested` (app_dispatch.py:77-82) and pushes `ApprovalScreen(prompt, details)` with callback `_approval_result(bool|None)`. The screen dismisses with `True` (y/approve) or `False` (n/escape/reject) (`finai/screens.py:13-61`).
-  2. `_approval_result(True)` (app_dispatch.py:128-142) appends a trace record and calls `_start_run("yes")`. `False` calls `_reject_pending()` (app_dispatch.py:144-151), which calls `clear_pending_callback()`.
-  3. The composer also accepts text while `phase == WAITING_FOR_APPROVAL` (app.py:300-320): `d`/`details` (opens debug), `n`/`reject`/`cancel`, `y`/`approve`/`proceed`.
+- Intended flow: the UI would show the prompt and details, then either re-run with `"yes"` (approve) or call `clear_pending` (reject). The Ink UI has no approval screen because the runtime never emits the event.
 - Persistence: `session.py:183-192` writes `pending.json` with `{"kind": "approval", run_id, query, prompt, details}`.
-- **Problem:** on the next call, `_agent_loop_stream` (session.py:127-130) sees `kind == "approval"`, clears pending, and treats `"yes"` as a brand-new user query. `approved_tool_ids` is accepted by `ResearchRunner.stream` but the session never passes it. Since the runtime never emits `approval.requested`, this path is not reachable today. Any TS port should not rely on it without fixing the runtime first.
+- **Problem:** on the next call, `_agent_loop_stream` (session.py:127-130) sees `kind == "approval"`, clears pending, and treats `"yes"` as a brand-new user query. `approved_tool_ids` is accepted by `ResearchRunner.stream` but the session never passes it. Since the runtime never emits `approval.requested`, this path is not reachable today. A UI should not rely on it without fixing the runtime first.
 
 ### Clarification (`clarification.requested`)
 
 - The runtime emits `ClarificationRequested` and then `RunCompleted(terminal_status="awaiting_clarification")` (`session_runtime.py:920-961`, `runtime.py:437` and others). It also writes `checkpoint.json` via `checkpoint_writer` (session_runtime.py:952, runtime.py:427, 644, 1113, 1195, 1440).
-- UI: `_consume` sets `self._clarified = True` and mounts `render_clarification(prompt)` (app_dispatch.py:83-90). `_finish_run` returns early when `_clarified` is true (app_dispatch.py: `_finish_run`).
-- Routing of the next user message: `on_composer_submitted` (app.py:283-320). If the phase is `WAITING_FOR_CLARIFICATION`, the text goes to `_mount_user(query)` and `_start_run(query)`. Ordinary messages behave the same way, so routing is identical.
+- UI: the clarification prompt is shown as the end of the run, and the next user message is submitted as an ordinary query.
 - Runtime side: `_agent_loop_stream` (session.py:131-136) resumes **only** if `pending.json` has `kind == "clarification"`. It then restores `history` from `checkpoint.json` and appends the user message. **Nothing writes `pending.json` with kind `clarification`** (only `session.py:184` writes pending, with kind approval). So that branch is dead. In practice the answer is appended to the stored transcript and run as a normal query. Whether the runtime's own checkpoint is used anywhere else was not traced.
 
 ## 4. Commands
 
-Registry: `finai/commands.py:15-61`, `CommandRegistry.default()`. Dispatch: `finai/app_dispatch.py:132-245` (`_command`). Parsing: `commands.parse_command` (commands.py:70-78, shlex). Output formatting: `finai/app_commands.py`.
+Slash commands are implemented in the UI (`frontend/src/commands/`). The runtime is not involved except through bridge methods.
 
-| command | behaviour | Python function called |
+| command | behaviour | bridge method |
 |---|---|---|
-| `/help` | Show command list and the help screen text | `CommandRegistry.help_text()` |
-| `/clear` | Clear the conversation display only; resets UI state | (UI only) |
-| `/new` | Start a new conversation (display cleared, session rotated) | `app.new_session_callback` → `build_app.new_session` → `FinAIRepl.new_session()` |
-| `/sources` | Show deduped sources from the last run | `render.render_sources` |
-| `/status` | Show phase and latest sequence | `app_commands.status_text` |
-| `/debug` | Show last event and error log | `render.render_debug` |
-| `/trace` | Show last 12 trace records and ledger path | `SessionStore.trace.read()` then `app_commands.trace_text` |
-| `/artifact` | Show the last run's artifact path | (UI state `_last_artifact`) |
-| `/logs` | Print the static text "Run artifacts: .finai/sessions/<session>/runs/" | (static text) |
-| `/mode [guided\|review\|autonomous]` | Show or set the mode | (UI state; `repl.mode` updated on next run) |
-| `/context` | Show token estimate and compaction limits | `ContextBudget.compact()` + `app_commands.context_text` |
-| `/compact` | Compact older messages now | `FinAIRepl.compact_context()` (via `compact_callback`) |
-| `/sessions` | Open the session picker modal | `SessionStore.list_sessions(root)` + `SessionScreen` |
-| `/resume <id-prefix>` | Resume a session by unique prefix | `session_callback` → `FinAIRepl.resume_session()` |
-| `/history` | List prior user queries | `app_commands.queries_text` |
-| `/retry` | Re-run the last user query | `_start_run` (UI) |
-| `/exit` | Exit | `App.exit()` |
+| `/help` | Show command list and key reference | (local) |
+| `/clear` | Clear the conversation display | (local) |
+| `/new` | Start a new conversation (session rotated) | `session.new` → `FinAIRepl.new_session()` |
+| `/sources` | Show deduped sources from the last run | (local) |
+| `/status` | Show phase and latest sequence | (local) |
+| `/debug` | Show last events and bridge stderr | (local) |
+| `/trace` | Show last 12 trace records and ledger path | `trace.tail` |
+| `/artifact` | Show the last run's artifact path | (local) |
+| `/logs` | Show `<data-dir>/sessions/<session>/runs/` | (local) |
+| `/mode [guided\|review\|autonomous]` | Show or set the mode, sent with the next run | (local) |
+| `/context` | Show token estimate and compaction limits | `context.info` → `ContextBudget` |
+| `/compact` | Compact older messages now | `context.compact` → `FinAIRepl.compact_context()` |
+| `/sessions` | Open the session picker | `session.list` → `SessionStore.list_sessions(root)` |
+| `/resume <id-prefix>` | Resume a session by unique prefix | `session.resume` → `FinAIRepl.resume_session()` |
+| `/history` | List prior user queries | `session.history` |
+| `/retry` | Re-run the last user query | (local) |
+| `/exit` | Exit | `shutdown` |
 
-Unknown commands print "Unknown command /<name> — try /help". Commands are not sent to the runtime. Composer completion uses `CommandRegistry.suggestion_items` (app.py `on_key` 357-375).
+Unknown commands print "Unknown command /<name> — try /help" and are not sent to the runtime.
 
 ## 5. Sessions
 
@@ -192,7 +179,7 @@ Other: `root/logs/finai.log` (cli.py `main`, `--debug`), and a provider archive 
 
 ## 6. Startup (`python -m finai`)
 
-- `finai/__main__.py`: lazily imports `cli.main`. If a missing module is `pydantic`, `textual`, `httpx` or `fastapi`, it prints a hint and exits with status 2.
+- `finai/__main__.py`: lazily imports `cli.main`. If a missing module is `pydantic`, `httpx` or `fastapi`, it prints a hint and exits with status 2.
 - `cli.parse_arguments` (cli.py:45-81):
   - `--data-dir PATH` (default `.finai`)
   - `--session ID`
@@ -210,7 +197,7 @@ Other: `root/logs/finai.log` (cli.py `main`, `--debug`), and a provider archive 
   4. optional replay JSON
   5. `FinAIRepl(args.data_dir, args.session, replay_snapshots)`
   6. If a positional query is given → `run_one_shot` (exit code per `EXIT_CODE_HELP`, cli.py:90-103)
-  7. If stdin and stdout are TTYs → `run_interactive` (Textual `FinAIApp.run_async`, cli.py:239-245); otherwise `run_plain_terminal` (`FinAIRepl.run()`, cli.py:201-206).
+  7. If stdin and stdout are TTYs and no query was given, `main` replaces the process with the Ink UI (`exec_ts_ui`, before any provider or tracing setup); otherwise `run_plain_terminal` (`FinAIRepl.run()`).
 - Exit codes: 0 ok, 1 failed/denied/cancelled, 2 clarification, 3 degraded evidence, 130 Ctrl+C.
 - Model selection and env: loaded by `app.config.settings` (imported at session_runtime.py:14). Not traced in detail. Config fields are in `backend/app/config/models.py`. `MissingOpenRouterKeyError` → exit 1.
 - **Measured import cost:** `time PYTHONPATH=backend uv run --offline python -c "import finai.session_runtime"` → **0.94 s wall** (3.47 s user, 0.10 s sys, 379% CPU).
@@ -263,55 +250,48 @@ Reducer `reduce_event(state, event)` (state.py:104-316). Rules by event:
 - `run.cancelled` (~308): phase cancelled, terminal_status cancelled.
 - Not handled (no branch, returns state unchanged, but sequence is still recorded): `check.stage`, `context.compacted`, `skill.selected`, `route.decision.made`, `model.response.completed`. (`provider.stream.started` and `tool.progress` are handled above.)
 
-The UI also sets phases itself: `STARTING` in `_start_run` (app_dispatch.py:42), `CANCELLING` in `action_cancel_run` (app_dispatch.py:155), `CANCELLED` in `_consume` on cancel (app_dispatch.py:94).
+The UI also sets the phases `starting` (when a run is submitted), `cancelling` (on cancel) and `cancelled` (when the run ends cancelled) itself.
 
-Transition-driving events in `app_events.py`:
-- `ACTIVITY_EVENTS` (app_events.py:5-26): skill.selected, model.request.started, provider.attempt.started, provider.retrying, provider.stream.started, provider.completed, provider.failed, tool.progress, context.compacted, stage.started/completed/failed, tool.started/completed/failed, run.completed/cancelled/failed.
-- `TERMINAL_EVENTS` (app_events.py:27): run.completed, run.cancelled, run.failed.
+Terminal events: `run.completed`, `run.cancelled`, `run.failed`.
 
-## 8. Render helpers with product logic (`backend/finai/render.py` and `plain.py`)
+## 8. Display helpers with product logic (`backend/finai/display.py` and `plain.py`)
 
-Presentation-only functions are not listed. These contain rules a TS client must reproduce:
+These rules live in Python. The bridge applies them and sends the results as the `display` object, so a client does not reproduce them:
 
-| function | line | what it does |
-|---|---|---|
-| `_VERBS` / `_NOUNS` maps | render.py:155, 168 | verb map (fetch→Fetched, analyze→Analyzed...) and tool-to-noun map (`fetch_fundamentals`→"fundamentals", etc.) |
-| `_tool_name` | 179 | strips the `prefix:` from a label (`data:fetch_stock_data` → `fetch_stock_data`) |
-| `_noun` | 183 | short noun for failures and the collapsed summary |
-| `_tool_label` | 193 | raw tool id → human label (`Fetched stock data`); never shows raw ids |
-| `_tool_detail` | 203 | drops JSON and `k=v` dumps; special-cases `key values:` for technical overview (`close ₹<x>`); max 40 chars |
-| `_failure_detail` | 218 | maps "no usable"/"unavailable" to "no usable articles" (news) or "no usable data"; strips raw ids with `_RAW_ID` (render.py:176, `\b[a-z_]+:[a-z_]+\b`) |
-| `_short` | 229 | whitespace collapse and ellipsis truncation |
-| `_failed_nouns` | 234 | unique nouns of failed `tool:` activities |
-| `_QUOTE_SYMBOL` / `instrument_from_sources` | 244, 247 | extracts `SYMBOL.NS` or `.BO` from `/quote/...` source URLs |
-| `has_tool_trail` | 256 | any `tool:` activity exists (controls whether the trail is shown) |
-| `render_activity` | 260 | the evidence trail: hides `model` and completed `provider`; "Gathered evidence · N tools"; collapsed summary; chat-only runs produce no trail |
-| `render_sources` | 398 | numbered, deduped sources; host shown only when it differs from the title |
-| `render_response` | 415 | sanitises response text before Markdown rendering |
-| `_CANDIDATE`, `_ACRONYMS`, `_title_name` | 420, 424, 427 | clarification candidate parsing (`- SYM (EX) Name` or `- Name (SYM, EX)`) and name title-casing with an acronym whitelist |
-| `render_clarification` | 440 | aligns candidates as `SYMBOL  Name · EX`; other lines pass through |
-| `render_footer` | 493 | per-run footer with elapsed time |
-| `render_debug` | 530 | last events and error details for `/debug` |
+| function | what it does |
+|---|---|
+| `VERBS` / `NOUNS` maps | verb map (fetch→Fetched, analyze→Analyzed...) and tool-to-noun map (`fetch_fundamentals`→"fundamentals", etc.) |
+| `tool_name` | strips the `prefix:` from a label (`data:fetch_stock_data` → `fetch_stock_data`) |
+| `noun` | short noun for failures and the collapsed summary |
+| `tool_label` | raw tool id → human label (`Fetched stock data`, or `Fetching stock data` when active); never shows raw ids |
+| `tool_detail` | drops JSON and `k=v` dumps; special-cases `key values:` for technical overview (`close ₹<x>`); max 40 chars |
+| `failure_detail` | maps "no usable"/"unavailable" to "no usable articles" (news) or "no usable data"; strips raw ids with `RAW_ID` (`\b[a-z_]+:[a-z_]+\b`) |
+| `short` | whitespace collapse and ellipsis truncation |
+| `failed_nouns` | unique nouns of failed `tool:` activities |
+| `QUOTE_SYMBOL` / `instrument_from_sources` | extracts `SYMBOL.NS` or `.BO` from `/quote/...` source URLs |
+| `has_tool_trail` | any `tool:` activity exists (controls whether the trail is shown; chat-only runs produce none) |
+| `dedupe_sources` / `source_label` | numbered, deduped sources; host shown only when it differs from the title |
+| `CANDIDATE`, `ACRONYMS`, `title_name`, `parse_clarification` | clarification candidate parsing (`- SYM (EX) Name` or `- Name (SYM, EX)`) and name title-casing with an acronym whitelist |
+| `build_display` | assembles the per-event `Display` payload from the helpers above |
 
-From `backend/finai/plain.py` (shared with state.py):
+Also in `backend/finai/display.py` (shared with `state.py` and `plain.py`):
 
-| function | line | what it does |
-|---|---|---|
-| `REVIEW_UNAVAILABLE_NOTE` | 35 | text shown when output review is unavailable |
-| `_PYDANTIC_VALUE_ERROR` | 39 | regex that strips pydantic validation dumps |
-| `dedupe_sources` | 42 | dedupe by `(url, source_label)` |
-| `source_label` | ~55 | title, else `provider · dataset · instrument` derived from `/quote/<symbol>/<dataset>` paths; falls back to "Source (no title provided)". Uses `_PROVIDER_LABELS` and `_DATASET_LABELS` maps. |
-| `friendly_error` | 74 | reduces a validation dump to one sentence |
-| `provider_notice` | 87 | builds "⚠ OpenRouter error (<reason>): <label> — <message>" from `provider.failed`; uses `_REASON_LABELS` |
-| `review_unavailable` | 103 | true when `output_review == "unavailable"` on the event or its meta |
+| name | what it does |
+|---|---|
+| `REVIEW_UNAVAILABLE_NOTE` | text shown when output review is unavailable |
+| `PYDANTIC_VALUE_ERROR` | regex that strips pydantic validation dumps |
+| `friendly_error` | reduces a validation dump to one sentence |
+| `provider_notice` | builds "⚠ OpenRouter error (<reason>): <label> — <message>" from `provider.failed`; uses `REASON_LABELS` |
+| `review_unavailable` | true when `output_review == "unavailable"` on the event or its meta |
+| `PROVIDER_LABELS` / `DATASET_LABELS` | labels used by `source_label`, which falls back to "Source (no title provided)" |
 
-Also used: `sanitize_terminal_text` (`finai/safety.py`, 13 lines). It must be reproduced on the TS side for any text from the runtime.
+Also used: `sanitize_terminal_text` (`finai/safety.py`). The UI applies the equivalent (`frontend/src/render/sanitize.ts`) to any text from the runtime.
 
-## Gaps and risks for a TS port
+## Gaps and risks
 
-1. The approval flow is inconsistent: the UI resumes by sending `"yes"` as a new query, and the runtime never emits the events. Define the contract before porting.
+1. The approval flow is inconsistent: resuming sends `"yes"` as a new query, and the runtime never emits the events. Define the contract before building a UI for it.
 2. The clarification resume branch (`kind == "clarification"`) is never written. Confirm the intended resume semantics first.
-3. No JSON schema for events. A TS client needs a hand-written or generated schema from the Pydantic models (for example `ResearchEvent` via `TypeAdapter(ResearchEvent).json_schema()`, which is not wired up today).
+3. Event and protocol schemas are exported from the Pydantic models (`python -m finai.bridge.schema`); keep them in step with `app/events/models.py`.
 4. There is no session delete API.
 5. `CheckStageResult`, `ContextCompacted`, `SkillSelected` and `RouteDecisionMade` are emitted but have no UI reducer branch; decide whether the TS UI should show them.
 6. Event sequence can be out of order. Dedupe by `sequence` and apply out-of-order events, as `reduce_event` does.

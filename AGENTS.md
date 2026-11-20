@@ -4,7 +4,8 @@ FIN-AI is a CLI-first financial research system. Keep deterministic market calcu
 
 ## Repository boundaries
 
-- `backend/finai/`: CLI, Textual UI, rendering, sessions, and local persistence.
+- `frontend/`: Ink (TypeScript) terminal UI, the only interactive UI; it talks to the Python bridge over JSON-RPC (see `docs/frontend.md`).
+- `backend/finai/`: CLI launcher, bridge (`bridge/`), plain/JSON output, sessions, and local persistence.
 - `backend/app/`: configuration, routing, bounded AgentLoop, providers, events, security, and observability.
 - `backend/data/`: YFinance, optional Upstox, and the TinyFish news pipeline.
 - `backend/quant/`: deterministic fundamental and technical analysis.
@@ -35,6 +36,7 @@ uv run mypy backend
 uv run pytest backend/tests --no-cov
 uv run pytest backend/tests --cov=backend --cov-report=term-missing --cov-fail-under=70
 PYTHONPATH=backend uv run python -m finai --help
+(cd frontend && npm install && npm run typecheck && npm test && npm run build && npm run gen:types:check)
 PYTHONPATH=backend uv run python -m experiments --help
 PYTHONPATH=. uv run python -m evals.validate
 ```

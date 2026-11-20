@@ -1,0 +1,183 @@
+{
+  "events": [
+    {
+      "display": null,
+      "event": {
+        "meta": {
+          "conversation_id": "5ca2cb28-d609-5c83-8b07-68833c5f7dbf",
+          "event_id": "829358f2-4d39-56bc-8d3e-e5ae3e6a5008",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "7655a79b-c82c-5e1a-8456-fedfb7c8df49",
+          "sequence": 1
+        },
+        "query": "Which bank?",
+        "type": "run.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": [
+          {
+            "exchange": "NSE",
+            "name": "HDFC Bank",
+            "symbol": "HDFCBANK.NS"
+          },
+          {
+            "exchange": "NSE",
+            "name": "ICICI Bank",
+            "symbol": "ICICIBANK.NS"
+          }
+        ],
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": [
+          "Please pick a company:",
+          "Or answer in your own words."
+        ],
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "meta": {
+          "conversation_id": "5ca2cb28-d609-5c83-8b07-68833c5f7dbf",
+          "event_id": "a307087d-510a-5e1f-b631-34c931c7a848",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "7655a79b-c82c-5e1a-8456-fedfb7c8df49",
+          "sequence": 2
+        },
+        "prompt": "Please pick a company:\n- HDFCBANK.NS (NSE) HDFC Bank\n- ICICIBANK.NS (NSE) ICICI Bank\nOr answer in your own words.",
+        "type": "clarification.requested"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": [],
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": false,
+        "sources": null
+      },
+      "event": {
+        "artifact_path": null,
+        "completion_reason": null,
+        "duration_ms": 2500.0,
+        "evidence_availability": [],
+        "evidence_status": null,
+        "meta": {
+          "conversation_id": "5ca2cb28-d609-5c83-8b07-68833c5f7dbf",
+          "event_id": "cf5e902c-ec49-5640-9be7-a8f77c9e8d24",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "7655a79b-c82c-5e1a-8456-fedfb7c8df49",
+          "sequence": 3
+        },
+        "output_review": null,
+        "route_reason_codes": [],
+        "terminal_status": "awaiting_clarification",
+        "type": "run.completed"
+      }
+    }
+  ],
+  "final": {
+    "active_tools": [],
+    "activities": {},
+    "current_operation": null,
+    "error": null,
+    "last_event_type": "run.completed",
+    "latest_sequence": 3,
+    "phase": "complete",
+    "query": "Which bank?",
+    "response_delta_count": 0,
+    "response_text": "",
+    "run_id": "7655a79b-c82c-5e1a-8456-fedfb7c8df49",
+    "seen_sequences": [
+      1,
+      2,
+      3
+    ],
+    "sources": [],
+    "terminal_status": "awaiting_clarification"
+  },
+  "snapshots": [
+    {
+      "after_sequence": 1,
+      "state": {
+        "active_tools": [],
+        "activities": {},
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "run.started",
+        "latest_sequence": 1,
+        "phase": "starting",
+        "query": "Which bank?",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "7655a79b-c82c-5e1a-8456-fedfb7c8df49",
+        "seen_sequences": [
+          1
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 2,
+      "state": {
+        "active_tools": [],
+        "activities": {},
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "clarification.requested",
+        "latest_sequence": 2,
+        "phase": "waiting_for_clarification",
+        "query": "Which bank?",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "7655a79b-c82c-5e1a-8456-fedfb7c8df49",
+        "seen_sequences": [
+          1,
+          2
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 3,
+      "state": {
+        "active_tools": [],
+        "activities": {},
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "run.completed",
+        "latest_sequence": 3,
+        "phase": "complete",
+        "query": "Which bank?",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "7655a79b-c82c-5e1a-8456-fedfb7c8df49",
+        "seen_sequences": [
+          1,
+          2,
+          3
+        ],
+        "sources": [],
+        "terminal_status": "awaiting_clarification"
+      }
+    }
+  ]
+}

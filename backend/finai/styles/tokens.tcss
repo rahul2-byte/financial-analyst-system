@@ -1,3 +1,0 @@
-/* Tokens ($fin-ink, $fin-graphite, $fin-rule, $fin-paper, $fin-dim, $fin-ledger,
-   $fin-gain, $fin-loss) are registered from theme.py. Global defaults only here. */
-Screen { background: $fin-ink; color: $fin-paper; }

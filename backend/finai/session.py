@@ -8,6 +8,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from pathlib import Path
+from typing import Any
 
 from app.config import settings
 from app.core.diagnostics import diagnostic_payload, diagnostics_enabled
@@ -48,6 +49,12 @@ class FinAIRepl:
             self.resources,
             self.mode,
         )
+
+    def last_report_material(self) -> dict[str, Any] | None:
+        """Read-only run material for the structured report view."""
+        from .report_view import collect_material
+
+        return collect_material(self.runtime)
 
     @property
     def conversation_id(self) -> uuid.UUID:

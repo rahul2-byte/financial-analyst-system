@@ -1,0 +1,335 @@
+{
+  "events": [
+    {
+      "display": null,
+      "event": {
+        "meta": {
+          "conversation_id": "db73e382-10f9-53b6-820b-f23044af99bb",
+          "event_id": "88e6bfbc-b7b9-5f2b-ab0e-499964a2c5d9",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "fc31d640-4dd3-5b20-924c-97ac55097f9e",
+          "sequence": 1
+        },
+        "query": "HDFC Bank",
+        "type": "run.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Preparing research",
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "label": "Preparing research",
+        "meta": {
+          "conversation_id": "db73e382-10f9-53b6-820b-f23044af99bb",
+          "event_id": "72f1f54d-cb61-5ba7-958c-2583c6b103eb",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "fc31d640-4dd3-5b20-924c-97ac55097f9e",
+          "sequence": 2
+        },
+        "stage": "agent",
+        "type": "stage.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching fundamentals",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamentals",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": null,
+        "meta": {
+          "conversation_id": "db73e382-10f9-53b6-820b-f23044af99bb",
+          "event_id": "884fbb40-8da2-5600-a635-1c1e2a04727e",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "fc31d640-4dd3-5b20-924c-97ac55097f9e",
+          "sequence": 3
+        },
+        "tool": "data:fetch_fundamentals",
+        "tool_id": "t1",
+        "type": "tool.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": "1 validation error for stockdata value …",
+        "friendly": "close must be a number",
+        "instrument": null,
+        "label": "Fetched fundamentals",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamentals",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "message": "1 validation error for StockData\nValue error, close must be a number [type=value_error, input_value='abc', input_type=str]\n  For further information visit https://errors.pydantic.dev/2.9/v/value_error",
+        "meta": {
+          "conversation_id": "db73e382-10f9-53b6-820b-f23044af99bb",
+          "event_id": "7b997c2d-8012-5811-80bf-42cda16f2235",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "fc31d640-4dd3-5b20-924c-97ac55097f9e",
+          "sequence": 4
+        },
+        "tool": "data:fetch_fundamentals",
+        "tool_id": "t1",
+        "type": "tool.failed"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": [
+          "fundamentals"
+        ],
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": false,
+        "sources": null
+      },
+      "event": {
+        "artifact_path": null,
+        "completion_reason": null,
+        "duration_ms": 9000.0,
+        "evidence_availability": [],
+        "evidence_status": null,
+        "meta": {
+          "conversation_id": "db73e382-10f9-53b6-820b-f23044af99bb",
+          "event_id": "fa17f9c6-162e-59df-b520-ddfcc404edb2",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "fc31d640-4dd3-5b20-924c-97ac55097f9e",
+          "sequence": 5
+        },
+        "output_review": null,
+        "route_reason_codes": [],
+        "terminal_status": "completed_with_limited_evidence",
+        "type": "run.completed"
+      }
+    }
+  ],
+  "final": {
+    "active_tools": [],
+    "activities": {
+      "agent": {
+        "detail": null,
+        "label": "Preparing research",
+        "status": "completed"
+      },
+      "tool:t1": {
+        "detail": "close must be a number",
+        "label": "data:fetch_fundamentals",
+        "status": "failed"
+      }
+    },
+    "current_operation": null,
+    "error": null,
+    "last_event_type": "run.completed",
+    "latest_sequence": 5,
+    "phase": "complete",
+    "query": "HDFC Bank",
+    "response_delta_count": 0,
+    "response_text": "",
+    "run_id": "fc31d640-4dd3-5b20-924c-97ac55097f9e",
+    "seen_sequences": [
+      1,
+      2,
+      3,
+      4,
+      5
+    ],
+    "sources": [],
+    "terminal_status": "completed_with_limited_evidence"
+  },
+  "snapshots": [
+    {
+      "after_sequence": 1,
+      "state": {
+        "active_tools": [],
+        "activities": {},
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "run.started",
+        "latest_sequence": 1,
+        "phase": "starting",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "fc31d640-4dd3-5b20-924c-97ac55097f9e",
+        "seen_sequences": [
+          1
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 2,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          }
+        },
+        "current_operation": "Preparing research",
+        "error": null,
+        "last_event_type": "stage.started",
+        "latest_sequence": 2,
+        "phase": "researching",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "fc31d640-4dd3-5b20-924c-97ac55097f9e",
+        "seen_sequences": [
+          1,
+          2
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 3,
+      "state": {
+        "active_tools": [
+          "t1"
+        ],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:t1": {
+            "detail": null,
+            "label": "data:fetch_fundamentals",
+            "status": "running"
+          }
+        },
+        "current_operation": "data:fetch_fundamentals",
+        "error": null,
+        "last_event_type": "tool.started",
+        "latest_sequence": 3,
+        "phase": "researching",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "fc31d640-4dd3-5b20-924c-97ac55097f9e",
+        "seen_sequences": [
+          1,
+          2,
+          3
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 4,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:t1": {
+            "detail": "close must be a number",
+            "label": "data:fetch_fundamentals",
+            "status": "failed"
+          }
+        },
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "tool.failed",
+        "latest_sequence": 4,
+        "phase": "researching",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "fc31d640-4dd3-5b20-924c-97ac55097f9e",
+        "seen_sequences": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 5,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "completed"
+          },
+          "tool:t1": {
+            "detail": "close must be a number",
+            "label": "data:fetch_fundamentals",
+            "status": "failed"
+          }
+        },
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "run.completed",
+        "latest_sequence": 5,
+        "phase": "complete",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "fc31d640-4dd3-5b20-924c-97ac55097f9e",
+        "seen_sequences": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "sources": [],
+        "terminal_status": "completed_with_limited_evidence"
+      }
+    }
+  ]
+}

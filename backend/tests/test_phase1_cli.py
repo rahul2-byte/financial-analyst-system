@@ -1,4 +1,4 @@
-"""Phase 1 CLI/TUI regressions: one-shot streaming, render coalescing, cancel."""
+"""Phase 1 CLI regressions: one-shot streaming, JSON lines, exit codes."""
 
 import asyncio
 import json
@@ -18,9 +18,6 @@ from app.events.models import (
     ToolStarted,
 )
 from finai import cli
-from finai.app import FinAIApp
-from finai.widgets import Composer
-from textual.widgets import Static
 
 
 def _repl(events: list, closed: list | None = None) -> SimpleNamespace:
@@ -130,91 +127,3 @@ def test_help_documents_exit_codes(capsys: pytest.CaptureFixture[str]) -> None:
     out = capsys.readouterr().out
     assert "exit codes" in out
     assert "130" in out
-
-
-def _text(app: FinAIApp) -> str:
-    parts = []
-    for widget in app.query("#conversation Static"):
-        rendered = widget.render()
-        parts.append(str(getattr(rendered, "plain", rendered)))
-    return "\n".join(parts)
-
-
-def test_markdown_updates_are_coalesced() -> None:
-    deltas = 200
-
-    async def stream(_q: str):
-        factory = EventFactory(uuid4())
-        yield factory.make(RunStarted, query="q")
-        for i in range(deltas):
-            yield factory.make(TextDelta, text=f"w{i} ")
-        yield factory.make(RunCompleted, terminal_status="success")
-
-    async def scenario() -> None:
-        app = FinAIApp(stream)
-        async with app.run_test(size=(100, 30)) as pilot:
-            app.query_one("#composer", Composer).text = "hi"
-            await pilot.press("enter")
-            await pilot.pause(0.6)
-            assert app.state.response_text == "".join(f"w{i} " for i in range(deltas))
-            assert app.response_render_count < deltas // 4
-            assert app._delta_dirty is False
-
-    asyncio.run(scenario())
-
-
-def test_cancel_with_queued_query_shows_cancelled_and_starts_next() -> None:
-    started: list[str] = []
-    release = asyncio.Event()
-
-    async def stream(query: str):
-        started.append(query)
-        factory = EventFactory(uuid4())
-        yield factory.make(RunStarted, query=query)
-        if query == "first":
-            await release.wait()  # never released; cancelled
-        yield factory.make(TextDelta, text=f"answer {query}")
-        yield factory.make(RunCompleted, terminal_status="success")
-
-    async def scenario() -> None:
-        app = FinAIApp(stream)
-        async with app.run_test(size=(100, 30)) as pilot:
-            composer = app.query_one("#composer", Composer)
-            composer.text = "first"
-            await pilot.press("enter")
-            await pilot.pause(0.1)
-            composer.text = "second"
-            await pilot.press("enter")
-            await pilot.pause(0.1)
-            assert started == ["first"]
-            app.action_cancel_run()
-            await pilot.pause(0.5)
-            assert started == ["first", "second"]
-            assert "Cancelled" in _text(app)
-            first_activity = next(iter(app.query(".run-activity")))
-            assert first_activity.display is False
-            assert "answer second" in app.state.response_text
-            assert app._run_task is None or app._run_task.done()
-
-    asyncio.run(scenario())
-
-
-def test_cancel_without_queue_leaves_cancelled_row() -> None:
-    async def stream(query: str):
-        factory = EventFactory(uuid4())
-        yield factory.make(RunStarted, query=query)
-        await asyncio.sleep(30)
-        yield factory.make(RunCompleted, terminal_status="success")
-
-    async def scenario() -> None:
-        app = FinAIApp(stream)
-        async with app.run_test(size=(100, 30)) as pilot:
-            app.query_one("#composer", Composer).text = "q"
-            await pilot.press("enter")
-            await pilot.pause(0.1)
-            app.action_cancel_run()
-            await pilot.pause(0.3)
-            assert "Cancelled" in _text(app)
-            assert isinstance(app.query_one("#status", Static), Static)
-
-    asyncio.run(scenario())

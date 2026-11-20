@@ -32,12 +32,16 @@ from app.events.models import (
     ToolStarted,
 )
 
-from .plain import (
+from .display import (
     REVIEW_UNAVAILABLE_NOTE,
     dedupe_sources,
     friendly_error,
+    provider_completed_detail,
     provider_notice,
+    provider_retrying_detail,
+    provider_stream_detail,
     review_unavailable,
+    tool_failure_text,
 )
 
 
@@ -165,7 +169,7 @@ def reduce_event(state: PresentationState, event: ResearchEvent) -> Presentation
         activities = dict(state.activities)
         activities["provider"] = ActivityState(
             "Retrying OpenRouter",
-            detail=f"{event.reason} · {event.delay_ms / 1000:.1f}s",
+            detail=provider_retrying_detail(event.reason, event.delay_ms),
         )
         return replace(
             state,
@@ -176,7 +180,7 @@ def reduce_event(state: PresentationState, event: ResearchEvent) -> Presentation
     if isinstance(event, ProviderStreamStarted):
         activities = dict(state.activities)
         activities["provider"] = ActivityState(
-            "Streaming response", detail=f"first byte {event.first_byte_ms / 1000:.1f}s"
+            "Streaming response", detail=provider_stream_detail(event.first_byte_ms)
         )
         return replace(
             state,
@@ -187,7 +191,7 @@ def reduce_event(state: PresentationState, event: ResearchEvent) -> Presentation
     if isinstance(event, ProviderCompleted | ProviderFailed):
         activities = dict(state.activities)
         if isinstance(event, ProviderCompleted):
-            detail = f"{event.attempts} attempt(s) · {event.duration_ms / 1000:.1f}s"
+            detail = provider_completed_detail(event.attempts, event.duration_ms)
             status = "completed"
             label = "OpenRouter"
         else:
@@ -246,7 +250,7 @@ def reduce_event(state: PresentationState, event: ResearchEvent) -> Presentation
                 activity,
                 status="failed" if isinstance(event, ToolFailed) else "completed",
                 detail=_short_detail(
-                    friendly_error(event.message)
+                    tool_failure_text(event.message, event.tool)
                     if isinstance(event, ToolFailed)
                     else event.detail
                 ),

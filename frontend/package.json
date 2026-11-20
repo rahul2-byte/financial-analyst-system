@@ -1,0 +1,36 @@
+{
+  "name": "finai-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "FIN-AI TypeScript terminal UI (Ink + React) over the Python JSON-RPC bridge",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node esbuild.config.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest",
+    "gen:types": "node scripts/gen-types.mjs",
+    "gen:types:check": "node scripts/gen-types.mjs --check",
+    "snapshot": "node scripts/build-snapshot.mjs && node dist/snapshot.mjs"
+  },
+  "dependencies": {
+    "ink": "6.8.0",
+    "marked": "18.2.1",
+    "react": "19.1.10",
+    "string-width": "9.0.0",
+    "wrap-ansi": "10.0.2"
+  },
+  "devDependencies": {
+    "@types/node": "26.6.6",
+    "@types/react": "19.3.0",
+    "@xterm/addon-serialize": "0.14.0",
+    "@xterm/headless": "6.0.0",
+    "esbuild": "0.28.2",
+    "ink-testing-library": "4.0.0",
+    "json-schema-to-typescript": "16.0.0",
+    "typescript": "7.0.2",
+    "vitest": "5.1.1"
+  }
+}

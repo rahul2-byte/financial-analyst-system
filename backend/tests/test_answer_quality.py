@@ -11,7 +11,6 @@ from app.core.agent_loop.tool_runner import FinancialToolRunner
 from app.core.instrument_resolution import resolve_instrument
 from app.core.resources import RuntimeResources
 from finai.plain import dedupe_sources, render_sources_plain
-from finai.render import render_sources
 
 
 def _rows(count: int = 300) -> list[dict[str, Any]]:
@@ -143,4 +142,3 @@ def test_duplicate_sources_rendered_once() -> None:
     plain = render_sources_plain(sources)
     assert plain.count("https://api.upstox.com") == 1
     assert "Sources · 1" in plain
-    assert "[2]" not in render_sources(sources).plain

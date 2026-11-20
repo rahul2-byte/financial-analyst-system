@@ -8,16 +8,16 @@ import contextlib
 import json
 import logging
 import os
+import shutil
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import TypeVar
+from typing import NoReturn, TypeVar
 
 from app.core.resources import MissingOpenRouterKeyError
 from app.events.models import ResearchEvent
 from app.observability.tracing import initialize_tracing
 
-from .app import FinAIApp
 from .plain import render_event
 from .session import FinAIRepl
 
@@ -40,6 +40,48 @@ def _validate_cli_paths(data_dir: Path, replay_path: Path | None) -> None:
             raise ValueError("--replay-snapshots must point to a file")
         if replay.stat().st_size > 256 * 1024:
             raise ValueError("--replay-snapshots is too large")
+
+
+TS_CLI = Path(__file__).resolve().parents[2] / "frontend" / "dist" / "cli.js"
+_BUILD_HINT = "cd frontend && npm install && npm run build"
+
+
+def exec_ts_ui(argv: Sequence[str]) -> NoReturn:
+    """Replace this process with the interactive UI (`node frontend/dist/cli.js`)."""
+    node = shutil.which("node")
+    if node is None:
+        raise SystemExit(
+            "finai: the interactive UI needs node on PATH. Install Node.js, then run: "
+            + _BUILD_HINT
+        )
+    if not TS_CLI.is_file():
+        raise SystemExit(
+            f"finai: the interactive UI is not built ({TS_CLI} is missing). "
+            f"Run: {_BUILD_HINT}"
+        )
+    os.execvp(node, [node, str(TS_CLI), *argv])
+
+
+def interactive_argv(args: argparse.Namespace) -> list[str]:
+    """Translate parsed CLI options into the options the interactive UI accepts."""
+    ignored = [
+        flag
+        for flag, value in (
+            ("--replay-snapshots", args.replay_snapshots),
+            ("--debug", args.debug),
+            ("--debug-payloads", args.debug_payloads),
+        )
+        if value
+    ]
+    if ignored:
+        print(
+            f"finai: {', '.join(ignored)} apply to one-shot runs only; ignored here.",
+            file=sys.stderr,
+        )
+    argv = ["--data-dir", str(args.data_dir), "--mode", args.mode]
+    if args.session:
+        argv += ["--session", args.session]
+    return argv
 
 
 def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -206,47 +248,10 @@ async def run_plain_terminal(repl: FinAIRepl) -> None:
         await repl.llm_service.aclose()
 
 
-def build_app(repl: FinAIRepl) -> FinAIApp:
-    """Create the Textual shell wired to the REPL's current session."""
-    app = FinAIApp(
-        session_store=repl.store,
-        compact_callback=repl.compact_context,
-        mode=repl.mode,
-    )
-
-    def resume_session(session_id: str) -> None:
-        repl.resume_session(session_id)
-        app.session_store = repl.store
-
-    def new_session() -> None:
-        repl.new_session()
-        app.session_store = repl.store
-
-    app.session_callback = resume_session
-    app.new_session_callback = new_session
-    # Late-bound: /new and resume replace repl.store.
-    app.clear_pending_callback = lambda: repl.store.clear_pending()
-
-    async def stream(query: str):
-        repl.mode = app.mode
-        async for event in repl.typed_stream(query):
-            yield event
-
-    app.event_stream = stream
-    return app
-
-
-async def run_interactive(repl: FinAIRepl) -> None:
-    """Start the Textual shell and connect it to the session stream."""
-    app = build_app(repl)
-    try:
-        await app.run_async()
-    finally:
-        await repl.llm_service.aclose()
-
-
 def main() -> None:
     args = parse_arguments()
+    if not args.query and sys.stdin.isatty() and sys.stdout.isatty():
+        exec_ts_ui(interactive_argv(args))
     try:
         # Keep stdout clean for --json/--plain: tracing diagnostics go to stderr.
         tracing = quiet_stdout(initialize_tracing)
@@ -277,10 +282,7 @@ def main() -> None:
             )
             quiet_stdout(tracing.shutdown)
             sys.exit(code)
-        if sys.stdin.isatty() and sys.stdout.isatty():
-            asyncio.run(run_interactive(repl))
-        else:
-            asyncio.run(run_plain_terminal(repl))
+        asyncio.run(run_plain_terminal(repl))
         tracing.shutdown()
     except MissingOpenRouterKeyError as exc:
         print(str(exc), file=sys.stderr)

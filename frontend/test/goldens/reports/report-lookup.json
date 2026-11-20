@@ -1,0 +1,478 @@
+{
+  "events": [
+    {
+      "display": null,
+      "event": {
+        "meta": {
+          "conversation_id": "83cc2f9d-8586-513a-b285-93075264c626",
+          "event_id": "042eb054-d4f0-5d30-9560-2563b7848cdd",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "0ef77802-eb41-5a25-a31f-1dd723c98b15",
+          "sequence": 1
+        },
+        "query": "HDFCBANK",
+        "type": "run.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Preparing research",
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "label": "Preparing research",
+        "meta": {
+          "conversation_id": "83cc2f9d-8586-513a-b285-93075264c626",
+          "event_id": "a1cae641-569a-53c0-ab36-caa29f6bbec8",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "0ef77802-eb41-5a25-a31f-1dd723c98b15",
+          "sequence": 3
+        },
+        "stage": "agent",
+        "type": "stage.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching stock data",
+        "lines": null,
+        "notice": null,
+        "noun": "stock data",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": null,
+        "meta": {
+          "conversation_id": "83cc2f9d-8586-513a-b285-93075264c626",
+          "event_id": "04f6b850-d804-57c4-bb8f-6ff46e4f2d13",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "0ef77802-eb41-5a25-a31f-1dd723c98b15",
+          "sequence": 9
+        },
+        "tool": "data:fetch_stock_data",
+        "tool_id": "call_6a5506c9b1e44053b1ba869e26e1a83a",
+        "type": "tool.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching fundamentals",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamentals",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "message": "Running data:fetch_fundamentals",
+        "meta": {
+          "conversation_id": "83cc2f9d-8586-513a-b285-93075264c626",
+          "event_id": "d7fa7796-bc33-5bc2-8533-f4fee785c221",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "0ef77802-eb41-5a25-a31f-1dd723c98b15",
+          "sequence": 10
+        },
+        "tool": "data:fetch_fundamentals",
+        "tool_id": "call_6a5506c9b1e44053b1ba869e26e1a83a",
+        "type": "tool.progress"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": "received 17 fields",
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetched stock data",
+        "lines": null,
+        "notice": null,
+        "noun": "stock data",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": "received 17 fields",
+        "duration_ms": 1184.28,
+        "meta": {
+          "conversation_id": "83cc2f9d-8586-513a-b285-93075264c626",
+          "event_id": "078f073d-ef56-5372-b8c5-0fe6707fe059",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "0ef77802-eb41-5a25-a31f-1dd723c98b15",
+          "sequence": 11
+        },
+        "tool": "data:fetch_stock_data",
+        "tool_id": "call_6a5506c9b1e44053b1ba869e26e1a83a",
+        "type": "tool.completed"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": [
+          {
+            "host": "api.upstox.com",
+            "label": "Upstox",
+            "url": "https://api.upstox.com"
+          }
+        ]
+      },
+      "event": {
+        "meta": {
+          "conversation_id": "83cc2f9d-8586-513a-b285-93075264c626",
+          "event_id": "236ee579-c678-52dd-b5fb-78ff8115eb77",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "0ef77802-eb41-5a25-a31f-1dd723c98b15",
+          "sequence": 12
+        },
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          }
+        ],
+        "type": "sources.updated"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": [
+          {
+            "host": "finance.yahoo.com",
+            "label": "Yahoo Finance · price history · HDFCBANK.NS",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          }
+        ]
+      },
+      "event": {
+        "meta": {
+          "conversation_id": "83cc2f9d-8586-513a-b285-93075264c626",
+          "event_id": "d0935a5e-e963-5295-964d-256015013ff6",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "0ef77802-eb41-5a25-a31f-1dd723c98b15",
+          "sequence": 16
+        },
+        "sources": [
+          {
+            "name": "yfinance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          }
+        ],
+        "type": "sources.updated"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": [
+          {
+            "host": null,
+            "label": "upstox.com",
+            "url": "https://upstox.com/news/market-news/stocks/hdfc-bank-shares-fall-over-1-amid-market-weakness-stock-turns-positive-over-6-months/article-203405/"
+          }
+        ]
+      },
+      "event": {
+        "meta": {
+          "conversation_id": "83cc2f9d-8586-513a-b285-93075264c626",
+          "event_id": "12b9b25b-ca9b-5739-a1ae-4d8837964391",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "0ef77802-eb41-5a25-a31f-1dd723c98b15",
+          "sequence": 20
+        },
+        "sources": [
+          {
+            "name": "upstox.com",
+            "url": "https://upstox.com/news/market-news/stocks/hdfc-bank-shares-fall-over-1-amid-market-weakness-stock-turns-positive-over-6-months/article-203405/"
+          }
+        ],
+        "type": "sources.updated"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": [
+          {
+            "host": "api.upstox.com",
+            "label": "Upstox",
+            "url": "https://api.upstox.com"
+          }
+        ]
+      },
+      "event": {
+        "meta": {
+          "conversation_id": "83cc2f9d-8586-513a-b285-93075264c626",
+          "event_id": "0c9c3de1-fbff-5481-b116-8da28237804a",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "0ef77802-eb41-5a25-a31f-1dd723c98b15",
+          "sequence": 29
+        },
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          }
+        ],
+        "type": "sources.updated"
+      }
+    },
+    {
+      "display": null,
+      "event": {
+        "meta": {
+          "conversation_id": "83cc2f9d-8586-513a-b285-93075264c626",
+          "event_id": "7a9c6250-f8b0-5258-b7b5-7dd643ffb172",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "0ef77802-eb41-5a25-a31f-1dd723c98b15",
+          "sequence": 1330
+        },
+        "text": "HDFC Bank last closed at ₹846, up 14.82% over the past year.",
+        "type": "response.delta"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": [],
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": "HDFCBANK.NS",
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": false,
+        "sources": null
+      },
+      "event": {
+        "artifact_path": ".finai/sessions/demo/runs/run.json",
+        "completion_reason": null,
+        "duration_ms": 51400.0,
+        "evidence_availability": [
+          {
+            "evidence_count": 3,
+            "reason": null,
+            "source": "market_data",
+            "status": "available"
+          }
+        ],
+        "evidence_status": "complete",
+        "meta": {
+          "conversation_id": "83cc2f9d-8586-513a-b285-93075264c626",
+          "event_id": "4113a9af-bafa-5542-83bb-8412cdb48d28",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "0ef77802-eb41-5a25-a31f-1dd723c98b15",
+          "sequence": 1362
+        },
+        "output_review": null,
+        "route_reason_codes": [
+          "jev_route"
+        ],
+        "terminal_status": "success",
+        "type": "run.completed"
+      }
+    }
+  ],
+  "finished": {
+    "evidence_availability": [
+      {
+        "name": "Price history",
+        "reason": null,
+        "status": "available"
+      }
+    ],
+    "evidence_status": "complete",
+    "outcome": "completed",
+    "report": {
+      "detailed_analysis": null,
+      "disclaimer": "Research aid based on provider data, not investment advice. Verify figures before acting.",
+      "drivers": [],
+      "evidence": {
+        "observed_through_text": "20 Nov 2026",
+        "sources": [
+          {
+            "name": "Price history",
+            "reason": null,
+            "status": "available"
+          }
+        ],
+        "status": "complete"
+      },
+      "final_view": null,
+      "instrument": {
+        "exchange": "NSE",
+        "name": null,
+        "symbol": "HDFCBANK"
+      },
+      "key_figures": [
+        {
+          "as_of_text": "20 Nov 2026",
+          "label": "Last close",
+          "source_ref": 1,
+          "value_text": "846.00"
+        },
+        {
+          "as_of_text": "20 Nov 2026",
+          "label": "Period return",
+          "source_ref": 1,
+          "value_text": "14.82%"
+        }
+      ],
+      "kind": "lookup",
+      "limitations": [],
+      "quote": {
+        "as_of_text": "20 Nov 2026",
+        "change_text": "+14.82% (1y)",
+        "direction": "up",
+        "price_text": "846.00"
+      },
+      "risks": [],
+      "signals": [],
+      "sources": [
+        {
+          "freshness_text": null,
+          "host": "finance.yahoo.com",
+          "label": "Yahoo Finance · price history · HDFCBANK.NS",
+          "ref": 1,
+          "retrieved_text": "observed 20 Nov 2026",
+          "trust": "verified",
+          "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+        }
+      ],
+      "sparkline": {
+        "high_text": "857.37",
+        "low_text": "717.00",
+        "period_text": "1y",
+        "points": [
+          0.14112702144332795,
+          0.38619363111776045,
+          0.3559165063760065,
+          0.32763410985253266,
+          0.42701431929899586,
+          0.3718030918287387,
+          0.06397378357198845,
+          0.0,
+          0.12367314953337617,
+          0.12224834366317566,
+          0.112702144332835,
+          0.34558666381705483,
+          0.61736838355774,
+          0.5610173113913229,
+          0.4926266296217139,
+          0.5663603334045736,
+          0.48122818266011225,
+          0.22162855310963891,
+          0.15117190282823983,
+          0.32300349077438223,
+          0.34223837002208424,
+          0.33397449597492335,
+          0.6101018736197192,
+          0.8231815915081566,
+          0.7596352496972287,
+          0.6532022511932752,
+          0.7108356486428722,
+          0.6328275272494125,
+          0.3874047161074303,
+          0.337322789769894,
+          0.5124314312174962,
+          0.5685687825033835,
+          0.581961957683266,
+          0.802735627270784,
+          1.0,
+          0.932606682339531,
+          0.7956115979197831,
+          0.8304481014461783,
+          0.7820759421528815,
+          0.5753366103868347,
+          0.5818907173897553,
+          0.7388330839923063,
+          0.8090760133931755,
+          0.8261736838355775,
+          0.92562513357555,
+          0.9851107786564078,
+          0.9331766046876113,
+          0.9189997862791195
+        ]
+      },
+      "stance_text": null,
+      "summary": "HDFC Bank last closed at ₹846.00, up 14.82% over the past year."
+    }
+  },
+  "markdown": "HDFC Bank last closed at ₹846, up 14.82% over the past year."
+}

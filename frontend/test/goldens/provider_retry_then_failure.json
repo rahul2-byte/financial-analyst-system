@@ -1,0 +1,388 @@
+{
+  "events": [
+    {
+      "display": null,
+      "event": {
+        "meta": {
+          "conversation_id": "ca6418a1-1d40-5b63-a075-56557ac3c328",
+          "event_id": "56b5d88e-3d6c-5ab7-a70a-e80b74c23713",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "fec70fd0-aef1-5255-bdf6-dcf7b6274f26",
+          "sequence": 1
+        },
+        "query": "HDFC Bank",
+        "type": "run.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Preparing research",
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "label": "Preparing research",
+        "meta": {
+          "conversation_id": "ca6418a1-1d40-5b63-a075-56557ac3c328",
+          "event_id": "3e832575-cc2f-588d-a4ca-21df3748bcfe",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "fec70fd0-aef1-5255-bdf6-dcf7b6274f26",
+          "sequence": 2
+        },
+        "stage": "agent",
+        "type": "stage.started"
+      }
+    },
+    {
+      "display": null,
+      "event": {
+        "attempt": 1,
+        "meta": {
+          "conversation_id": "ca6418a1-1d40-5b63-a075-56557ac3c328",
+          "event_id": "d793435a-3ac3-51ef-8a36-14abb43a1b5a",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "fec70fd0-aef1-5255-bdf6-dcf7b6274f26",
+          "sequence": 3
+        },
+        "provider": "openrouter",
+        "type": "provider.attempt.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": "rate_limit · 5.0s",
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "attempt": 2,
+        "delay_ms": 5000.0,
+        "meta": {
+          "conversation_id": "ca6418a1-1d40-5b63-a075-56557ac3c328",
+          "event_id": "aca12ddd-705f-5c50-83cb-9526c9364761",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "fec70fd0-aef1-5255-bdf6-dcf7b6274f26",
+          "sequence": 4
+        },
+        "provider": "openrouter",
+        "reason": "rate_limit",
+        "status_code": 429,
+        "type": "provider.retrying"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": "Rate limited: slow down and retry",
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": "⚠ OpenRouter error (rate_limit): rate limited — Rate limited: slow down and retry",
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "attempts": 3,
+        "duration_ms": null,
+        "message": "Rate limited: slow down and retry",
+        "meta": {
+          "conversation_id": "ca6418a1-1d40-5b63-a075-56557ac3c328",
+          "event_id": "b5044229-0cfb-517e-8434-25cd7ba4af19",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "fec70fd0-aef1-5255-bdf6-dcf7b6274f26",
+          "sequence": 5
+        },
+        "model_id": null,
+        "partial_output": null,
+        "phase": "stream",
+        "provider": "openrouter",
+        "reason": "rate_limit",
+        "status_code": 429,
+        "timeout": null,
+        "type": "provider.failed",
+        "usage": null
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": "Provider stream failed: rate limited",
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "category": "internal",
+        "message": "Provider stream failed: rate limited",
+        "meta": {
+          "conversation_id": "ca6418a1-1d40-5b63-a075-56557ac3c328",
+          "event_id": "083a7003-703e-5f45-b7e1-3d906c268fba",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "fec70fd0-aef1-5255-bdf6-dcf7b6274f26",
+          "sequence": 6
+        },
+        "type": "run.failed"
+      }
+    }
+  ],
+  "final": {
+    "active_tools": [],
+    "activities": {
+      "agent": {
+        "detail": null,
+        "label": "Preparing research",
+        "status": "running"
+      },
+      "provider": {
+        "detail": null,
+        "label": "⚠ OpenRouter error (rate_limit): rate limited — Rate limited: slow down and retry",
+        "status": "failed"
+      }
+    },
+    "current_operation": null,
+    "error": "Provider stream failed: rate limited",
+    "last_event_type": "run.failed",
+    "latest_sequence": 6,
+    "phase": "failed",
+    "query": "HDFC Bank",
+    "response_delta_count": 0,
+    "response_text": "",
+    "run_id": "fec70fd0-aef1-5255-bdf6-dcf7b6274f26",
+    "seen_sequences": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "sources": [],
+    "terminal_status": "failed"
+  },
+  "snapshots": [
+    {
+      "after_sequence": 1,
+      "state": {
+        "active_tools": [],
+        "activities": {},
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "run.started",
+        "latest_sequence": 1,
+        "phase": "starting",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "fec70fd0-aef1-5255-bdf6-dcf7b6274f26",
+        "seen_sequences": [
+          1
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 2,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          }
+        },
+        "current_operation": "Preparing research",
+        "error": null,
+        "last_event_type": "stage.started",
+        "latest_sequence": 2,
+        "phase": "researching",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "fec70fd0-aef1-5255-bdf6-dcf7b6274f26",
+        "seen_sequences": [
+          1,
+          2
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 3,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "provider": {
+            "detail": "attempt 1",
+            "label": "Contacting OpenRouter",
+            "status": "running"
+          }
+        },
+        "current_operation": "Contacting OpenRouter",
+        "error": null,
+        "last_event_type": "provider.attempt.started",
+        "latest_sequence": 3,
+        "phase": "generating",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "fec70fd0-aef1-5255-bdf6-dcf7b6274f26",
+        "seen_sequences": [
+          1,
+          2,
+          3
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 4,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "provider": {
+            "detail": "rate_limit · 5.0s",
+            "label": "Retrying OpenRouter",
+            "status": "running"
+          }
+        },
+        "current_operation": "Retrying OpenRouter",
+        "error": null,
+        "last_event_type": "provider.retrying",
+        "latest_sequence": 4,
+        "phase": "generating",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "fec70fd0-aef1-5255-bdf6-dcf7b6274f26",
+        "seen_sequences": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 5,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "provider": {
+            "detail": null,
+            "label": "⚠ OpenRouter error (rate_limit): rate limited — Rate limited: slow down and retry",
+            "status": "failed"
+          }
+        },
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "provider.failed",
+        "latest_sequence": 5,
+        "phase": "generating",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "fec70fd0-aef1-5255-bdf6-dcf7b6274f26",
+        "seen_sequences": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 6,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "provider": {
+            "detail": null,
+            "label": "⚠ OpenRouter error (rate_limit): rate limited — Rate limited: slow down and retry",
+            "status": "failed"
+          }
+        },
+        "current_operation": null,
+        "error": "Provider stream failed: rate limited",
+        "last_event_type": "run.failed",
+        "latest_sequence": 6,
+        "phase": "failed",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "fec70fd0-aef1-5255-bdf6-dcf7b6274f26",
+        "seen_sequences": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "sources": [],
+        "terminal_status": "failed"
+      }
+    }
+  ]
+}

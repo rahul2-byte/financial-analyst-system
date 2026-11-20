@@ -61,7 +61,7 @@ class ContextBudget:
     def compact(
         self, messages: list[Message]
     ) -> tuple[list[Message], dict[str, int | str]]:
-        """Keep the newest turns and a bounded textual summary of older turns."""
+        """Keep the newest turns and a bounded text summary of older turns."""
         estimated = sum(self._message_tokens(message) for message in messages)
         if not self.should_compact(estimated):
             return messages, {"estimated_tokens": estimated, "compacted_messages": 0}

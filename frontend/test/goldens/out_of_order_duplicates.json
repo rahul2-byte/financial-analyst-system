@@ -1,0 +1,465 @@
+{
+  "events": [
+    {
+      "display": null,
+      "event": {
+        "meta": {
+          "conversation_id": "f19c6a85-638c-5321-ae20-f48b8d7748ae",
+          "event_id": "0521b2fe-9824-5594-97ed-e9456d4d3ddb",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "da9fcaee-4da3-598b-8be3-bf5e9af61dec",
+          "sequence": 1
+        },
+        "query": "HDFC Bank",
+        "type": "run.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Preparing research",
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "label": "Preparing research",
+        "meta": {
+          "conversation_id": "f19c6a85-638c-5321-ae20-f48b8d7748ae",
+          "event_id": "e2adfbc9-9a98-55ff-be9c-879171d54ec5",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "da9fcaee-4da3-598b-8be3-bf5e9af61dec",
+          "sequence": 2
+        },
+        "stage": "agent",
+        "type": "stage.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": "ok",
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetched fundamentals",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamentals",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": "ok",
+        "duration_ms": null,
+        "meta": {
+          "conversation_id": "f19c6a85-638c-5321-ae20-f48b8d7748ae",
+          "event_id": "f3300889-5641-55c1-9207-c33c747655b4",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "da9fcaee-4da3-598b-8be3-bf5e9af61dec",
+          "sequence": 4
+        },
+        "tool": "data:fetch_fundamentals",
+        "tool_id": "t1",
+        "type": "tool.completed"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching fundamentals",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamentals",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": null,
+        "meta": {
+          "conversation_id": "f19c6a85-638c-5321-ae20-f48b8d7748ae",
+          "event_id": "6e91c7f9-00c7-5a43-9fb9-921d0e5cf80b",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "da9fcaee-4da3-598b-8be3-bf5e9af61dec",
+          "sequence": 3
+        },
+        "tool": "data:fetch_fundamentals",
+        "tool_id": "t1",
+        "type": "tool.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching fundamentals",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamentals",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": null,
+        "meta": {
+          "conversation_id": "f19c6a85-638c-5321-ae20-f48b8d7748ae",
+          "event_id": "6e91c7f9-00c7-5a43-9fb9-921d0e5cf80b",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "da9fcaee-4da3-598b-8be3-bf5e9af61dec",
+          "sequence": 3
+        },
+        "tool": "data:fetch_fundamentals",
+        "tool_id": "t1",
+        "type": "tool.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": "ok",
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetched fundamentals",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamentals",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": "ok",
+        "duration_ms": null,
+        "meta": {
+          "conversation_id": "f19c6a85-638c-5321-ae20-f48b8d7748ae",
+          "event_id": "eb22e6ef-fb9e-55b9-b17a-e0875431af68",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "da9fcaee-4da3-598b-8be3-bf5e9af61dec",
+          "sequence": 5
+        },
+        "tool": "data:fetch_fundamentals",
+        "tool_id": "t1",
+        "type": "tool.completed"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": [],
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": false,
+        "sources": null
+      },
+      "event": {
+        "artifact_path": null,
+        "completion_reason": null,
+        "duration_ms": 100.0,
+        "evidence_availability": [],
+        "evidence_status": null,
+        "meta": {
+          "conversation_id": "f19c6a85-638c-5321-ae20-f48b8d7748ae",
+          "event_id": "e7c6ad5a-f7c0-521a-869b-7cdf8a9070c7",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "da9fcaee-4da3-598b-8be3-bf5e9af61dec",
+          "sequence": 6
+        },
+        "output_review": null,
+        "route_reason_codes": [],
+        "terminal_status": "completed",
+        "type": "run.completed"
+      }
+    }
+  ],
+  "final": {
+    "active_tools": [],
+    "activities": {
+      "agent": {
+        "detail": null,
+        "label": "Preparing research",
+        "status": "completed"
+      },
+      "tool:t1": {
+        "detail": "ok",
+        "label": "data:fetch_fundamentals",
+        "status": "completed"
+      }
+    },
+    "current_operation": null,
+    "error": null,
+    "last_event_type": "run.completed",
+    "latest_sequence": 6,
+    "phase": "complete",
+    "query": "HDFC Bank",
+    "response_delta_count": 0,
+    "response_text": "",
+    "run_id": "da9fcaee-4da3-598b-8be3-bf5e9af61dec",
+    "seen_sequences": [
+      1,
+      2,
+      3,
+      4,
+      5,
+      6
+    ],
+    "sources": [],
+    "terminal_status": "completed"
+  },
+  "snapshots": [
+    {
+      "after_sequence": 1,
+      "state": {
+        "active_tools": [],
+        "activities": {},
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "run.started",
+        "latest_sequence": 1,
+        "phase": "starting",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "da9fcaee-4da3-598b-8be3-bf5e9af61dec",
+        "seen_sequences": [
+          1
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 2,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          }
+        },
+        "current_operation": "Preparing research",
+        "error": null,
+        "last_event_type": "stage.started",
+        "latest_sequence": 2,
+        "phase": "researching",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "da9fcaee-4da3-598b-8be3-bf5e9af61dec",
+        "seen_sequences": [
+          1,
+          2
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 4,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          }
+        },
+        "current_operation": "Preparing research",
+        "error": null,
+        "last_event_type": "tool.completed",
+        "latest_sequence": 4,
+        "phase": "researching",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "da9fcaee-4da3-598b-8be3-bf5e9af61dec",
+        "seen_sequences": [
+          1,
+          2,
+          4
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 3,
+      "state": {
+        "active_tools": [
+          "t1"
+        ],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:t1": {
+            "detail": null,
+            "label": "data:fetch_fundamentals",
+            "status": "running"
+          }
+        },
+        "current_operation": "data:fetch_fundamentals",
+        "error": null,
+        "last_event_type": "tool.started",
+        "latest_sequence": 4,
+        "phase": "researching",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "da9fcaee-4da3-598b-8be3-bf5e9af61dec",
+        "seen_sequences": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 3,
+      "state": {
+        "active_tools": [
+          "t1"
+        ],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:t1": {
+            "detail": null,
+            "label": "data:fetch_fundamentals",
+            "status": "running"
+          }
+        },
+        "current_operation": "data:fetch_fundamentals",
+        "error": null,
+        "last_event_type": "tool.started",
+        "latest_sequence": 4,
+        "phase": "researching",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "da9fcaee-4da3-598b-8be3-bf5e9af61dec",
+        "seen_sequences": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 5,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:t1": {
+            "detail": "ok",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          }
+        },
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "tool.completed",
+        "latest_sequence": 5,
+        "phase": "researching",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "da9fcaee-4da3-598b-8be3-bf5e9af61dec",
+        "seen_sequences": [
+          1,
+          2,
+          3,
+          4,
+          5
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 6,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "completed"
+          },
+          "tool:t1": {
+            "detail": "ok",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          }
+        },
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "run.completed",
+        "latest_sequence": 6,
+        "phase": "complete",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "da9fcaee-4da3-598b-8be3-bf5e9af61dec",
+        "seen_sequences": [
+          1,
+          2,
+          3,
+          4,
+          5,
+          6
+        ],
+        "sources": [],
+        "terminal_status": "completed"
+      }
+    }
+  ]
+}

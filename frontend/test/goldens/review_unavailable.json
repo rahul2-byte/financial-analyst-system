@@ -1,0 +1,243 @@
+{
+  "events": [
+    {
+      "display": null,
+      "event": {
+        "meta": {
+          "conversation_id": "0d036247-5831-5303-a805-203030255a43",
+          "event_id": "05bc9527-f1ab-5aa8-aa6b-ffb7b8cd29ec",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "bb476402-fa1d-58c8-a13a-d1bd593cfe28",
+          "sequence": 1
+        },
+        "query": "HDFC Bank",
+        "type": "run.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Preparing research",
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "label": "Preparing research",
+        "meta": {
+          "conversation_id": "0d036247-5831-5303-a805-203030255a43",
+          "event_id": "09f9826f-293e-5e49-a53b-a23de9d32440",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "bb476402-fa1d-58c8-a13a-d1bd593cfe28",
+          "sequence": 2
+        },
+        "stage": "agent",
+        "type": "stage.started"
+      }
+    },
+    {
+      "display": null,
+      "event": {
+        "meta": {
+          "conversation_id": "0d036247-5831-5303-a805-203030255a43",
+          "event_id": "5456c17d-b5c6-560c-9932-166d5ba08e7e",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "bb476402-fa1d-58c8-a13a-d1bd593cfe28",
+          "sequence": 3
+        },
+        "text": "Partial report text",
+        "type": "response.delta"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": [],
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": "Note: independent answer review was unavailable; numbers were checked against tool evidence.",
+        "review_unavailable": true,
+        "sources": null
+      },
+      "event": {
+        "artifact_path": null,
+        "completion_reason": null,
+        "duration_ms": null,
+        "evidence_availability": [],
+        "evidence_status": null,
+        "meta": {
+          "conversation_id": "0d036247-5831-5303-a805-203030255a43",
+          "event_id": "f06a848a-5f36-5ca6-a979-1c93bea7add6",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "bb476402-fa1d-58c8-a13a-d1bd593cfe28",
+          "sequence": 4
+        },
+        "output_review": "unavailable",
+        "route_reason_codes": [],
+        "terminal_status": "completed",
+        "type": "run.completed"
+      }
+    }
+  ],
+  "final": {
+    "active_tools": [],
+    "activities": {
+      "agent": {
+        "detail": null,
+        "label": "Preparing research",
+        "status": "completed"
+      },
+      "output_review": {
+        "detail": null,
+        "label": "Note: independent answer review was unavailable; numbers were checked against tool evidence.",
+        "status": "completed"
+      }
+    },
+    "current_operation": null,
+    "error": null,
+    "last_event_type": "run.completed",
+    "latest_sequence": 4,
+    "phase": "complete",
+    "query": "HDFC Bank",
+    "response_delta_count": 1,
+    "response_text": "Partial report text",
+    "run_id": "bb476402-fa1d-58c8-a13a-d1bd593cfe28",
+    "seen_sequences": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "sources": [],
+    "terminal_status": "completed"
+  },
+  "snapshots": [
+    {
+      "after_sequence": 1,
+      "state": {
+        "active_tools": [],
+        "activities": {},
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "run.started",
+        "latest_sequence": 1,
+        "phase": "starting",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "bb476402-fa1d-58c8-a13a-d1bd593cfe28",
+        "seen_sequences": [
+          1
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 2,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          }
+        },
+        "current_operation": "Preparing research",
+        "error": null,
+        "last_event_type": "stage.started",
+        "latest_sequence": 2,
+        "phase": "researching",
+        "query": "HDFC Bank",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "bb476402-fa1d-58c8-a13a-d1bd593cfe28",
+        "seen_sequences": [
+          1,
+          2
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 3,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          }
+        },
+        "current_operation": "Preparing research",
+        "error": null,
+        "last_event_type": "response.delta",
+        "latest_sequence": 3,
+        "phase": "generating",
+        "query": "HDFC Bank",
+        "response_delta_count": 1,
+        "response_text": "Partial report text",
+        "run_id": "bb476402-fa1d-58c8-a13a-d1bd593cfe28",
+        "seen_sequences": [
+          1,
+          2,
+          3
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 4,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "completed"
+          },
+          "output_review": {
+            "detail": null,
+            "label": "Note: independent answer review was unavailable; numbers were checked against tool evidence.",
+            "status": "completed"
+          }
+        },
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "run.completed",
+        "latest_sequence": 4,
+        "phase": "complete",
+        "query": "HDFC Bank",
+        "response_delta_count": 1,
+        "response_text": "Partial report text",
+        "run_id": "bb476402-fa1d-58c8-a13a-d1bd593cfe28",
+        "seen_sequences": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "sources": [],
+        "terminal_status": "completed"
+      }
+    }
+  ]
+}

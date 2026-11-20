@@ -83,6 +83,8 @@ class ResearchRunner:
         self.mode = mode
         self.tool_runner = FinancialToolRunner(resources)
         self._resolved_tickers: dict[UUID, str] = {}
+        # Read-only handle on the latest loop, for presentation material.
+        self.last_loop: AgentLoop | None = None
 
     async def stream(
         self,
@@ -97,6 +99,7 @@ class ResearchRunner:
     ) -> AsyncIterator[ResearchEvent]:
         """Yield events for ``query`` while keeping construction out of the session."""
         self.tool_runner.set_mocked_tools(mocked_tools or [])
+        self.last_loop = None
         route = None
         resolution, resolution_source = self._resolve_instrument_context(
             history, query, conversation_id
@@ -303,6 +306,7 @@ class ResearchRunner:
             ),
             **loop_kwargs,
         )
+        self.last_loop = runtime
         stream = runtime.run(
             runtime_history,
             conversation_id=conversation_id,

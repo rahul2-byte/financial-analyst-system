@@ -1,0 +1,2076 @@
+{
+  "events": [
+    {
+      "display": null,
+      "event": {
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "a4be20f4-c02d-562c-b6f0-066dc5ca83d0",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 1
+        },
+        "query": "HDFCBANK",
+        "type": "run.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Preparing research",
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "label": "Preparing research",
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "ccd4f9ee-6140-54ac-906a-63b09335f133",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 3
+        },
+        "stage": "agent",
+        "type": "stage.started"
+      }
+    },
+    {
+      "display": null,
+      "event": {
+        "has_tool_calls": true,
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "0fee63ce-7b71-5071-bbe6-9e7c9519cedf",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 8
+        },
+        "round": 1,
+        "type": "model.response.completed"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching fundamentals",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamentals",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": null,
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "841710db-cc8f-58f3-b7b7-768ce097432d",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 9
+        },
+        "tool": "data:fetch_fundamentals",
+        "tool_id": "call_6a5506c9b1e44053b1ba869e26e1a83a",
+        "type": "tool.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching fundamentals",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamentals",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "message": "Running data:fetch_fundamentals",
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "d997a819-c1b9-57b6-b6ac-9fc2f66c2325",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 10
+        },
+        "tool": "data:fetch_fundamentals",
+        "tool_id": "call_6a5506c9b1e44053b1ba869e26e1a83a",
+        "type": "tool.progress"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": "received 17 fields",
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetched fundamentals",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamentals",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": "received 17 fields",
+        "duration_ms": 1184.28,
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "fe24dff7-c99b-5ba9-9fbd-e0f44f3facac",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 11
+        },
+        "tool": "data:fetch_fundamentals",
+        "tool_id": "call_6a5506c9b1e44053b1ba869e26e1a83a",
+        "type": "tool.completed"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": [
+          {
+            "host": "api.upstox.com",
+            "label": "Upstox",
+            "url": "https://api.upstox.com"
+          }
+        ]
+      },
+      "event": {
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "34d9758f-f311-54b3-a2a8-e82090041e0c",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 12
+        },
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          }
+        ],
+        "type": "sources.updated"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching technical overview",
+        "lines": null,
+        "notice": null,
+        "noun": "technical overview",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": null,
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "6c9b2974-ca02-52cd-93da-7d8faa35a455",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 13
+        },
+        "tool": "analysis:get_technical_overview",
+        "tool_id": "call_383724b93e26433b863e21b45c92cd52",
+        "type": "tool.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching technical overview",
+        "lines": null,
+        "notice": null,
+        "noun": "technical overview",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "message": "Running analysis:get_technical_overview",
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "9467d58c-f28d-523e-9cf6-87c161b70074",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 14
+        },
+        "tool": "analysis:get_technical_overview",
+        "tool_id": "call_383724b93e26433b863e21b45c92cd52",
+        "type": "tool.progress"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": "close ₹846.0",
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetched technical overview",
+        "lines": null,
+        "notice": null,
+        "noun": "technical overview",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+        "duration_ms": 1665.63,
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "8b542ec7-5af2-58c5-9b65-1245334a2d1d",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 15
+        },
+        "tool": "analysis:get_technical_overview",
+        "tool_id": "call_383724b93e26433b863e21b45c92cd52",
+        "type": "tool.completed"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": [
+          {
+            "host": "finance.yahoo.com",
+            "label": "Yahoo Finance · price history · HDFCBANK.NS",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          }
+        ]
+      },
+      "event": {
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "4a64e904-b420-5623-8490-f4db47ace894",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 16
+        },
+        "sources": [
+          {
+            "name": "yfinance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          }
+        ],
+        "type": "sources.updated"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching news",
+        "lines": null,
+        "notice": null,
+        "noun": "news",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": null,
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "f1167830-d4f0-5b38-a45c-daebb92d9ebe",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 17
+        },
+        "tool": "news:fetch_news",
+        "tool_id": "call_76a1f49219084abb844e421b45d0a28c",
+        "type": "tool.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching news",
+        "lines": null,
+        "notice": null,
+        "noun": "news",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "message": "Running news:fetch_news",
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "2dcf4142-d9bc-5c2b-a311-0e387ea349c3",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 18
+        },
+        "tool": "news:fetch_news",
+        "tool_id": "call_76a1f49219084abb844e421b45d0a28c",
+        "type": "tool.progress"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetched news",
+        "lines": null,
+        "notice": null,
+        "noun": "news",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": "{\"news_quality\": {\"below_threshold_count\": 2, \"connector_elapsed_ms\": 7885.61, \"connector_",
+        "duration_ms": 15943.78,
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "caab5ea4-c69d-57f9-a32f-e87cb9cdc333",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 19
+        },
+        "tool": "news:fetch_news",
+        "tool_id": "call_76a1f49219084abb844e421b45d0a28c",
+        "type": "tool.completed"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": [
+          {
+            "host": null,
+            "label": "upstox.com",
+            "url": "https://upstox.com/news/market-news/stocks/hdfc-bank-shares-fall-over-1-amid-market-weakness-stock-turns-positive-over-6-months/article-203405/"
+          }
+        ]
+      },
+      "event": {
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "3f336051-cc09-5669-a515-30d72e8e291b",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 20
+        },
+        "sources": [
+          {
+            "name": "upstox.com",
+            "url": "https://upstox.com/news/market-news/stocks/hdfc-bank-shares-fall-over-1-amid-market-weakness-stock-turns-positive-over-6-months/article-203405/"
+          }
+        ],
+        "type": "sources.updated"
+      }
+    },
+    {
+      "display": null,
+      "event": {
+        "has_tool_calls": true,
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "5d140a9d-6c01-5a0d-a470-602d598c2d5a",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 25
+        },
+        "round": 2,
+        "type": "model.response.completed"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Running fundamental scan",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamental scan",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": null,
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "5ff2b4d7-67bb-5b87-a3d3-b5b2c86e2fc3",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 26
+        },
+        "tool": "analysis:run_fundamental_scan",
+        "tool_id": "call_131e7a59fba54c5b9883e0dc8191c1f2",
+        "type": "tool.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Running fundamental scan",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamental scan",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "message": "Running analysis:run_fundamental_scan",
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "cd9c4998-2f04-5a2d-95f1-3d36f2f36878",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 27
+        },
+        "tool": "analysis:run_fundamental_scan",
+        "tool_id": "call_131e7a59fba54c5b9883e0dc8191c1f2",
+        "type": "tool.progress"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Ran fundamental scan",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamental scan",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": "key values: peRatio=15.13, priceToBook=2.1, returnOnEquity=0.1375",
+        "duration_ms": 27.01,
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "db1f555d-f778-5237-94b3-7d6d1071804f",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 28
+        },
+        "tool": "analysis:run_fundamental_scan",
+        "tool_id": "call_131e7a59fba54c5b9883e0dc8191c1f2",
+        "type": "tool.completed"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": [
+          {
+            "host": "api.upstox.com",
+            "label": "Upstox",
+            "url": "https://api.upstox.com"
+          }
+        ]
+      },
+      "event": {
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "ba068589-bce0-5155-be42-b5b704644684",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 29
+        },
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          }
+        ],
+        "type": "sources.updated"
+      }
+    },
+    {
+      "display": null,
+      "event": {
+        "has_tool_calls": false,
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "d09f4412-b335-5395-8da3-c8487bc0b6f1",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 1361
+        },
+        "round": 4,
+        "type": "model.response.completed"
+      }
+    },
+    {
+      "display": null,
+      "event": {
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "ecc4ec96-27e1-57ff-b29f-5a50b8bd3212",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 1330
+        },
+        "text": "## Report Metadata\n- Report title: Research report\n- Evidence status: COMPLETE\n- Evidence observed through: 2026-11-20T10:00:00+00:00\n- Price return basis: see provider adjustment metadata\n\n## Executive Summary\nHDFC Bank closed at ₹846 after a 14.82% one-year move. Trailing P/E of 15.13 ratio sits below its recent history while momentum is stretched.\n\n## Key Drivers\n- Valuation: P/E of 15.13 ratio and price/book of 2.1 ratio look undemanding for the franchise.\n- Profitability: return on equity of 0.1375 fraction with a 0.2711 fraction profit margin.\n- Trend: price holds above its 20, 50 and 200 day averages.\n- Newsflow: Q2 results coverage points to steady loan growth.\n\n## Detailed Analysis\nThe stock gained 14.82% over the last year and trades near its highs with daily volume of 6,240,100 shares.\n\nFundamentals are steady: return on equity of 0.1375 fraction and a market capitalisation of 13000000000000.0 currency. The technical scan shows an RSI above 75, which historically precedes consolidation.\n\n## Risks and Contrarian View\n- Momentum is stretched: RSI above 75 raises the odds of a pullback.\n- Net interest margin pressure could cap earnings growth.\n- Single-name concentration: banking sector rotation would hit the stock regardless of fundamentals.\n\n## Final View\nConstructive on fundamentals but wait for a pullback: the setup favours accumulating on dips rather than chasing a stretched RSI.\n\n## Claims and references\n- Valuation: P/E of 15.13 ratio and price/book of 2.1 ratio look undemanding for the franchise. [citations: c2]\n- Profitability: return on equity of 0.1375 fraction with a 0.2711 fraction profit margin. [citations: c2]\n- Trend: price holds above its 20, 50 and 200 day averages. [citations: c1]\n- Newsflow: Q2 results coverage points to steady loan growth. [citations: c3]\n- Momentum is stretched: RSI above 75 raises the odds of a pullback. [citations: c1]\n\n## Sources\n- fundamentals_snapshot: https://finance.yahoo.com/quote/HDFCBANK.NS/key-statistics/ (observed 2026-11-20T10:00:00+00:00)\n- historical_prices: https://finance.yahoo.com/quote/HDFCBANK.NS/history/ (observed 2026-11-20T10:00:00+00:00)\n- news_articles: https://upstox.com/news/market-news/hdfc-bank-q2-results (observed 2026-11-20T10:00:00+00:00)",
+        "type": "response.delta"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": [],
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": "HDFCBANK.NS",
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": false,
+        "sources": null
+      },
+      "event": {
+        "artifact_path": ".finai/sessions/demo/runs/run.json",
+        "completion_reason": null,
+        "duration_ms": 51400.0,
+        "evidence_availability": [],
+        "evidence_status": "limited",
+        "meta": {
+          "conversation_id": "cbc31868-e3cb-5559-9040-235d0f841a72",
+          "event_id": "deb3691d-da08-54cd-9de4-6a3d745f16d3",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+          "sequence": 1362
+        },
+        "output_review": null,
+        "route_reason_codes": [
+          "jev_route"
+        ],
+        "terminal_status": "success",
+        "type": "run.completed"
+      }
+    }
+  ],
+  "final": {
+    "active_tools": [],
+    "activities": {
+      "agent": {
+        "detail": null,
+        "label": "Preparing research",
+        "status": "completed"
+      },
+      "tool:call_131e7a59fba54c5b9883e0dc8191c1f2": {
+        "detail": "key values: peRatio=15.13, priceToBook=2.1, returnOnEquity=0.1375",
+        "label": "analysis:run_fundamental_scan",
+        "status": "completed"
+      },
+      "tool:call_383724b93e26433b863e21b45c92cd52": {
+        "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+        "label": "analysis:get_technical_overview",
+        "status": "completed"
+      },
+      "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+        "detail": "received 17 fields",
+        "label": "data:fetch_fundamentals",
+        "status": "completed"
+      },
+      "tool:call_76a1f49219084abb844e421b45d0a28c": {
+        "detail": "{\"news_quality\": {\"below_threshold_count\": 2, \"connector_elapsed_ms\": 7885.61, \"connector_",
+        "label": "news:fetch_news",
+        "status": "completed"
+      }
+    },
+    "current_operation": null,
+    "error": null,
+    "last_event_type": "run.completed",
+    "latest_sequence": 1362,
+    "phase": "complete",
+    "query": "HDFCBANK",
+    "response_delta_count": 1,
+    "response_text": "## Report Metadata\n- Report title: Research report\n- Evidence status: COMPLETE\n- Evidence observed through: 2026-11-20T10:00:00+00:00\n- Price return basis: see provider adjustment metadata\n\n## Executive Summary\nHDFC Bank closed at ₹846 after a 14.82% one-year move. Trailing P/E of 15.13 ratio sits below its recent history while momentum is stretched.\n\n## Key Drivers\n- Valuation: P/E of 15.13 ratio and price/book of 2.1 ratio look undemanding for the franchise.\n- Profitability: return on equity of 0.1375 fraction with a 0.2711 fraction profit margin.\n- Trend: price holds above its 20, 50 and 200 day averages.\n- Newsflow: Q2 results coverage points to steady loan growth.\n\n## Detailed Analysis\nThe stock gained 14.82% over the last year and trades near its highs with daily volume of 6,240,100 shares.\n\nFundamentals are steady: return on equity of 0.1375 fraction and a market capitalisation of 13000000000000.0 currency. The technical scan shows an RSI above 75, which historically precedes consolidation.\n\n## Risks and Contrarian View\n- Momentum is stretched: RSI above 75 raises the odds of a pullback.\n- Net interest margin pressure could cap earnings growth.\n- Single-name concentration: banking sector rotation would hit the stock regardless of fundamentals.\n\n## Final View\nConstructive on fundamentals but wait for a pullback: the setup favours accumulating on dips rather than chasing a stretched RSI.\n\n## Claims and references\n- Valuation: P/E of 15.13 ratio and price/book of 2.1 ratio look undemanding for the franchise. [citations: c2]\n- Profitability: return on equity of 0.1375 fraction with a 0.2711 fraction profit margin. [citations: c2]\n- Trend: price holds above its 20, 50 and 200 day averages. [citations: c1]\n- Newsflow: Q2 results coverage points to steady loan growth. [citations: c3]\n- Momentum is stretched: RSI above 75 raises the odds of a pullback. [citations: c1]\n\n## Sources\n- fundamentals_snapshot: https://finance.yahoo.com/quote/HDFCBANK.NS/key-statistics/ (observed 2026-11-20T10:00:00+00:00)\n- historical_prices: https://finance.yahoo.com/quote/HDFCBANK.NS/history/ (observed 2026-11-20T10:00:00+00:00)\n- news_articles: https://upstox.com/news/market-news/hdfc-bank-q2-results (observed 2026-11-20T10:00:00+00:00)",
+    "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+    "seen_sequences": [
+      1,
+      3,
+      8,
+      9,
+      10,
+      11,
+      12,
+      13,
+      14,
+      15,
+      16,
+      17,
+      18,
+      19,
+      20,
+      25,
+      26,
+      27,
+      28,
+      29,
+      1330,
+      1361,
+      1362
+    ],
+    "sources": [
+      {
+        "name": "upstox",
+        "url": "https://api.upstox.com"
+      },
+      {
+        "name": "yfinance",
+        "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+      },
+      {
+        "name": "upstox.com",
+        "url": "https://upstox.com/news/market-news/stocks/hdfc-bank-shares-fall-over-1-amid-market-weakness-stock-turns-positive-over-6-months/article-203405/"
+      }
+    ],
+    "terminal_status": "success"
+  },
+  "snapshots": [
+    {
+      "after_sequence": 1,
+      "state": {
+        "active_tools": [],
+        "activities": {},
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "run.started",
+        "latest_sequence": 1,
+        "phase": "starting",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 3,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          }
+        },
+        "current_operation": "Preparing research",
+        "error": null,
+        "last_event_type": "stage.started",
+        "latest_sequence": 3,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 8,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          }
+        },
+        "current_operation": "Preparing research",
+        "error": null,
+        "last_event_type": "model.response.completed",
+        "latest_sequence": 8,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 9,
+      "state": {
+        "active_tools": [
+          "call_6a5506c9b1e44053b1ba869e26e1a83a"
+        ],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": null,
+            "label": "data:fetch_fundamentals",
+            "status": "running"
+          }
+        },
+        "current_operation": "data:fetch_fundamentals",
+        "error": null,
+        "last_event_type": "tool.started",
+        "latest_sequence": 9,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 10,
+      "state": {
+        "active_tools": [
+          "call_6a5506c9b1e44053b1ba869e26e1a83a"
+        ],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "Running data:fetch_fundamentals",
+            "label": "data:fetch_fundamentals",
+            "status": "running"
+          }
+        },
+        "current_operation": "Running data:fetch_fundamentals",
+        "error": null,
+        "last_event_type": "tool.progress",
+        "latest_sequence": 10,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 11,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          }
+        },
+        "current_operation": "Running data:fetch_fundamentals",
+        "error": null,
+        "last_event_type": "tool.completed",
+        "latest_sequence": 11,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 12,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          }
+        },
+        "current_operation": "Running data:fetch_fundamentals",
+        "error": null,
+        "last_event_type": "sources.updated",
+        "latest_sequence": 12,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11,
+          12
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 13,
+      "state": {
+        "active_tools": [
+          "call_383724b93e26433b863e21b45c92cd52"
+        ],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_383724b93e26433b863e21b45c92cd52": {
+            "detail": null,
+            "label": "analysis:get_technical_overview",
+            "status": "running"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          }
+        },
+        "current_operation": "analysis:get_technical_overview",
+        "error": null,
+        "last_event_type": "tool.started",
+        "latest_sequence": 13,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 14,
+      "state": {
+        "active_tools": [
+          "call_383724b93e26433b863e21b45c92cd52"
+        ],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_383724b93e26433b863e21b45c92cd52": {
+            "detail": "Running analysis:get_technical_overview",
+            "label": "analysis:get_technical_overview",
+            "status": "running"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          }
+        },
+        "current_operation": "Running analysis:get_technical_overview",
+        "error": null,
+        "last_event_type": "tool.progress",
+        "latest_sequence": 14,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 15,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_383724b93e26433b863e21b45c92cd52": {
+            "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+            "label": "analysis:get_technical_overview",
+            "status": "completed"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          }
+        },
+        "current_operation": "Running analysis:get_technical_overview",
+        "error": null,
+        "last_event_type": "tool.completed",
+        "latest_sequence": 15,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 16,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_383724b93e26433b863e21b45c92cd52": {
+            "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+            "label": "analysis:get_technical_overview",
+            "status": "completed"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          }
+        },
+        "current_operation": "Running analysis:get_technical_overview",
+        "error": null,
+        "last_event_type": "sources.updated",
+        "latest_sequence": 16,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "yfinance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 17,
+      "state": {
+        "active_tools": [
+          "call_76a1f49219084abb844e421b45d0a28c"
+        ],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_383724b93e26433b863e21b45c92cd52": {
+            "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+            "label": "analysis:get_technical_overview",
+            "status": "completed"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          },
+          "tool:call_76a1f49219084abb844e421b45d0a28c": {
+            "detail": null,
+            "label": "news:fetch_news",
+            "status": "running"
+          }
+        },
+        "current_operation": "news:fetch_news",
+        "error": null,
+        "last_event_type": "tool.started",
+        "latest_sequence": 17,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "yfinance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 18,
+      "state": {
+        "active_tools": [
+          "call_76a1f49219084abb844e421b45d0a28c"
+        ],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_383724b93e26433b863e21b45c92cd52": {
+            "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+            "label": "analysis:get_technical_overview",
+            "status": "completed"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          },
+          "tool:call_76a1f49219084abb844e421b45d0a28c": {
+            "detail": "Running news:fetch_news",
+            "label": "news:fetch_news",
+            "status": "running"
+          }
+        },
+        "current_operation": "Running news:fetch_news",
+        "error": null,
+        "last_event_type": "tool.progress",
+        "latest_sequence": 18,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "yfinance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 19,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_383724b93e26433b863e21b45c92cd52": {
+            "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+            "label": "analysis:get_technical_overview",
+            "status": "completed"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          },
+          "tool:call_76a1f49219084abb844e421b45d0a28c": {
+            "detail": "{\"news_quality\": {\"below_threshold_count\": 2, \"connector_elapsed_ms\": 7885.61, \"connector_",
+            "label": "news:fetch_news",
+            "status": "completed"
+          }
+        },
+        "current_operation": "Running news:fetch_news",
+        "error": null,
+        "last_event_type": "tool.completed",
+        "latest_sequence": 19,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "yfinance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 20,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_383724b93e26433b863e21b45c92cd52": {
+            "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+            "label": "analysis:get_technical_overview",
+            "status": "completed"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          },
+          "tool:call_76a1f49219084abb844e421b45d0a28c": {
+            "detail": "{\"news_quality\": {\"below_threshold_count\": 2, \"connector_elapsed_ms\": 7885.61, \"connector_",
+            "label": "news:fetch_news",
+            "status": "completed"
+          }
+        },
+        "current_operation": "Running news:fetch_news",
+        "error": null,
+        "last_event_type": "sources.updated",
+        "latest_sequence": 20,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "yfinance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          },
+          {
+            "name": "upstox.com",
+            "url": "https://upstox.com/news/market-news/stocks/hdfc-bank-shares-fall-over-1-amid-market-weakness-stock-turns-positive-over-6-months/article-203405/"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 25,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_383724b93e26433b863e21b45c92cd52": {
+            "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+            "label": "analysis:get_technical_overview",
+            "status": "completed"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          },
+          "tool:call_76a1f49219084abb844e421b45d0a28c": {
+            "detail": "{\"news_quality\": {\"below_threshold_count\": 2, \"connector_elapsed_ms\": 7885.61, \"connector_",
+            "label": "news:fetch_news",
+            "status": "completed"
+          }
+        },
+        "current_operation": "Running news:fetch_news",
+        "error": null,
+        "last_event_type": "model.response.completed",
+        "latest_sequence": 25,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          25
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "yfinance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          },
+          {
+            "name": "upstox.com",
+            "url": "https://upstox.com/news/market-news/stocks/hdfc-bank-shares-fall-over-1-amid-market-weakness-stock-turns-positive-over-6-months/article-203405/"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 26,
+      "state": {
+        "active_tools": [
+          "call_131e7a59fba54c5b9883e0dc8191c1f2"
+        ],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_131e7a59fba54c5b9883e0dc8191c1f2": {
+            "detail": null,
+            "label": "analysis:run_fundamental_scan",
+            "status": "running"
+          },
+          "tool:call_383724b93e26433b863e21b45c92cd52": {
+            "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+            "label": "analysis:get_technical_overview",
+            "status": "completed"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          },
+          "tool:call_76a1f49219084abb844e421b45d0a28c": {
+            "detail": "{\"news_quality\": {\"below_threshold_count\": 2, \"connector_elapsed_ms\": 7885.61, \"connector_",
+            "label": "news:fetch_news",
+            "status": "completed"
+          }
+        },
+        "current_operation": "analysis:run_fundamental_scan",
+        "error": null,
+        "last_event_type": "tool.started",
+        "latest_sequence": 26,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          25,
+          26
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "yfinance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          },
+          {
+            "name": "upstox.com",
+            "url": "https://upstox.com/news/market-news/stocks/hdfc-bank-shares-fall-over-1-amid-market-weakness-stock-turns-positive-over-6-months/article-203405/"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 27,
+      "state": {
+        "active_tools": [
+          "call_131e7a59fba54c5b9883e0dc8191c1f2"
+        ],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_131e7a59fba54c5b9883e0dc8191c1f2": {
+            "detail": "Running analysis:run_fundamental_scan",
+            "label": "analysis:run_fundamental_scan",
+            "status": "running"
+          },
+          "tool:call_383724b93e26433b863e21b45c92cd52": {
+            "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+            "label": "analysis:get_technical_overview",
+            "status": "completed"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          },
+          "tool:call_76a1f49219084abb844e421b45d0a28c": {
+            "detail": "{\"news_quality\": {\"below_threshold_count\": 2, \"connector_elapsed_ms\": 7885.61, \"connector_",
+            "label": "news:fetch_news",
+            "status": "completed"
+          }
+        },
+        "current_operation": "Running analysis:run_fundamental_scan",
+        "error": null,
+        "last_event_type": "tool.progress",
+        "latest_sequence": 27,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          25,
+          26,
+          27
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "yfinance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          },
+          {
+            "name": "upstox.com",
+            "url": "https://upstox.com/news/market-news/stocks/hdfc-bank-shares-fall-over-1-amid-market-weakness-stock-turns-positive-over-6-months/article-203405/"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 28,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_131e7a59fba54c5b9883e0dc8191c1f2": {
+            "detail": "key values: peRatio=15.13, priceToBook=2.1, returnOnEquity=0.1375",
+            "label": "analysis:run_fundamental_scan",
+            "status": "completed"
+          },
+          "tool:call_383724b93e26433b863e21b45c92cd52": {
+            "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+            "label": "analysis:get_technical_overview",
+            "status": "completed"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          },
+          "tool:call_76a1f49219084abb844e421b45d0a28c": {
+            "detail": "{\"news_quality\": {\"below_threshold_count\": 2, \"connector_elapsed_ms\": 7885.61, \"connector_",
+            "label": "news:fetch_news",
+            "status": "completed"
+          }
+        },
+        "current_operation": "Running analysis:run_fundamental_scan",
+        "error": null,
+        "last_event_type": "tool.completed",
+        "latest_sequence": 28,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          25,
+          26,
+          27,
+          28
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "yfinance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          },
+          {
+            "name": "upstox.com",
+            "url": "https://upstox.com/news/market-news/stocks/hdfc-bank-shares-fall-over-1-amid-market-weakness-stock-turns-positive-over-6-months/article-203405/"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 29,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_131e7a59fba54c5b9883e0dc8191c1f2": {
+            "detail": "key values: peRatio=15.13, priceToBook=2.1, returnOnEquity=0.1375",
+            "label": "analysis:run_fundamental_scan",
+            "status": "completed"
+          },
+          "tool:call_383724b93e26433b863e21b45c92cd52": {
+            "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+            "label": "analysis:get_technical_overview",
+            "status": "completed"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          },
+          "tool:call_76a1f49219084abb844e421b45d0a28c": {
+            "detail": "{\"news_quality\": {\"below_threshold_count\": 2, \"connector_elapsed_ms\": 7885.61, \"connector_",
+            "label": "news:fetch_news",
+            "status": "completed"
+          }
+        },
+        "current_operation": "Running analysis:run_fundamental_scan",
+        "error": null,
+        "last_event_type": "sources.updated",
+        "latest_sequence": 29,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          25,
+          26,
+          27,
+          28,
+          29
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "yfinance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          },
+          {
+            "name": "upstox.com",
+            "url": "https://upstox.com/news/market-news/stocks/hdfc-bank-shares-fall-over-1-amid-market-weakness-stock-turns-positive-over-6-months/article-203405/"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 1361,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_131e7a59fba54c5b9883e0dc8191c1f2": {
+            "detail": "key values: peRatio=15.13, priceToBook=2.1, returnOnEquity=0.1375",
+            "label": "analysis:run_fundamental_scan",
+            "status": "completed"
+          },
+          "tool:call_383724b93e26433b863e21b45c92cd52": {
+            "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+            "label": "analysis:get_technical_overview",
+            "status": "completed"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          },
+          "tool:call_76a1f49219084abb844e421b45d0a28c": {
+            "detail": "{\"news_quality\": {\"below_threshold_count\": 2, \"connector_elapsed_ms\": 7885.61, \"connector_",
+            "label": "news:fetch_news",
+            "status": "completed"
+          }
+        },
+        "current_operation": "Running analysis:run_fundamental_scan",
+        "error": null,
+        "last_event_type": "model.response.completed",
+        "latest_sequence": 1361,
+        "phase": "researching",
+        "query": "HDFCBANK",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          25,
+          26,
+          27,
+          28,
+          29,
+          1361
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "yfinance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          },
+          {
+            "name": "upstox.com",
+            "url": "https://upstox.com/news/market-news/stocks/hdfc-bank-shares-fall-over-1-amid-market-weakness-stock-turns-positive-over-6-months/article-203405/"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 1330,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          },
+          "tool:call_131e7a59fba54c5b9883e0dc8191c1f2": {
+            "detail": "key values: peRatio=15.13, priceToBook=2.1, returnOnEquity=0.1375",
+            "label": "analysis:run_fundamental_scan",
+            "status": "completed"
+          },
+          "tool:call_383724b93e26433b863e21b45c92cd52": {
+            "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+            "label": "analysis:get_technical_overview",
+            "status": "completed"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          },
+          "tool:call_76a1f49219084abb844e421b45d0a28c": {
+            "detail": "{\"news_quality\": {\"below_threshold_count\": 2, \"connector_elapsed_ms\": 7885.61, \"connector_",
+            "label": "news:fetch_news",
+            "status": "completed"
+          }
+        },
+        "current_operation": "Running analysis:run_fundamental_scan",
+        "error": null,
+        "last_event_type": "response.delta",
+        "latest_sequence": 1361,
+        "phase": "generating",
+        "query": "HDFCBANK",
+        "response_delta_count": 1,
+        "response_text": "## Report Metadata\n- Report title: Research report\n- Evidence status: COMPLETE\n- Evidence observed through: 2026-11-20T10:00:00+00:00\n- Price return basis: see provider adjustment metadata\n\n## Executive Summary\nHDFC Bank closed at ₹846 after a 14.82% one-year move. Trailing P/E of 15.13 ratio sits below its recent history while momentum is stretched.\n\n## Key Drivers\n- Valuation: P/E of 15.13 ratio and price/book of 2.1 ratio look undemanding for the franchise.\n- Profitability: return on equity of 0.1375 fraction with a 0.2711 fraction profit margin.\n- Trend: price holds above its 20, 50 and 200 day averages.\n- Newsflow: Q2 results coverage points to steady loan growth.\n\n## Detailed Analysis\nThe stock gained 14.82% over the last year and trades near its highs with daily volume of 6,240,100 shares.\n\nFundamentals are steady: return on equity of 0.1375 fraction and a market capitalisation of 13000000000000.0 currency. The technical scan shows an RSI above 75, which historically precedes consolidation.\n\n## Risks and Contrarian View\n- Momentum is stretched: RSI above 75 raises the odds of a pullback.\n- Net interest margin pressure could cap earnings growth.\n- Single-name concentration: banking sector rotation would hit the stock regardless of fundamentals.\n\n## Final View\nConstructive on fundamentals but wait for a pullback: the setup favours accumulating on dips rather than chasing a stretched RSI.\n\n## Claims and references\n- Valuation: P/E of 15.13 ratio and price/book of 2.1 ratio look undemanding for the franchise. [citations: c2]\n- Profitability: return on equity of 0.1375 fraction with a 0.2711 fraction profit margin. [citations: c2]\n- Trend: price holds above its 20, 50 and 200 day averages. [citations: c1]\n- Newsflow: Q2 results coverage points to steady loan growth. [citations: c3]\n- Momentum is stretched: RSI above 75 raises the odds of a pullback. [citations: c1]\n\n## Sources\n- fundamentals_snapshot: https://finance.yahoo.com/quote/HDFCBANK.NS/key-statistics/ (observed 2026-11-20T10:00:00+00:00)\n- historical_prices: https://finance.yahoo.com/quote/HDFCBANK.NS/history/ (observed 2026-11-20T10:00:00+00:00)\n- news_articles: https://upstox.com/news/market-news/hdfc-bank-q2-results (observed 2026-11-20T10:00:00+00:00)",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          25,
+          26,
+          27,
+          28,
+          29,
+          1330,
+          1361
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "yfinance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          },
+          {
+            "name": "upstox.com",
+            "url": "https://upstox.com/news/market-news/stocks/hdfc-bank-shares-fall-over-1-amid-market-weakness-stock-turns-positive-over-6-months/article-203405/"
+          }
+        ],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 1362,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "completed"
+          },
+          "tool:call_131e7a59fba54c5b9883e0dc8191c1f2": {
+            "detail": "key values: peRatio=15.13, priceToBook=2.1, returnOnEquity=0.1375",
+            "label": "analysis:run_fundamental_scan",
+            "status": "completed"
+          },
+          "tool:call_383724b93e26433b863e21b45c92cd52": {
+            "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+            "label": "analysis:get_technical_overview",
+            "status": "completed"
+          },
+          "tool:call_6a5506c9b1e44053b1ba869e26e1a83a": {
+            "detail": "received 17 fields",
+            "label": "data:fetch_fundamentals",
+            "status": "completed"
+          },
+          "tool:call_76a1f49219084abb844e421b45d0a28c": {
+            "detail": "{\"news_quality\": {\"below_threshold_count\": 2, \"connector_elapsed_ms\": 7885.61, \"connector_",
+            "label": "news:fetch_news",
+            "status": "completed"
+          }
+        },
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "run.completed",
+        "latest_sequence": 1362,
+        "phase": "complete",
+        "query": "HDFCBANK",
+        "response_delta_count": 1,
+        "response_text": "## Report Metadata\n- Report title: Research report\n- Evidence status: COMPLETE\n- Evidence observed through: 2026-11-20T10:00:00+00:00\n- Price return basis: see provider adjustment metadata\n\n## Executive Summary\nHDFC Bank closed at ₹846 after a 14.82% one-year move. Trailing P/E of 15.13 ratio sits below its recent history while momentum is stretched.\n\n## Key Drivers\n- Valuation: P/E of 15.13 ratio and price/book of 2.1 ratio look undemanding for the franchise.\n- Profitability: return on equity of 0.1375 fraction with a 0.2711 fraction profit margin.\n- Trend: price holds above its 20, 50 and 200 day averages.\n- Newsflow: Q2 results coverage points to steady loan growth.\n\n## Detailed Analysis\nThe stock gained 14.82% over the last year and trades near its highs with daily volume of 6,240,100 shares.\n\nFundamentals are steady: return on equity of 0.1375 fraction and a market capitalisation of 13000000000000.0 currency. The technical scan shows an RSI above 75, which historically precedes consolidation.\n\n## Risks and Contrarian View\n- Momentum is stretched: RSI above 75 raises the odds of a pullback.\n- Net interest margin pressure could cap earnings growth.\n- Single-name concentration: banking sector rotation would hit the stock regardless of fundamentals.\n\n## Final View\nConstructive on fundamentals but wait for a pullback: the setup favours accumulating on dips rather than chasing a stretched RSI.\n\n## Claims and references\n- Valuation: P/E of 15.13 ratio and price/book of 2.1 ratio look undemanding for the franchise. [citations: c2]\n- Profitability: return on equity of 0.1375 fraction with a 0.2711 fraction profit margin. [citations: c2]\n- Trend: price holds above its 20, 50 and 200 day averages. [citations: c1]\n- Newsflow: Q2 results coverage points to steady loan growth. [citations: c3]\n- Momentum is stretched: RSI above 75 raises the odds of a pullback. [citations: c1]\n\n## Sources\n- fundamentals_snapshot: https://finance.yahoo.com/quote/HDFCBANK.NS/key-statistics/ (observed 2026-11-20T10:00:00+00:00)\n- historical_prices: https://finance.yahoo.com/quote/HDFCBANK.NS/history/ (observed 2026-11-20T10:00:00+00:00)\n- news_articles: https://upstox.com/news/market-news/hdfc-bank-q2-results (observed 2026-11-20T10:00:00+00:00)",
+        "run_id": "8d92b37e-a96b-5cbf-a77b-2b2609c61a66",
+        "seen_sequences": [
+          1,
+          3,
+          8,
+          9,
+          10,
+          11,
+          12,
+          13,
+          14,
+          15,
+          16,
+          17,
+          18,
+          19,
+          20,
+          25,
+          26,
+          27,
+          28,
+          29,
+          1330,
+          1361,
+          1362
+        ],
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          },
+          {
+            "name": "yfinance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          },
+          {
+            "name": "upstox.com",
+            "url": "https://upstox.com/news/market-news/stocks/hdfc-bank-shares-fall-over-1-amid-market-weakness-stock-turns-positive-over-6-months/article-203405/"
+          }
+        ],
+        "terminal_status": "success"
+      }
+    }
+  ]
+}

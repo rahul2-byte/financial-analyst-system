@@ -36,6 +36,16 @@ uv run pytest backend/tests --no-cov
 uv run pytest backend/tests --cov=backend --cov-report=term-missing --cov-fail-under=70
 ```
 
+The terminal UI has its own checks (Node.js 20 or newer):
+
+```bash
+cd frontend
+npm install
+npm run typecheck && npm test && npm run build && npm run gen:types:check
+```
+
+See [`frontend.md`](frontend.md) for the UI architecture and screenshot commands.
+
 Pytest defaults are defined in `pyproject.toml`: asyncio mode is automatic, coverage targets `backend`, and the default coverage threshold is 70%. Use `--no-cov` for focused behavioral runs.
 
 The tests are organized into `backend/tests/unit/` and `backend/tests/integration/`. The integration tests cover CLI research flow, smoke execution, experiments, and storage recovery. Unit tests cover the AgentLoop, providers, news pipeline, quant logic, events, publication, persistence, evaluation helpers, and safety policy.

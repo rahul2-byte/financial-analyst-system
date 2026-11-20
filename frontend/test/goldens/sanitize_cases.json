@@ -1,0 +1,30 @@
+[
+  {
+    "input": "\u001b[31mred\u001b[0m",
+    "output": "red"
+  },
+  {
+    "input": "\u001b[2J\u001b[Hstatus: running",
+    "output": "status: running"
+  },
+  {
+    "input": "\u001b]8;;https://example.com\u0007link text\u001b]8;;\u0007",
+    "output": "link text"
+  },
+  {
+    "input": "a\u0000\u0007\u000b\f\u000e\u001fz",
+    "output": "az"
+  },
+  {
+    "input": "",
+    "output": ""
+  },
+  {
+    "input": "line one\nline two\r\nline three\ttab",
+    "output": "line one\nline two\r\nline three\ttab"
+  },
+  {
+    "input": "unicode ✓ ₹ stays",
+    "output": "unicode ✓ ₹ stays"
+  }
+]

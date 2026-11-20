@@ -1,0 +1,2968 @@
+{
+  "$defs": {
+    "ApprovalRequested": {
+      "properties": {
+        "details": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Details"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "prompt": {
+          "title": "Prompt",
+          "type": "string"
+        },
+        "type": {
+          "const": "approval.requested",
+          "default": "approval.requested",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "prompt"
+      ],
+      "title": "ApprovalRequested",
+      "type": "object"
+    },
+    "ApprovalResolved": {
+      "properties": {
+        "decision": {
+          "enum": [
+            "approved",
+            "rejected",
+            "revised"
+          ],
+          "title": "Decision",
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "type": {
+          "const": "approval.resolved",
+          "default": "approval.resolved",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "decision"
+      ],
+      "title": "ApprovalResolved",
+      "type": "object"
+    },
+    "BridgeLogParams": {
+      "additionalProperties": true,
+      "properties": {
+        "level": {
+          "enum": [
+            "debug",
+            "info",
+            "warning",
+            "error"
+          ],
+          "title": "Level",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "level",
+        "message"
+      ],
+      "title": "BridgeLogParams",
+      "type": "object"
+    },
+    "CheckStageResult": {
+      "description": "Outcome of one answer-verification stage for one draft.\n\n``attempt`` is the repair retry this result triggers when ``retrying`` is\ntrue, otherwise the number of repair retries already used; ``max_attempts``\nis the shared repair budget.",
+      "properties": {
+        "attempt": {
+          "minimum": 0,
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "max_attempts": {
+          "minimum": 0,
+          "title": "Max Attempts",
+          "type": "integer"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "passed": {
+          "title": "Passed",
+          "type": "boolean"
+        },
+        "reasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reasons",
+          "type": "array"
+        },
+        "retrying": {
+          "default": false,
+          "title": "Retrying",
+          "type": "boolean"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        },
+        "type": {
+          "const": "check.stage",
+          "default": "check.stage",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "stage",
+        "label",
+        "passed",
+        "attempt",
+        "max_attempts"
+      ],
+      "title": "CheckStageResult",
+      "type": "object"
+    },
+    "ClarificationRequested": {
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "prompt": {
+          "title": "Prompt",
+          "type": "string"
+        },
+        "type": {
+          "const": "clarification.requested",
+          "default": "clarification.requested",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "prompt"
+      ],
+      "title": "ClarificationRequested",
+      "type": "object"
+    },
+    "ClientInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "version"
+      ],
+      "title": "ClientInfo",
+      "type": "object"
+    },
+    "ContextCompactParams": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "ContextCompactParams",
+      "type": "object"
+    },
+    "ContextCompactResult": {
+      "additionalProperties": true,
+      "description": "Free-form result of ``FinAIRepl.compact_context()``.",
+      "properties": {},
+      "title": "ContextCompactResult",
+      "type": "object"
+    },
+    "ContextCompacted": {
+      "properties": {
+        "compacted_messages": {
+          "title": "Compacted Messages",
+          "type": "integer"
+        },
+        "estimated_tokens": {
+          "title": "Estimated Tokens",
+          "type": "integer"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "type": {
+          "const": "context.compacted",
+          "default": "context.compacted",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "compacted_messages",
+        "estimated_tokens"
+      ],
+      "title": "ContextCompacted",
+      "type": "object"
+    },
+    "ContextInfoParams": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "ContextInfoParams",
+      "type": "object"
+    },
+    "ContextInfoResult": {
+      "additionalProperties": true,
+      "description": "Free-form output of the ``ContextBudget`` used by ``/context``.",
+      "properties": {},
+      "title": "ContextInfoResult",
+      "type": "object"
+    },
+    "Display": {
+      "additionalProperties": true,
+      "description": "Sanitized, presentation-ready strings computed by the Python runtime.",
+      "properties": {
+        "candidates": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DisplayCandidate"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Candidates"
+        },
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "failed_nouns": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failed Nouns"
+        },
+        "failure_detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Failure Detail"
+        },
+        "friendly": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Friendly"
+        },
+        "instrument": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Instrument"
+        },
+        "label": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Label"
+        },
+        "lines": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Lines"
+        },
+        "notice": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Notice"
+        },
+        "noun": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Noun"
+        },
+        "review_note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Review Note"
+        },
+        "review_unavailable": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Review Unavailable"
+        },
+        "sources": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/DisplaySource"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Sources"
+        }
+      },
+      "title": "Display",
+      "type": "object"
+    },
+    "DisplayCandidate": {
+      "additionalProperties": true,
+      "properties": {
+        "exchange": {
+          "title": "Exchange",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "symbol": {
+          "title": "Symbol",
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol",
+        "name",
+        "exchange"
+      ],
+      "title": "DisplayCandidate",
+      "type": "object"
+    },
+    "DisplaySource": {
+      "additionalProperties": true,
+      "properties": {
+        "host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Host"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "url"
+      ],
+      "title": "DisplaySource",
+      "type": "object"
+    },
+    "ErrorObject": {
+      "additionalProperties": true,
+      "properties": {
+        "code": {
+          "title": "Code",
+          "type": "integer"
+        },
+        "data": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Data"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        }
+      },
+      "required": [
+        "code",
+        "message"
+      ],
+      "title": "ErrorObject",
+      "type": "object"
+    },
+    "EventMeta": {
+      "properties": {
+        "conversation_id": {
+          "format": "uuid",
+          "title": "Conversation Id",
+          "type": "string"
+        },
+        "event_id": {
+          "format": "uuid",
+          "title": "Event Id",
+          "type": "string"
+        },
+        "occurred_at": {
+          "format": "date-time",
+          "title": "Occurred At",
+          "type": "string"
+        },
+        "run_id": {
+          "format": "uuid",
+          "title": "Run Id",
+          "type": "string"
+        },
+        "sequence": {
+          "minimum": 1,
+          "title": "Sequence",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "event_id",
+        "run_id",
+        "conversation_id",
+        "sequence",
+        "occurred_at"
+      ],
+      "title": "EventMeta",
+      "type": "object"
+    },
+    "InitializeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "client": {
+          "$ref": "#/$defs/ClientInfo"
+        },
+        "protocol_version": {
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "terminal": {
+          "$ref": "#/$defs/TerminalInfo"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "client",
+        "terminal"
+      ],
+      "title": "InitializeParams",
+      "type": "object"
+    },
+    "InitializeResult": {
+      "additionalProperties": true,
+      "properties": {
+        "data_dir": {
+          "title": "Data Dir",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "guided",
+            "review",
+            "autonomous"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "model": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ModelInfo"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "protocol_version": {
+          "title": "Protocol Version",
+          "type": "integer"
+        },
+        "server_version": {
+          "title": "Server Version",
+          "type": "string"
+        },
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        }
+      },
+      "required": [
+        "protocol_version",
+        "server_version",
+        "session",
+        "mode",
+        "data_dir"
+      ],
+      "title": "InitializeResult",
+      "type": "object"
+    },
+    "ModelInfo": {
+      "additionalProperties": true,
+      "properties": {
+        "fallback_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Fallback Id"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "ModelInfo",
+      "type": "object"
+    },
+    "ModelRequestStarted": {
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "model": {
+          "title": "Model",
+          "type": "string"
+        },
+        "round": {
+          "title": "Round",
+          "type": "integer"
+        },
+        "type": {
+          "const": "model.request.started",
+          "default": "model.request.started",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "model",
+        "round"
+      ],
+      "title": "ModelRequestStarted",
+      "type": "object"
+    },
+    "ModelResponseCompleted": {
+      "properties": {
+        "has_tool_calls": {
+          "default": false,
+          "title": "Has Tool Calls",
+          "type": "boolean"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "round": {
+          "title": "Round",
+          "type": "integer"
+        },
+        "type": {
+          "const": "model.response.completed",
+          "default": "model.response.completed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "round"
+      ],
+      "title": "ModelResponseCompleted",
+      "type": "object"
+    },
+    "Notification": {
+      "additionalProperties": true,
+      "properties": {
+        "jsonrpc": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Params"
+        }
+      },
+      "required": [
+        "method"
+      ],
+      "title": "Notification",
+      "type": "object"
+    },
+    "ProviderAttemptStarted": {
+      "properties": {
+        "attempt": {
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "provider": {
+          "default": "openrouter",
+          "title": "Provider",
+          "type": "string"
+        },
+        "type": {
+          "const": "provider.attempt.started",
+          "default": "provider.attempt.started",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "attempt"
+      ],
+      "title": "ProviderAttemptStarted",
+      "type": "object"
+    },
+    "ProviderCompleted": {
+      "properties": {
+        "attempts": {
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "duration_ms": {
+          "title": "Duration Ms",
+          "type": "number"
+        },
+        "first_token_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "First Token Ms"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "model_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Id"
+        },
+        "provider": {
+          "default": "openrouter",
+          "title": "Provider",
+          "type": "string"
+        },
+        "type": {
+          "const": "provider.completed",
+          "default": "provider.completed",
+          "title": "Type",
+          "type": "string"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenUsage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "meta",
+        "attempts",
+        "duration_ms"
+      ],
+      "title": "ProviderCompleted",
+      "type": "object"
+    },
+    "ProviderFailed": {
+      "properties": {
+        "attempts": {
+          "title": "Attempts",
+          "type": "integer"
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Ms"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "model_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Model Id"
+        },
+        "partial_output": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Partial Output"
+        },
+        "phase": {
+          "title": "Phase",
+          "type": "string"
+        },
+        "provider": {
+          "default": "openrouter",
+          "title": "Provider",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "status_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status Code"
+        },
+        "timeout": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Timeout"
+        },
+        "type": {
+          "const": "provider.failed",
+          "default": "provider.failed",
+          "title": "Type",
+          "type": "string"
+        },
+        "usage": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/TokenUsage"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "meta",
+        "attempts",
+        "phase",
+        "message"
+      ],
+      "title": "ProviderFailed",
+      "type": "object"
+    },
+    "ProviderRetrying": {
+      "properties": {
+        "attempt": {
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "delay_ms": {
+          "title": "Delay Ms",
+          "type": "number"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "provider": {
+          "default": "openrouter",
+          "title": "Provider",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "status_code": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Status Code"
+        },
+        "type": {
+          "const": "provider.retrying",
+          "default": "provider.retrying",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "attempt",
+        "delay_ms",
+        "reason"
+      ],
+      "title": "ProviderRetrying",
+      "type": "object"
+    },
+    "ProviderStreamStarted": {
+      "properties": {
+        "attempt": {
+          "title": "Attempt",
+          "type": "integer"
+        },
+        "first_byte_ms": {
+          "title": "First Byte Ms",
+          "type": "number"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "provider": {
+          "default": "openrouter",
+          "title": "Provider",
+          "type": "string"
+        },
+        "type": {
+          "const": "provider.stream.started",
+          "default": "provider.stream.started",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "attempt",
+        "first_byte_ms"
+      ],
+      "title": "ProviderStreamStarted",
+      "type": "object"
+    },
+    "ReportDriver": {
+      "additionalProperties": true,
+      "properties": {
+        "importance": {
+          "enum": [
+            "major",
+            "supporting",
+            "minor"
+          ],
+          "title": "Importance",
+          "type": "string"
+        },
+        "source_refs": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text",
+        "importance"
+      ],
+      "title": "ReportDriver",
+      "type": "object"
+    },
+    "ReportEvidence": {
+      "additionalProperties": true,
+      "properties": {
+        "observed_through_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Observed Through Text"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/ReportSourceStatus"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "status": {
+          "enum": [
+            "complete",
+            "limited"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "title": "ReportEvidence",
+      "type": "object"
+    },
+    "ReportInstrument": {
+      "additionalProperties": true,
+      "properties": {
+        "exchange": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Exchange"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "symbol": {
+          "title": "Symbol",
+          "type": "string"
+        }
+      },
+      "required": [
+        "symbol"
+      ],
+      "title": "ReportInstrument",
+      "type": "object"
+    },
+    "ReportKeyFigure": {
+      "additionalProperties": true,
+      "properties": {
+        "as_of_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of Text"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "source_ref": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Ref"
+        },
+        "value_text": {
+          "title": "Value Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "value_text"
+      ],
+      "title": "ReportKeyFigure",
+      "type": "object"
+    },
+    "ReportQuote": {
+      "additionalProperties": true,
+      "properties": {
+        "as_of_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "As Of Text"
+        },
+        "change_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Change Text"
+        },
+        "direction": {
+          "anyOf": [
+            {
+              "enum": [
+                "up",
+                "down",
+                "flat"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Direction"
+        },
+        "price_text": {
+          "title": "Price Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "price_text"
+      ],
+      "title": "ReportQuote",
+      "type": "object"
+    },
+    "ReportRisk": {
+      "additionalProperties": true,
+      "properties": {
+        "source_refs": {
+          "items": {
+            "type": "integer"
+          },
+          "title": "Source Refs",
+          "type": "array"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "ReportRisk",
+      "type": "object"
+    },
+    "ReportSignal": {
+      "additionalProperties": true,
+      "properties": {
+        "direction": {
+          "enum": [
+            "bullish",
+            "bearish",
+            "neutral",
+            "unavailable"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "percentile_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Percentile Text"
+        },
+        "state_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "State Text"
+        },
+        "strength": {
+          "anyOf": [
+            {
+              "maximum": 1,
+              "minimum": 0,
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Strength"
+        },
+        "value_text": {
+          "title": "Value Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "value_text",
+        "direction"
+      ],
+      "title": "ReportSignal",
+      "type": "object"
+    },
+    "ReportSource": {
+      "additionalProperties": true,
+      "properties": {
+        "freshness_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Freshness Text"
+        },
+        "host": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Host"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "ref": {
+          "title": "Ref",
+          "type": "integer"
+        },
+        "retrieved_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Retrieved Text"
+        },
+        "trust": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Trust"
+        },
+        "url": {
+          "title": "Url",
+          "type": "string"
+        }
+      },
+      "required": [
+        "label",
+        "url",
+        "ref"
+      ],
+      "title": "ReportSource",
+      "type": "object"
+    },
+    "ReportSourceStatus": {
+      "additionalProperties": true,
+      "properties": {
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Reason"
+        },
+        "status": {
+          "enum": [
+            "available",
+            "degraded",
+            "unavailable"
+          ],
+          "title": "Status",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "status"
+      ],
+      "title": "ReportSourceStatus",
+      "type": "object"
+    },
+    "ReportSparkline": {
+      "additionalProperties": true,
+      "description": "Closing prices resampled to at most 48 points and scaled to 0..1 in Python.",
+      "properties": {
+        "high_text": {
+          "title": "High Text",
+          "type": "string"
+        },
+        "low_text": {
+          "title": "Low Text",
+          "type": "string"
+        },
+        "period_text": {
+          "title": "Period Text",
+          "type": "string"
+        },
+        "points": {
+          "items": {
+            "type": "number"
+          },
+          "maxItems": 48,
+          "minItems": 2,
+          "title": "Points",
+          "type": "array"
+        }
+      },
+      "required": [
+        "points",
+        "period_text",
+        "low_text",
+        "high_text"
+      ],
+      "title": "ReportSparkline",
+      "type": "object"
+    },
+    "ReportView": {
+      "additionalProperties": true,
+      "description": "Display-ready report. Every ``*_text`` field is final text from Python.",
+      "properties": {
+        "detailed_analysis": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detailed Analysis"
+        },
+        "disclaimer": {
+          "title": "Disclaimer",
+          "type": "string"
+        },
+        "drivers": {
+          "items": {
+            "$ref": "#/$defs/ReportDriver"
+          },
+          "title": "Drivers",
+          "type": "array"
+        },
+        "evidence": {
+          "$ref": "#/$defs/ReportEvidence"
+        },
+        "final_view": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Final View"
+        },
+        "instrument": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReportInstrument"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "key_figures": {
+          "items": {
+            "$ref": "#/$defs/ReportKeyFigure"
+          },
+          "title": "Key Figures",
+          "type": "array"
+        },
+        "kind": {
+          "enum": [
+            "report",
+            "lookup"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "limitations": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Limitations",
+          "type": "array"
+        },
+        "quote": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReportQuote"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "risks": {
+          "items": {
+            "$ref": "#/$defs/ReportRisk"
+          },
+          "title": "Risks",
+          "type": "array"
+        },
+        "signals": {
+          "items": {
+            "$ref": "#/$defs/ReportSignal"
+          },
+          "title": "Signals",
+          "type": "array"
+        },
+        "sources": {
+          "items": {
+            "$ref": "#/$defs/ReportSource"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "sparkline": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReportSparkline"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stance_text": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stance Text"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "evidence",
+        "summary",
+        "disclaimer"
+      ],
+      "title": "ReportView",
+      "type": "object"
+    },
+    "Request": {
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "method": {
+          "title": "Method",
+          "type": "string"
+        },
+        "params": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Params"
+        }
+      },
+      "required": [
+        "id",
+        "method"
+      ],
+      "title": "Request",
+      "type": "object"
+    },
+    "Response": {
+      "additionalProperties": true,
+      "properties": {
+        "error": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ErrorObject"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "id": {
+          "title": "Id",
+          "type": "integer"
+        },
+        "jsonrpc": {
+          "const": "2.0",
+          "default": "2.0",
+          "title": "Jsonrpc",
+          "type": "string"
+        },
+        "result": {
+          "anyOf": [
+            {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Result"
+        }
+      },
+      "required": [
+        "id"
+      ],
+      "title": "Response",
+      "type": "object"
+    },
+    "RouteDecisionMade": {
+      "properties": {
+        "confidence": {
+          "maximum": 1.0,
+          "minimum": 0.0,
+          "title": "Confidence",
+          "type": "number"
+        },
+        "escalation_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Escalation Reason"
+        },
+        "evidence_sufficient": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Sufficient"
+        },
+        "execution_mode": {
+          "title": "Execution Mode",
+          "type": "string"
+        },
+        "intent": {
+          "title": "Intent",
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "model_tier": {
+          "title": "Model Tier",
+          "type": "string"
+        },
+        "next_action": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Next Action"
+        },
+        "prompt_injection_risk": {
+          "default": "low",
+          "title": "Prompt Injection Risk",
+          "type": "string"
+        },
+        "reason": {
+          "default": "",
+          "title": "Reason",
+          "type": "string"
+        },
+        "reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Reason Codes",
+          "type": "array"
+        },
+        "required_tools": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Required Tools",
+          "type": "array"
+        },
+        "risk_flags": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Risk Flags",
+          "type": "array"
+        },
+        "selected_model": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selected Model"
+        },
+        "selected_provider": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Selected Provider"
+        },
+        "type": {
+          "const": "route.decision.made",
+          "default": "route.decision.made",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "intent",
+        "execution_mode",
+        "model_tier",
+        "confidence"
+      ],
+      "title": "RouteDecisionMade",
+      "type": "object"
+    },
+    "RunCancelParams": {
+      "additionalProperties": false,
+      "properties": {
+        "client_run_id": {
+          "title": "Client Run Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "client_run_id"
+      ],
+      "title": "RunCancelParams",
+      "type": "object"
+    },
+    "RunCancelResult": {
+      "additionalProperties": true,
+      "properties": {
+        "cancelled": {
+          "title": "Cancelled",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "cancelled"
+      ],
+      "title": "RunCancelResult",
+      "type": "object"
+    },
+    "RunCancelled": {
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "reason": {
+          "default": "cancelled by user",
+          "title": "Reason",
+          "type": "string"
+        },
+        "type": {
+          "const": "run.cancelled",
+          "default": "run.cancelled",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta"
+      ],
+      "title": "RunCancelled",
+      "type": "object"
+    },
+    "RunCompleted": {
+      "properties": {
+        "artifact_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Artifact Path"
+        },
+        "completion_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completion Reason"
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Ms"
+        },
+        "evidence_availability": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Evidence Availability",
+          "type": "array"
+        },
+        "evidence_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Status"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "output_review": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Review"
+        },
+        "route_reason_codes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Route Reason Codes",
+          "type": "array"
+        },
+        "terminal_status": {
+          "title": "Terminal Status",
+          "type": "string"
+        },
+        "type": {
+          "const": "run.completed",
+          "default": "run.completed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "terminal_status"
+      ],
+      "title": "RunCompleted",
+      "type": "object"
+    },
+    "RunEventParams": {
+      "additionalProperties": true,
+      "properties": {
+        "client_run_id": {
+          "title": "Client Run Id",
+          "type": "string"
+        },
+        "display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Display"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "event": {
+          "discriminator": {
+            "mapping": {
+              "approval.requested": "#/$defs/ApprovalRequested",
+              "approval.resolved": "#/$defs/ApprovalResolved",
+              "check.stage": "#/$defs/CheckStageResult",
+              "clarification.requested": "#/$defs/ClarificationRequested",
+              "context.compacted": "#/$defs/ContextCompacted",
+              "model.request.started": "#/$defs/ModelRequestStarted",
+              "model.response.completed": "#/$defs/ModelResponseCompleted",
+              "provider.attempt.started": "#/$defs/ProviderAttemptStarted",
+              "provider.completed": "#/$defs/ProviderCompleted",
+              "provider.failed": "#/$defs/ProviderFailed",
+              "provider.retrying": "#/$defs/ProviderRetrying",
+              "provider.stream.started": "#/$defs/ProviderStreamStarted",
+              "response.delta": "#/$defs/TextDelta",
+              "route.decision.made": "#/$defs/RouteDecisionMade",
+              "run.cancelled": "#/$defs/RunCancelled",
+              "run.completed": "#/$defs/RunCompleted",
+              "run.failed": "#/$defs/RunFailed",
+              "run.started": "#/$defs/RunStarted",
+              "skill.selected": "#/$defs/SkillSelected",
+              "sources.updated": "#/$defs/SourcesUpdated",
+              "stage.completed": "#/$defs/StageCompleted",
+              "stage.failed": "#/$defs/StageFailed",
+              "stage.started": "#/$defs/StageStarted",
+              "tool.completed": "#/$defs/ToolCompleted",
+              "tool.failed": "#/$defs/ToolFailed",
+              "tool.progress": "#/$defs/ToolProgress",
+              "tool.started": "#/$defs/ToolStarted"
+            },
+            "propertyName": "type"
+          },
+          "oneOf": [
+            {
+              "$ref": "#/$defs/RunStarted"
+            },
+            {
+              "$ref": "#/$defs/RunCompleted"
+            },
+            {
+              "$ref": "#/$defs/RunFailed"
+            },
+            {
+              "$ref": "#/$defs/RunCancelled"
+            },
+            {
+              "$ref": "#/$defs/StageStarted"
+            },
+            {
+              "$ref": "#/$defs/StageCompleted"
+            },
+            {
+              "$ref": "#/$defs/StageFailed"
+            },
+            {
+              "$ref": "#/$defs/CheckStageResult"
+            },
+            {
+              "$ref": "#/$defs/ToolStarted"
+            },
+            {
+              "$ref": "#/$defs/ToolCompleted"
+            },
+            {
+              "$ref": "#/$defs/ToolFailed"
+            },
+            {
+              "$ref": "#/$defs/TextDelta"
+            },
+            {
+              "$ref": "#/$defs/ModelRequestStarted"
+            },
+            {
+              "$ref": "#/$defs/ModelResponseCompleted"
+            },
+            {
+              "$ref": "#/$defs/ProviderAttemptStarted"
+            },
+            {
+              "$ref": "#/$defs/ProviderRetrying"
+            },
+            {
+              "$ref": "#/$defs/ProviderStreamStarted"
+            },
+            {
+              "$ref": "#/$defs/ProviderCompleted"
+            },
+            {
+              "$ref": "#/$defs/ProviderFailed"
+            },
+            {
+              "$ref": "#/$defs/ToolProgress"
+            },
+            {
+              "$ref": "#/$defs/ContextCompacted"
+            },
+            {
+              "$ref": "#/$defs/SkillSelected"
+            },
+            {
+              "$ref": "#/$defs/SourcesUpdated"
+            },
+            {
+              "$ref": "#/$defs/ApprovalRequested"
+            },
+            {
+              "$ref": "#/$defs/ApprovalResolved"
+            },
+            {
+              "$ref": "#/$defs/ClarificationRequested"
+            },
+            {
+              "$ref": "#/$defs/RouteDecisionMade"
+            }
+          ],
+          "title": "Event"
+        }
+      },
+      "required": [
+        "client_run_id",
+        "event",
+        "display"
+      ],
+      "title": "RunEventParams",
+      "type": "object"
+    },
+    "RunFailed": {
+      "properties": {
+        "category": {
+          "default": "internal",
+          "title": "Category",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "type": {
+          "const": "run.failed",
+          "default": "run.failed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "message"
+      ],
+      "title": "RunFailed",
+      "type": "object"
+    },
+    "RunFinishedParams": {
+      "additionalProperties": true,
+      "properties": {
+        "artifact_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Artifact Path"
+        },
+        "client_run_id": {
+          "title": "Client Run Id",
+          "type": "string"
+        },
+        "evidence_availability": {
+          "anyOf": [
+            {
+              "items": {
+                "$ref": "#/$defs/ReportSourceStatus"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Availability"
+        },
+        "evidence_status": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Evidence Status"
+        },
+        "message": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Message"
+        },
+        "outcome": {
+          "enum": [
+            "completed",
+            "failed",
+            "cancelled",
+            "clarification",
+            "error"
+          ],
+          "title": "Outcome",
+          "type": "string"
+        },
+        "report": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReportView"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "run_id": {
+          "anyOf": [
+            {
+              "format": "uuid",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "title": "Run Id"
+        }
+      },
+      "required": [
+        "client_run_id",
+        "outcome",
+        "run_id",
+        "artifact_path",
+        "message"
+      ],
+      "title": "RunFinishedParams",
+      "type": "object"
+    },
+    "RunStartParams": {
+      "additionalProperties": false,
+      "properties": {
+        "client_run_id": {
+          "title": "Client Run Id",
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "guided",
+            "review",
+            "autonomous"
+          ],
+          "title": "Mode",
+          "type": "string"
+        },
+        "query": {
+          "title": "Query",
+          "type": "string"
+        }
+      },
+      "required": [
+        "client_run_id",
+        "query",
+        "mode"
+      ],
+      "title": "RunStartParams",
+      "type": "object"
+    },
+    "RunStartResult": {
+      "additionalProperties": true,
+      "properties": {
+        "accepted": {
+          "const": true,
+          "default": true,
+          "title": "Accepted",
+          "type": "boolean"
+        }
+      },
+      "title": "RunStartResult",
+      "type": "object"
+    },
+    "RunStarted": {
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "query": {
+          "title": "Query",
+          "type": "string"
+        },
+        "type": {
+          "const": "run.started",
+          "default": "run.started",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "query"
+      ],
+      "title": "RunStarted",
+      "type": "object"
+    },
+    "SessionHistoryParams": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "SessionHistoryParams",
+      "type": "object"
+    },
+    "SessionHistoryResult": {
+      "additionalProperties": true,
+      "properties": {
+        "queries": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Queries",
+          "type": "array"
+        }
+      },
+      "required": [
+        "queries"
+      ],
+      "title": "SessionHistoryResult",
+      "type": "object"
+    },
+    "SessionInfo": {
+      "additionalProperties": true,
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "message_count": {
+          "title": "Message Count",
+          "type": "integer"
+        },
+        "run_count": {
+          "title": "Run Count",
+          "type": "integer"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "message_count",
+        "run_count"
+      ],
+      "title": "SessionInfo",
+      "type": "object"
+    },
+    "SessionListParams": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 50,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "title": "SessionListParams",
+      "type": "object"
+    },
+    "SessionListResult": {
+      "additionalProperties": true,
+      "properties": {
+        "sessions": {
+          "items": {
+            "$ref": "#/$defs/SessionSummary"
+          },
+          "title": "Sessions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "sessions"
+      ],
+      "title": "SessionListResult",
+      "type": "object"
+    },
+    "SessionNewParams": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "SessionNewParams",
+      "type": "object"
+    },
+    "SessionNewResult": {
+      "additionalProperties": true,
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        }
+      },
+      "required": [
+        "session"
+      ],
+      "title": "SessionNewResult",
+      "type": "object"
+    },
+    "SessionResumeParams": {
+      "additionalProperties": false,
+      "properties": {
+        "id_prefix": {
+          "title": "Id Prefix",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id_prefix"
+      ],
+      "title": "SessionResumeParams",
+      "type": "object"
+    },
+    "SessionResumeResult": {
+      "additionalProperties": true,
+      "properties": {
+        "session": {
+          "$ref": "#/$defs/SessionInfo"
+        }
+      },
+      "required": [
+        "session"
+      ],
+      "title": "SessionResumeResult",
+      "type": "object"
+    },
+    "SessionSummary": {
+      "additionalProperties": true,
+      "description": "Shape returned by ``SessionStore.list_sessions``.",
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "last_activity": {
+          "title": "Last Activity",
+          "type": "string"
+        },
+        "last_status": {
+          "title": "Last Status",
+          "type": "string"
+        },
+        "message_count": {
+          "title": "Message Count",
+          "type": "integer"
+        },
+        "run_count": {
+          "title": "Run Count",
+          "type": "integer"
+        },
+        "title": {
+          "title": "Title",
+          "type": "string"
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "message_count",
+        "run_count",
+        "last_status",
+        "last_activity"
+      ],
+      "title": "SessionSummary",
+      "type": "object"
+    },
+    "ShutdownParams": {
+      "additionalProperties": false,
+      "properties": {},
+      "title": "ShutdownParams",
+      "type": "object"
+    },
+    "ShutdownResult": {
+      "additionalProperties": true,
+      "properties": {},
+      "title": "ShutdownResult",
+      "type": "object"
+    },
+    "SkillSelected": {
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "package_hash": {
+          "title": "Package Hash",
+          "type": "string"
+        },
+        "skill_id": {
+          "title": "Skill Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "skill.selected",
+          "default": "skill.selected",
+          "title": "Type",
+          "type": "string"
+        },
+        "version": {
+          "title": "Version",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "skill_id",
+        "version",
+        "package_hash"
+      ],
+      "title": "SkillSelected",
+      "type": "object"
+    },
+    "SourcesUpdated": {
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "sources": {
+          "items": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "type": "object"
+          },
+          "title": "Sources",
+          "type": "array"
+        },
+        "type": {
+          "const": "sources.updated",
+          "default": "sources.updated",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "sources"
+      ],
+      "title": "SourcesUpdated",
+      "type": "object"
+    },
+    "StageCompleted": {
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        },
+        "type": {
+          "const": "stage.completed",
+          "default": "stage.completed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "stage",
+        "label"
+      ],
+      "title": "StageCompleted",
+      "type": "object"
+    },
+    "StageFailed": {
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        },
+        "type": {
+          "const": "stage.failed",
+          "default": "stage.failed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "stage",
+        "label",
+        "message"
+      ],
+      "title": "StageFailed",
+      "type": "object"
+    },
+    "StageStarted": {
+      "properties": {
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "stage": {
+          "title": "Stage",
+          "type": "string"
+        },
+        "type": {
+          "const": "stage.started",
+          "default": "stage.started",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "stage",
+        "label"
+      ],
+      "title": "StageStarted",
+      "type": "object"
+    },
+    "TerminalInfo": {
+      "additionalProperties": false,
+      "properties": {
+        "columns": {
+          "minimum": 1,
+          "title": "Columns",
+          "type": "integer"
+        },
+        "rows": {
+          "minimum": 1,
+          "title": "Rows",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "columns",
+        "rows"
+      ],
+      "title": "TerminalInfo",
+      "type": "object"
+    },
+    "TextDelta": {
+      "properties": {
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "type": {
+          "const": "response.delta",
+          "default": "response.delta",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "text"
+      ],
+      "title": "TextDelta",
+      "type": "object"
+    },
+    "TokenUsage": {
+      "properties": {
+        "completion_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Completion Tokens"
+        },
+        "prompt_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Prompt Tokens"
+        },
+        "total_tokens": {
+          "anyOf": [
+            {
+              "minimum": 0,
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Total Tokens"
+        },
+        "verified": {
+          "default": false,
+          "title": "Verified",
+          "type": "boolean"
+        }
+      },
+      "title": "TokenUsage",
+      "type": "object"
+    },
+    "ToolCompleted": {
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "duration_ms": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Duration Ms"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "tool_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Id"
+        },
+        "type": {
+          "const": "tool.completed",
+          "default": "tool.completed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "tool"
+      ],
+      "title": "ToolCompleted",
+      "type": "object"
+    },
+    "ToolFailed": {
+      "properties": {
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "tool_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Id"
+        },
+        "type": {
+          "const": "tool.failed",
+          "default": "tool.failed",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "tool",
+        "message"
+      ],
+      "title": "ToolFailed",
+      "type": "object"
+    },
+    "ToolProgress": {
+      "properties": {
+        "message": {
+          "title": "Message",
+          "type": "string"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "tool_id": {
+          "title": "Tool Id",
+          "type": "string"
+        },
+        "type": {
+          "const": "tool.progress",
+          "default": "tool.progress",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "tool",
+        "tool_id",
+        "message"
+      ],
+      "title": "ToolProgress",
+      "type": "object"
+    },
+    "ToolStarted": {
+      "properties": {
+        "detail": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Detail"
+        },
+        "meta": {
+          "$ref": "#/$defs/EventMeta"
+        },
+        "tool": {
+          "title": "Tool",
+          "type": "string"
+        },
+        "tool_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Tool Id"
+        },
+        "type": {
+          "const": "tool.started",
+          "default": "tool.started",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "meta",
+        "tool"
+      ],
+      "title": "ToolStarted",
+      "type": "object"
+    },
+    "TraceTailParams": {
+      "additionalProperties": false,
+      "properties": {
+        "limit": {
+          "default": 12,
+          "minimum": 1,
+          "title": "Limit",
+          "type": "integer"
+        }
+      },
+      "title": "TraceTailParams",
+      "type": "object"
+    },
+    "TraceTailResult": {
+      "additionalProperties": true,
+      "properties": {
+        "ledger_path": {
+          "title": "Ledger Path",
+          "type": "string"
+        },
+        "records": {
+          "items": {
+            "additionalProperties": true,
+            "type": "object"
+          },
+          "title": "Records",
+          "type": "array"
+        }
+      },
+      "required": [
+        "records",
+        "ledger_path"
+      ],
+      "title": "TraceTailResult",
+      "type": "object"
+    }
+  },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "JSON-RPC envelopes, method params/results, notifications and display payloads for the FIN-AI TypeScript bridge.",
+  "title": "FIN-AI bridge protocol v1"
+}

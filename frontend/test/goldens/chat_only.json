@@ -1,0 +1,233 @@
+{
+  "events": [
+    {
+      "display": null,
+      "event": {
+        "meta": {
+          "conversation_id": "ecf066fa-d0c6-5ba3-a296-a9f7f52011d4",
+          "event_id": "64e14aa8-2094-5783-abb3-a465eec9e715",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "f7e5eddb-8949-52cf-82d3-987cdd66c93d",
+          "sequence": 1
+        },
+        "query": "Hello",
+        "type": "run.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Preparing research",
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "label": "Preparing research",
+        "meta": {
+          "conversation_id": "ecf066fa-d0c6-5ba3-a296-a9f7f52011d4",
+          "event_id": "224debab-6cca-5411-9bdf-ff0492c2ee82",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "f7e5eddb-8949-52cf-82d3-987cdd66c93d",
+          "sequence": 2
+        },
+        "stage": "agent",
+        "type": "stage.started"
+      }
+    },
+    {
+      "display": null,
+      "event": {
+        "meta": {
+          "conversation_id": "ecf066fa-d0c6-5ba3-a296-a9f7f52011d4",
+          "event_id": "fc8aa508-5f3c-5749-9028-640e584976d8",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "f7e5eddb-8949-52cf-82d3-987cdd66c93d",
+          "sequence": 3
+        },
+        "text": "Hello! Ask me about an NSE or BSE company.",
+        "type": "response.delta"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": [],
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": false,
+        "sources": null
+      },
+      "event": {
+        "artifact_path": null,
+        "completion_reason": null,
+        "duration_ms": 1800.0,
+        "evidence_availability": [],
+        "evidence_status": null,
+        "meta": {
+          "conversation_id": "ecf066fa-d0c6-5ba3-a296-a9f7f52011d4",
+          "event_id": "115ef77b-f628-5384-83a4-dcd595bf9d19",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "f7e5eddb-8949-52cf-82d3-987cdd66c93d",
+          "sequence": 4
+        },
+        "output_review": null,
+        "route_reason_codes": [],
+        "terminal_status": "success",
+        "type": "run.completed"
+      }
+    }
+  ],
+  "final": {
+    "active_tools": [],
+    "activities": {
+      "agent": {
+        "detail": null,
+        "label": "Preparing research",
+        "status": "completed"
+      }
+    },
+    "current_operation": null,
+    "error": null,
+    "last_event_type": "run.completed",
+    "latest_sequence": 4,
+    "phase": "complete",
+    "query": "Hello",
+    "response_delta_count": 1,
+    "response_text": "Hello! Ask me about an NSE or BSE company.",
+    "run_id": "f7e5eddb-8949-52cf-82d3-987cdd66c93d",
+    "seen_sequences": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "sources": [],
+    "terminal_status": "success"
+  },
+  "snapshots": [
+    {
+      "after_sequence": 1,
+      "state": {
+        "active_tools": [],
+        "activities": {},
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "run.started",
+        "latest_sequence": 1,
+        "phase": "starting",
+        "query": "Hello",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "f7e5eddb-8949-52cf-82d3-987cdd66c93d",
+        "seen_sequences": [
+          1
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 2,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          }
+        },
+        "current_operation": "Preparing research",
+        "error": null,
+        "last_event_type": "stage.started",
+        "latest_sequence": 2,
+        "phase": "researching",
+        "query": "Hello",
+        "response_delta_count": 0,
+        "response_text": "",
+        "run_id": "f7e5eddb-8949-52cf-82d3-987cdd66c93d",
+        "seen_sequences": [
+          1,
+          2
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 3,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "running"
+          }
+        },
+        "current_operation": "Preparing research",
+        "error": null,
+        "last_event_type": "response.delta",
+        "latest_sequence": 3,
+        "phase": "generating",
+        "query": "Hello",
+        "response_delta_count": 1,
+        "response_text": "Hello! Ask me about an NSE or BSE company.",
+        "run_id": "f7e5eddb-8949-52cf-82d3-987cdd66c93d",
+        "seen_sequences": [
+          1,
+          2,
+          3
+        ],
+        "sources": [],
+        "terminal_status": null
+      }
+    },
+    {
+      "after_sequence": 4,
+      "state": {
+        "active_tools": [],
+        "activities": {
+          "agent": {
+            "detail": null,
+            "label": "Preparing research",
+            "status": "completed"
+          }
+        },
+        "current_operation": null,
+        "error": null,
+        "last_event_type": "run.completed",
+        "latest_sequence": 4,
+        "phase": "complete",
+        "query": "Hello",
+        "response_delta_count": 1,
+        "response_text": "Hello! Ask me about an NSE or BSE company.",
+        "run_id": "f7e5eddb-8949-52cf-82d3-987cdd66c93d",
+        "seen_sequences": [
+          1,
+          2,
+          3,
+          4
+        ],
+        "sources": [],
+        "terminal_status": "success"
+      }
+    }
+  ]
+}

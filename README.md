@@ -8,7 +8,7 @@ A research request can resolve an instrument, fetch market/fundamental/news evid
 
 The runtime has two separate surfaces:
 
-- **CLI:** the supported research interface, with Textual, plain, and JSON output modes.
+- **CLI:** the supported research interface, with an interactive terminal UI (Ink) and plain and JSON one-shot output modes.
 - **FastAPI:** a small HTTP application currently exposing only `/` and `/api/health`; it is not an HTTP research API or SSE gateway.
 
 The repository also contains an independent offline experiment package under [`backend/experiments/`](backend/experiments/) and an evaluation harness under [`evals/`](evals/). Neither changes the CLI research path.
@@ -29,7 +29,7 @@ flowchart LR
     T --> N[TinyFish news pipeline]
     T --> D[Deterministic quant tools]
     L --> E[Typed ResearchEvent stream]
-    E --> V[Textual/plain/JSON renderer]
+    E --> V[Terminal UI/plain/JSON renderer]
     S --> F[Local session files]
     T --> A[Content-addressed provider archive]
 ```
@@ -40,7 +40,8 @@ The detailed call flow, state ownership, persistence layout, and failure behavio
 
 - Python 3.11-3.14, managed with `uv`
 - FastAPI and Uvicorn for the health application
-- Textual and Rich for the terminal UI
+- Node.js, Ink, and React for the interactive terminal UI (`frontend/`)
+- Rich for terminal screenshots of that UI
 - HTTPX for provider calls
 - Pydantic v2 and `pydantic-settings` for schemas and configuration
 - NumPy, Pandas, TA-Lib, and pandas-ta-classic for deterministic analysis
@@ -53,7 +54,8 @@ There is no Dockerfile, deployment manifest, PostgreSQL, Redis, vector database,
 
 | Path | Responsibility |
 | --- | --- |
-| `backend/finai/` | CLI, Textual UI, rendering, sessions, local persistence |
+| `backend/finai/` | CLI launcher, UI bridge, plain/JSON output, sessions, local persistence |
+| `frontend/` | Ink (TypeScript) interactive terminal UI |
 | `backend/app/core/agent_loop/` | Bounded model/tool orchestration and publication validation |
 | `backend/app/services/` | OpenRouter (generation) and Jev provider clients |
 | `backend/data/` | YFinance/Upstox adapters and the news search/extraction pipeline |
@@ -98,7 +100,7 @@ PYTHONPATH=backend uv run python -m finai --plain "Analyze RELIANCE.NS"
 PYTHONPATH=backend uv run python -m finai --json "What is the latest price of RELIANCE.NS?"
 ```
 
-Without a query, the CLI starts Textual when attached to a TTY and a line-oriented terminal otherwise. Useful options include `--session`, `--data-dir`, `--mode guided|review|autonomous`, `--debug`, and `--replay-snapshots`. The `--plain` flag is accepted for compatibility; one-shot output is plain unless `--json` is selected.
+Without a query, the CLI starts the terminal UI when attached to a TTY (build it once with `cd frontend && npm install && npm run build`) and a line-oriented terminal otherwise. Useful options include `--session`, `--data-dir`, `--mode guided|review|autonomous`, `--debug`, and `--replay-snapshots`. The `--plain` flag is accepted for compatibility; one-shot output is plain unless `--json` is selected.
 
 Replay uses a JSON mapping of provider operations to hashes stored under the selected data directory. It disables live providers and is intended for deterministic local runs.
 
@@ -127,9 +129,10 @@ PYTHONPATH=. uv run python -m evals.validate
 PYTHONPATH=backend:. uv run python -m evals.adversarial
 uv run pytest backend/tests --no-cov
 uv run pytest backend/tests --cov=backend --cov-report=term-missing --cov-fail-under=70
+(cd frontend && npm run typecheck && npm test && npm run build && npm run gen:types:check)
 ```
 
-CI runs on pushes and pull requests with Ruff, mypy, evaluation manifest checks, selected evaluation tests, the backend suite, and the 70% coverage threshold. See [`docs/development.md`](docs/development.md).
+The last line needs Node.js 20 or newer and `npm install` in `frontend/` once. CI runs on pushes and pull requests with Ruff, mypy, evaluation manifest checks, selected evaluation tests, the backend suite, and the 70% coverage threshold. See [`docs/development.md`](docs/development.md).
 
 ## Evaluation
 
@@ -146,6 +149,7 @@ Credentials and local research artifacts require operator protection. Full trace
 | Document | Contents |
 | --- | --- |
 | [`docs/architecture.md`](docs/architecture.md) | Runtime components, request/data flow, events, state, persistence, retries, and failure behavior |
+| [`docs/frontend.md`](docs/frontend.md) | Terminal UI architecture, bridge protocol, build/test commands, screenshots, and performance budgets |
 | [`docs/ml-system.md`](docs/ml-system.md) | Prompts, skills, providers, tools, evidence, deterministic quant boundaries, and AI failure modes |
 | [`docs/configuration.md`](docs/configuration.md) | Environment variables, provider selection, limits, and sensitive settings |
 | [`docs/observability.md`](docs/observability.md) | Event ledgers, provider archives, replay, Phoenix, traces, metrics, and retention |
@@ -172,6 +176,5 @@ These documents describe maintainer and agent workflow, not application runtime 
 ### Module-local documentation
 
 - [`backend/data/README.md`](backend/data/README.md) - provider and data-pipeline boundary
-- [`backend/finai/styles/README.md`](backend/finai/styles/README.md) - Textual style organization and safe edits
 - [`backend/skills/`](backend/skills/) - runtime skill package manifests and prompts
 - [`evals/candidates/pilot-v1/README.md`](evals/candidates/pilot-v1/README.md) - candidate evaluation-set promotion rules

@@ -1,0 +1,971 @@
+{
+  "events": [
+    {
+      "display": null,
+      "event": {
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "54f1cad5-3684-5cf6-bcbe-694c492abf90",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 1
+        },
+        "query": "HDFCBANK",
+        "type": "run.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Preparing research",
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "label": "Preparing research",
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "ef762e79-0e49-5b2f-b941-5ceb7a348b9e",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 3
+        },
+        "stage": "agent",
+        "type": "stage.started"
+      }
+    },
+    {
+      "display": null,
+      "event": {
+        "has_tool_calls": true,
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "fe7a2edf-7025-5619-afba-a7614ec1cd0b",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 8
+        },
+        "round": 1,
+        "type": "model.response.completed"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching fundamentals",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamentals",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": null,
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "ee5b3c0f-9ec4-5321-83d1-5dcce6f4c0b4",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 9
+        },
+        "tool": "data:fetch_fundamentals",
+        "tool_id": "call_6a5506c9b1e44053b1ba869e26e1a83a",
+        "type": "tool.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching fundamentals",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamentals",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "message": "Running data:fetch_fundamentals",
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "29db23bb-519a-5639-8087-6f48dfed7561",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 10
+        },
+        "tool": "data:fetch_fundamentals",
+        "tool_id": "call_6a5506c9b1e44053b1ba869e26e1a83a",
+        "type": "tool.progress"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": "received 17 fields",
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetched fundamentals",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamentals",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": "received 17 fields",
+        "duration_ms": 1184.28,
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "94b34f74-2427-5f15-9c95-1bfea6b92b73",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 11
+        },
+        "tool": "data:fetch_fundamentals",
+        "tool_id": "call_6a5506c9b1e44053b1ba869e26e1a83a",
+        "type": "tool.completed"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": [
+          {
+            "host": "api.upstox.com",
+            "label": "Upstox",
+            "url": "https://api.upstox.com"
+          }
+        ]
+      },
+      "event": {
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "754a5166-4ae6-53cb-ac20-07e9b2e5f0cb",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 12
+        },
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          }
+        ],
+        "type": "sources.updated"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching technical overview",
+        "lines": null,
+        "notice": null,
+        "noun": "technical overview",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": null,
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "ce50dd1a-c18c-53f7-b66c-ca4b0ecea5f1",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 13
+        },
+        "tool": "analysis:get_technical_overview",
+        "tool_id": "call_383724b93e26433b863e21b45c92cd52",
+        "type": "tool.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching technical overview",
+        "lines": null,
+        "notice": null,
+        "noun": "technical overview",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "message": "Running analysis:get_technical_overview",
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "c007ed68-c3e6-5b81-9a5a-49bb01d16b15",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 14
+        },
+        "tool": "analysis:get_technical_overview",
+        "tool_id": "call_383724b93e26433b863e21b45c92cd52",
+        "type": "tool.progress"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": "close ₹846.0",
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetched technical overview",
+        "lines": null,
+        "notice": null,
+        "noun": "technical overview",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": "key values: as_of=2026-11-20T00:00:00+05:30, close=846.0, RSI_14=77.9515, SMA_20=758.0675,",
+        "duration_ms": 1665.63,
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "6f56e25f-60b5-5450-9bf0-7fdabe39775e",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 15
+        },
+        "tool": "analysis:get_technical_overview",
+        "tool_id": "call_383724b93e26433b863e21b45c92cd52",
+        "type": "tool.completed"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": [
+          {
+            "host": "finance.yahoo.com",
+            "label": "Yahoo Finance · price history · HDFCBANK.NS",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          }
+        ]
+      },
+      "event": {
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "0f65ac92-ddd3-5539-92a5-2f920c504065",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 16
+        },
+        "sources": [
+          {
+            "name": "yfinance",
+            "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+          }
+        ],
+        "type": "sources.updated"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching news",
+        "lines": null,
+        "notice": null,
+        "noun": "news",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": null,
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "a5083309-bb43-5a11-9191-653cdca13cb3",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 17
+        },
+        "tool": "news:fetch_news",
+        "tool_id": "call_76a1f49219084abb844e421b45d0a28c",
+        "type": "tool.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetching news",
+        "lines": null,
+        "notice": null,
+        "noun": "news",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "message": "Running news:fetch_news",
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "d7f5c4d2-d3be-5614-9665-934bf8ba1324",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 18
+        },
+        "tool": "news:fetch_news",
+        "tool_id": "call_76a1f49219084abb844e421b45d0a28c",
+        "type": "tool.progress"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Fetched news",
+        "lines": null,
+        "notice": null,
+        "noun": "news",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": "{\"news_quality\": {\"below_threshold_count\": 2, \"connector_elapsed_ms\": 7885.61, \"connector_",
+        "duration_ms": 15943.78,
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "4e9c13d2-1bd8-5523-961d-d3eff8dee46c",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 19
+        },
+        "tool": "news:fetch_news",
+        "tool_id": "call_76a1f49219084abb844e421b45d0a28c",
+        "type": "tool.completed"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": [
+          {
+            "host": null,
+            "label": "upstox.com",
+            "url": "https://upstox.com/news/market-news/stocks/hdfc-bank-shares-fall-over-1-amid-market-weakness-stock-turns-positive-over-6-months/article-203405/"
+          }
+        ]
+      },
+      "event": {
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "40895a95-3212-57a0-a4d3-072d9c254491",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 20
+        },
+        "sources": [
+          {
+            "name": "upstox.com",
+            "url": "https://upstox.com/news/market-news/stocks/hdfc-bank-shares-fall-over-1-amid-market-weakness-stock-turns-positive-over-6-months/article-203405/"
+          }
+        ],
+        "type": "sources.updated"
+      }
+    },
+    {
+      "display": null,
+      "event": {
+        "has_tool_calls": true,
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "02d7c1b6-ef0b-5419-85ac-9e320f9d8d47",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 25
+        },
+        "round": 2,
+        "type": "model.response.completed"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Running fundamental scan",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamental scan",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": null,
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "906a21f4-e328-5979-99dc-351c1abddbcb",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 26
+        },
+        "tool": "analysis:run_fundamental_scan",
+        "tool_id": "call_131e7a59fba54c5b9883e0dc8191c1f2",
+        "type": "tool.started"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Running fundamental scan",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamental scan",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "message": "Running analysis:run_fundamental_scan",
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "f1e224f4-9ff9-51d6-a3d9-d1e9b4c72927",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 27
+        },
+        "tool": "analysis:run_fundamental_scan",
+        "tool_id": "call_131e7a59fba54c5b9883e0dc8191c1f2",
+        "type": "tool.progress"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": "Ran fundamental scan",
+        "lines": null,
+        "notice": null,
+        "noun": "fundamental scan",
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": null
+      },
+      "event": {
+        "detail": "key values: peRatio=15.13, priceToBook=2.1, returnOnEquity=0.1375",
+        "duration_ms": 27.01,
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "b506360f-3e5c-553e-ad92-18a1bc482a67",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 28
+        },
+        "tool": "analysis:run_fundamental_scan",
+        "tool_id": "call_131e7a59fba54c5b9883e0dc8191c1f2",
+        "type": "tool.completed"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": null,
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": null,
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": null,
+        "sources": [
+          {
+            "host": "api.upstox.com",
+            "label": "Upstox",
+            "url": "https://api.upstox.com"
+          }
+        ]
+      },
+      "event": {
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "ad43362a-da09-51a9-98c8-8c8ed1d61ce8",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 29
+        },
+        "sources": [
+          {
+            "name": "upstox",
+            "url": "https://api.upstox.com"
+          }
+        ],
+        "type": "sources.updated"
+      }
+    },
+    {
+      "display": null,
+      "event": {
+        "has_tool_calls": false,
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "ea594fe6-8c30-5a10-91a2-a6433a8e0408",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 1361
+        },
+        "round": 4,
+        "type": "model.response.completed"
+      }
+    },
+    {
+      "display": null,
+      "event": {
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "60585600-a1dd-5b6f-a540-afec240935e8",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 1330
+        },
+        "text": "## Report Metadata\n- Report title: Research report\n- Evidence status: COMPLETE\n- Evidence observed through: 2026-11-20T10:00:00+00:00\n- Price return basis: see provider adjustment metadata\n\n## Executive Summary\nHDFC Bank closed at ₹846 after a 14.82% one-year move. Trailing P/E of 15.13 ratio sits below its recent history while momentum is stretched.\n\n## Key Drivers\n- Valuation: P/E of 15.13 ratio and price/book of 2.1 ratio look undemanding for the franchise.\n- Profitability: return on equity of 0.1375 fraction with a 0.2711 fraction profit margin.\n- Trend: price holds above its 20, 50 and 200 day averages.\n- Newsflow: Q2 results coverage points to steady loan growth.\n\n## Detailed Analysis\nThe stock gained 14.82% over the last year and trades near its highs with daily volume of 6,240,100 shares.\n\nFundamentals are steady: return on equity of 0.1375 fraction and a market capitalisation of 13000000000000.0 currency. The technical scan shows an RSI above 75, which historically precedes consolidation.\n\n## Risks and Contrarian View\n- Momentum is stretched: RSI above 75 raises the odds of a pullback.\n- Net interest margin pressure could cap earnings growth.\n- Single-name concentration: banking sector rotation would hit the stock regardless of fundamentals.\n\n## Final View\nConstructive on fundamentals but wait for a pullback: the setup favours accumulating on dips rather than chasing a stretched RSI.\n\n## Claims and references\n- Valuation: P/E of 15.13 ratio and price/book of 2.1 ratio look undemanding for the franchise. [citations: c2]\n- Profitability: return on equity of 0.1375 fraction with a 0.2711 fraction profit margin. [citations: c2]\n- Trend: price holds above its 20, 50 and 200 day averages. [citations: c1]\n- Newsflow: Q2 results coverage points to steady loan growth. [citations: c3]\n- Momentum is stretched: RSI above 75 raises the odds of a pullback. [citations: c1]\n\n## Sources\n- fundamentals_snapshot: https://finance.yahoo.com/quote/HDFCBANK.NS/key-statistics/ (observed 2026-11-20T10:00:00+00:00)\n- historical_prices: https://finance.yahoo.com/quote/HDFCBANK.NS/history/ (observed 2026-11-20T10:00:00+00:00)\n- news_articles: https://upstox.com/news/market-news/hdfc-bank-q2-results (observed 2026-11-20T10:00:00+00:00)",
+        "type": "response.delta"
+      }
+    },
+    {
+      "display": {
+        "candidates": null,
+        "detail": null,
+        "failed_nouns": [],
+        "failure_detail": null,
+        "friendly": null,
+        "instrument": "HDFCBANK.NS",
+        "label": null,
+        "lines": null,
+        "notice": null,
+        "noun": null,
+        "review_note": null,
+        "review_unavailable": false,
+        "sources": null
+      },
+      "event": {
+        "artifact_path": ".finai/sessions/demo/runs/run.json",
+        "completion_reason": null,
+        "duration_ms": 51400.0,
+        "evidence_availability": [
+          {
+            "evidence_count": 3,
+            "reason": null,
+            "source": "market_data",
+            "status": "available"
+          },
+          {
+            "evidence_count": 5,
+            "reason": null,
+            "source": "fundamentals",
+            "status": "available"
+          },
+          {
+            "evidence_count": 8,
+            "reason": null,
+            "source": "technical_overview",
+            "status": "available"
+          },
+          {
+            "evidence_count": 1,
+            "reason": null,
+            "source": "news",
+            "status": "available"
+          }
+        ],
+        "evidence_status": "complete",
+        "meta": {
+          "conversation_id": "b21df38e-b61a-5cf3-b7c9-ec8e9272a60c",
+          "event_id": "eddbba2a-c4ac-5a1e-be54-946cab0520f7",
+          "occurred_at": "2026-01-01T00:00:00Z",
+          "run_id": "a6ed543a-d4bc-57ec-8846-6c775a9dd365",
+          "sequence": 1362
+        },
+        "output_review": null,
+        "route_reason_codes": [
+          "jev_route"
+        ],
+        "terminal_status": "success",
+        "type": "run.completed"
+      }
+    }
+  ],
+  "finished": {
+    "evidence_availability": [
+      {
+        "name": "Price history",
+        "reason": null,
+        "status": "available"
+      },
+      {
+        "name": "Fundamentals",
+        "reason": null,
+        "status": "available"
+      },
+      {
+        "name": "Technical scan",
+        "reason": null,
+        "status": "available"
+      },
+      {
+        "name": "News",
+        "reason": null,
+        "status": "available"
+      }
+    ],
+    "evidence_status": "complete",
+    "outcome": "completed",
+    "report": {
+      "detailed_analysis": "The stock gained 14.82% over the last year and trades near its highs with daily volume of 6,240,100 shares.\n\nFundamentals are steady: return on equity of 13.75% and a market capitalisation of 13.00T. The technical scan shows an RSI above 75, which historically precedes consolidation.",
+      "disclaimer": "Research aid based on provider data, not investment advice. Verify figures before acting.",
+      "drivers": [
+        {
+          "importance": "major",
+          "source_refs": [
+            2
+          ],
+          "text": "Valuation: P/E of 15.13 and price/book of 2.10 look undemanding for the franchise."
+        },
+        {
+          "importance": "major",
+          "source_refs": [
+            2
+          ],
+          "text": "Profitability: return on equity of 13.75% with a 27.11% profit margin."
+        },
+        {
+          "importance": "supporting",
+          "source_refs": [
+            1
+          ],
+          "text": "Trend: price holds above its 20, 50 and 200 day averages."
+        },
+        {
+          "importance": "minor",
+          "source_refs": [
+            3
+          ],
+          "text": "Newsflow: Q2 results coverage points to steady loan growth."
+        }
+      ],
+      "evidence": {
+        "observed_through_text": "20 Nov 2026",
+        "sources": [
+          {
+            "name": "Price history",
+            "reason": null,
+            "status": "available"
+          },
+          {
+            "name": "Fundamentals",
+            "reason": null,
+            "status": "available"
+          },
+          {
+            "name": "Technical scan",
+            "reason": null,
+            "status": "available"
+          },
+          {
+            "name": "News",
+            "reason": null,
+            "status": "available"
+          }
+        ],
+        "status": "complete"
+      },
+      "final_view": "Constructive on fundamentals but wait for a pullback: the setup favours accumulating on dips rather than chasing a stretched RSI.",
+      "instrument": {
+        "exchange": "NSE",
+        "name": null,
+        "symbol": "HDFCBANK"
+      },
+      "key_figures": [
+        {
+          "as_of_text": "20 Nov 2026",
+          "label": "P/E",
+          "source_ref": 2,
+          "value_text": "15.13"
+        },
+        {
+          "as_of_text": "20 Nov 2026",
+          "label": "Price / book",
+          "source_ref": 2,
+          "value_text": "2.10"
+        },
+        {
+          "as_of_text": "20 Nov 2026",
+          "label": "Return on equity",
+          "source_ref": 2,
+          "value_text": "13.75%"
+        },
+        {
+          "as_of_text": "20 Nov 2026",
+          "label": "Profit margin",
+          "source_ref": 2,
+          "value_text": "27.11%"
+        },
+        {
+          "as_of_text": "20 Nov 2026",
+          "label": "Period return",
+          "source_ref": 1,
+          "value_text": "14.82%"
+        },
+        {
+          "as_of_text": "20 Nov 2026",
+          "label": "Last close",
+          "source_ref": 1,
+          "value_text": "846.00"
+        }
+      ],
+      "kind": "report",
+      "limitations": [],
+      "quote": {
+        "as_of_text": "20 Nov 2026",
+        "change_text": "+14.82% (1y)",
+        "direction": "up",
+        "price_text": "846.00"
+      },
+      "risks": [
+        {
+          "source_refs": [
+            1
+          ],
+          "text": "Momentum is stretched: RSI above 75 raises the odds of a pullback."
+        },
+        {
+          "source_refs": [],
+          "text": "Net interest margin pressure could cap earnings growth."
+        },
+        {
+          "source_refs": [],
+          "text": "Single-name concentration: banking sector rotation would hit the stock regardless of fundamentals."
+        }
+      ],
+      "signals": [
+        {
+          "direction": "bearish",
+          "name": "RSI (14)",
+          "percentile_text": "93rd pct",
+          "state_text": "overbought",
+          "strength": 0.78,
+          "value_text": "77.95"
+        },
+        {
+          "direction": "bullish",
+          "name": "SMA 20",
+          "percentile_text": "81st pct",
+          "state_text": "price above",
+          "strength": 0.46,
+          "value_text": "821.40"
+        },
+        {
+          "direction": "bullish",
+          "name": "SMA 50",
+          "percentile_text": "88th pct",
+          "state_text": "price above",
+          "strength": 0.52,
+          "value_text": "804.90"
+        },
+        {
+          "direction": "bullish",
+          "name": "SMA 200",
+          "percentile_text": "90th pct",
+          "state_text": "price above",
+          "strength": 0.61,
+          "value_text": "778.30"
+        },
+        {
+          "direction": "bullish",
+          "name": "MACD",
+          "percentile_text": "84th pct",
+          "state_text": "above signal",
+          "strength": 0.57,
+          "value_text": "9.84"
+        }
+      ],
+      "sources": [
+        {
+          "freshness_text": null,
+          "host": "finance.yahoo.com",
+          "label": "Yahoo Finance · price history · HDFCBANK.NS",
+          "ref": 1,
+          "retrieved_text": "observed 20 Nov 2026",
+          "trust": "verified",
+          "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/history/"
+        },
+        {
+          "freshness_text": null,
+          "host": "finance.yahoo.com",
+          "label": "Yahoo Finance · key statistics · HDFCBANK.NS",
+          "ref": 2,
+          "retrieved_text": "observed 20 Nov 2026",
+          "trust": "verified",
+          "url": "https://finance.yahoo.com/quote/HDFCBANK.NS/key-statistics/"
+        },
+        {
+          "freshness_text": null,
+          "host": "upstox.com",
+          "label": "Upstox",
+          "ref": 3,
+          "retrieved_text": "observed 20 Nov 2026",
+          "trust": "verified",
+          "url": "https://upstox.com/news/market-news/hdfc-bank-q2-results"
+        }
+      ],
+      "sparkline": {
+        "high_text": "857.37",
+        "low_text": "717.00",
+        "period_text": "1y",
+        "points": [
+          0.14112702144332795,
+          0.38619363111776045,
+          0.3559165063760065,
+          0.32763410985253266,
+          0.42701431929899586,
+          0.3718030918287387,
+          0.06397378357198845,
+          0.0,
+          0.12367314953337617,
+          0.12224834366317566,
+          0.112702144332835,
+          0.34558666381705483,
+          0.61736838355774,
+          0.5610173113913229,
+          0.4926266296217139,
+          0.5663603334045736,
+          0.48122818266011225,
+          0.22162855310963891,
+          0.15117190282823983,
+          0.32300349077438223,
+          0.34223837002208424,
+          0.33397449597492335,
+          0.6101018736197192,
+          0.8231815915081566,
+          0.7596352496972287,
+          0.6532022511932752,
+          0.7108356486428722,
+          0.6328275272494125,
+          0.3874047161074303,
+          0.337322789769894,
+          0.5124314312174962,
+          0.5685687825033835,
+          0.581961957683266,
+          0.802735627270784,
+          1.0,
+          0.932606682339531,
+          0.7956115979197831,
+          0.8304481014461783,
+          0.7820759421528815,
+          0.5753366103868347,
+          0.5818907173897553,
+          0.7388330839923063,
+          0.8090760133931755,
+          0.8261736838355775,
+          0.92562513357555,
+          0.9851107786564078,
+          0.9331766046876113,
+          0.9189997862791195
+        ]
+      },
+      "stance_text": null,
+      "summary": "HDFC Bank closed at ₹846.00 after a 14.82% one-year move. Trailing P/E of 15.13 sits below its recent history while momentum is stretched."
+    }
+  },
+  "markdown": "## Report Metadata\n- Report title: Research report\n- Evidence status: COMPLETE\n- Evidence observed through: 2026-11-20T10:00:00+00:00\n- Price return basis: see provider adjustment metadata\n\n## Executive Summary\nHDFC Bank closed at ₹846 after a 14.82% one-year move. Trailing P/E of 15.13 ratio sits below its recent history while momentum is stretched.\n\n## Key Drivers\n- Valuation: P/E of 15.13 ratio and price/book of 2.1 ratio look undemanding for the franchise.\n- Profitability: return on equity of 0.1375 fraction with a 0.2711 fraction profit margin.\n- Trend: price holds above its 20, 50 and 200 day averages.\n- Newsflow: Q2 results coverage points to steady loan growth.\n\n## Detailed Analysis\nThe stock gained 14.82% over the last year and trades near its highs with daily volume of 6,240,100 shares.\n\nFundamentals are steady: return on equity of 0.1375 fraction and a market capitalisation of 13000000000000.0 currency. The technical scan shows an RSI above 75, which historically precedes consolidation.\n\n## Risks and Contrarian View\n- Momentum is stretched: RSI above 75 raises the odds of a pullback.\n- Net interest margin pressure could cap earnings growth.\n- Single-name concentration: banking sector rotation would hit the stock regardless of fundamentals.\n\n## Final View\nConstructive on fundamentals but wait for a pullback: the setup favours accumulating on dips rather than chasing a stretched RSI.\n\n## Claims and references\n- Valuation: P/E of 15.13 ratio and price/book of 2.1 ratio look undemanding for the franchise. [citations: c2]\n- Profitability: return on equity of 0.1375 fraction with a 0.2711 fraction profit margin. [citations: c2]\n- Trend: price holds above its 20, 50 and 200 day averages. [citations: c1]\n- Newsflow: Q2 results coverage points to steady loan growth. [citations: c3]\n- Momentum is stretched: RSI above 75 raises the odds of a pullback. [citations: c1]\n\n## Sources\n- fundamentals_snapshot: https://finance.yahoo.com/quote/HDFCBANK.NS/key-statistics/ (observed 2026-11-20T10:00:00+00:00)\n- historical_prices: https://finance.yahoo.com/quote/HDFCBANK.NS/history/ (observed 2026-11-20T10:00:00+00:00)\n- news_articles: https://upstox.com/news/market-news/hdfc-bank-q2-results (observed 2026-11-20T10:00:00+00:00)"
+}
