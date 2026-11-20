@@ -102,7 +102,7 @@ def test_redaction_is_pattern_based_and_shared() -> None:
     value = {
         "access_token": "a",
         "x-api-key": "b",
-        "HIVE_API_KEY": "c",
+        "OPENROUTER_API_KEY": "c",
         "max_tokens": 5,
         "msg": "Bearer abc123 api_key=zzz",
     }
@@ -111,7 +111,7 @@ def test_redaction_is_pattern_based_and_shared() -> None:
         assert (
             out["access_token"]
             == out["x-api-key"]
-            == out["HIVE_API_KEY"]
+            == out["OPENROUTER_API_KEY"]
             == "[REDACTED]"
         )
         assert out["max_tokens"] == 5

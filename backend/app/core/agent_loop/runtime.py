@@ -73,8 +73,7 @@ from app.models.request_models import Message
 from app.models.routing import ExecutionMode, ModelTier, NextAction, RoutePlan
 from app.observability.tracing import set_current_span_attributes, span
 from app.security.policy import redact_secrets
-from app.services.chatgpt_codex_service import ChatGPTCodexError
-from app.services.hive_service import HiveProviderError
+from app.services.openrouter_service import OpenRouterProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -1919,8 +1918,7 @@ def _is_model_unavailable(exc: BaseException) -> bool:
         exc,
         (
             ModelBudgetExceeded,
-            HiveProviderError,
-            ChatGPTCodexError,
+            OpenRouterProviderError,
             CircuitBreakerOpen,
             httpx.HTTPError,
             TimeoutError,

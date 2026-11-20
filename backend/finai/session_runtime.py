@@ -126,20 +126,14 @@ class ResearchRunner:
                 conversation_context=conversation_context,
             )
         model_service = self.model_service
-        selected_provider = (
-            "chatgpt_codex"
-            if settings.FINAI_CHATGPT_CODEX_ENABLED
-            and settings.FINAI_CHATGPT_CODEX_PRIMARY
-            else "hive"
-        )
         if route is not None and route.model_tier in {
             ModelTier.SMALL,
             ModelTier.MAIN,
         }:
-            selected_model = _model_for_route(route, selected_provider)
+            selected_model = settings.OPENROUTER_MODEL
             route = route.model_copy(
                 update={
-                    "selected_provider": selected_provider,
+                    "selected_provider": "openrouter",
                     "selected_model": selected_model,
                 }
             )
@@ -286,27 +280,19 @@ class ResearchRunner:
             self.tool_runner,
             config=AgentLoopConfig(
                 mode=self.mode,
-                model=_model_for_route(route, selected_provider),
+                model=settings.OPENROUTER_MODEL,
                 decision_provider=self.routing_policy,
-                repair_model=(
-                    settings.FINAI_CHATGPT_CODEX_LUNA_MODEL
-                    if selected_provider == "chatgpt_codex"
-                    else settings.HIVE_MODEL
-                ),
-                escalation_model=(
-                    settings.FINAI_CHATGPT_CODEX_ESCALATION_MODEL
-                    if selected_provider == "chatgpt_codex"
-                    else settings.HIVE_MODEL
-                ),
-                max_tokens=settings.HIVE_MAX_OUTPUT_TOKENS,
-                report_max_tokens=settings.HIVE_MAX_REPORT_TOKENS,
-                report_repair_max_tokens=settings.HIVE_MAX_REPAIR_TOKENS,
+                repair_model=settings.OPENROUTER_MODEL,
+                escalation_model=settings.OPENROUTER_MODEL,
+                max_tokens=settings.OPENROUTER_MAX_OUTPUT_TOKENS,
+                report_max_tokens=settings.OPENROUTER_MAX_REPORT_TOKENS,
+                report_repair_max_tokens=settings.OPENROUTER_MAX_REPAIR_TOKENS,
                 max_run_seconds=settings.FINAI_AGENT_MAX_RUN_SECONDS,
                 emergency_max_tool_calls=settings.FINAI_AGENT_EMERGENCY_MAX_TOOL_CALLS,
                 max_input_tokens=settings.FINAI_AGENT_MAX_INPUT_TOKENS,
                 duplicate_reuse_limit=settings.FINAI_AGENT_DUPLICATE_REUSE_LIMIT,
-                max_report_repairs=settings.HIVE_MAX_REPORT_REPAIRS,
-                report_repair_timeout_seconds=settings.HIVE_REPAIR_TIMEOUT,
+                max_report_repairs=settings.OPENROUTER_MAX_REPORT_REPAIRS,
+                report_repair_timeout_seconds=settings.OPENROUTER_REPAIR_TIMEOUT,
                 publish_reports=publish_reports,
                 answer_contract=answer_contract,
                 allowed_tools=(
@@ -369,16 +355,6 @@ class ResearchRunner:
                 "resolved", ticker=cached
             ), "conversation_context"
         return InstrumentResolution("not_requested"), "not_requested"
-
-
-def _model_for_route(route: RoutePlan | None, provider: str) -> str:
-    if provider != "chatgpt_codex":
-        return settings.HIVE_MODEL
-    if route is not None and route.execution_mode is ExecutionMode.REPAIR:
-        return settings.FINAI_CHATGPT_CODEX_LUNA_MODEL
-    if route is not None and route.execution_mode is ExecutionMode.ESCALATE:
-        return settings.FINAI_CHATGPT_CODEX_ESCALATION_MODEL
-    return settings.FINAI_CHATGPT_CODEX_LUNA_MODEL
 
 
 _EXCHANGE_TOKEN = re.compile(r"\b(?:NSE|BSE)\b", re.IGNORECASE)

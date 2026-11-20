@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict
 
 # One pattern-based redactor shared by logging, feedback and tracing. Keys match
-# by substring so access_token, x-api-key and HIVE_API_KEY are all covered;
+# by substring so access_token, x-api-key and OPENROUTER_API_KEY are all covered;
 # plural ``tokens`` (usage counters) is deliberately not a secret.
 _SECRET_KEY = re.compile(
     r"(?i)(api[-_]?key|apikey|authorization|cookie|passw(?:or)?d|passphrase|secret|"

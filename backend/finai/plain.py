@@ -29,6 +29,7 @@ _REASON_LABELS = {
     "quota": "quota reached",
     "auth": "authentication failed",
     "rate_limit": "rate limited",
+    "server_error": "provider server error",
     "timeout": "timed out",
     "error": "error",
 }
@@ -85,23 +86,18 @@ def _first_line(value: object, limit: int = 120) -> str:
 
 
 def provider_notice(event: Any) -> str | None:
-    """One-line provider fallback notice; tolerant of missing structured fields."""
+    """One-line OpenRouter failure notice; tolerant of missing structured fields."""
     if getattr(event, "type", None) != "provider.failed":
         return None
-    provider = getattr(event, "provider", None) or "provider"
     reason = getattr(event, "reason", None)
-    next_provider = getattr(event, "next_provider", None)
-    next_model = getattr(event, "next_model", None)
+    message = _first_line(getattr(event, "message", ""))
     if reason:
-        line = f"⚠ {provider} unavailable ({_REASON_LABELS.get(str(reason), reason)})"
+        label = _REASON_LABELS.get(str(reason), str(reason))
+        line = f"⚠ OpenRouter error ({reason}): {label}"
+        if message and message != label:
+            line += f" — {message}"
     else:
-        line = f"⚠ {provider} unavailable: {_first_line(getattr(event, 'message', ''))}"
-    if next_provider:
-        line += f" — using {next_provider}"
-        if next_model:
-            line += f" · {next_model}"
-        if next_provider == "hive":
-            line += " (slower)"
+        line = f"⚠ OpenRouter error: {message}"
     return sanitize_terminal_text(line)
 
 

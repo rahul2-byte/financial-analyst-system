@@ -25,12 +25,12 @@ flowchart TB
     Dev --> API[Uvicorn FastAPI process]
     CLI --> FS[Local filesystem .finai]
     API --> FS
-    CLI --> Hive[Hive]
+    CLI --> OR[OpenRouter]
     CLI --> Jev[OpenRouter Jev optional]
     CLI --> YF[YFinance]
     CLI --> Tiny[TinyFish]
     CLI --> Up[Upstox optional]
-    API --> Hive
+    API --> OR
     API --> Tiny
 ```
 
@@ -66,7 +66,7 @@ Development API:
 PYTHONPATH=backend uv run uvicorn app.main:app --reload
 ```
 
-The API health endpoint is not a production readiness probe. It checks Hive key presence rather than making a Hive request, verifies that YFinance imports, runs a local canary, and may make a live TinyFish search. It is unauthenticated and exposes provider URL/status information.
+The API health endpoint is not a production readiness probe. It checks OpenRouter key presence rather than making an OpenRouter request, verifies that YFinance imports, runs a local canary, and may make a live TinyFish search. It is unauthenticated and exposes provider URL/status information.
 
 ## Absent deployment assets
 

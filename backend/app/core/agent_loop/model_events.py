@@ -6,7 +6,7 @@ import json
 from collections.abc import Sequence
 from typing import Any
 
-from app.services.hive_service import merge_tool_call_deltas
+from app.services.openrouter_service import merge_tool_call_deltas
 
 
 def merge_chunk_tool_calls(calls: dict[int, dict[str, Any]], chunk: Any) -> None:

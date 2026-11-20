@@ -43,7 +43,7 @@ class FinAIRepl:
             provider_archive=ProviderArchive(self.root),
             replay_snapshots=replay_snapshots,
         )
-        self.hive_service = self.resources.llm_service
+        self.llm_service = self.resources.llm_service
         self.runtime = ResearchRunner(
             self.resources,
             self.mode,

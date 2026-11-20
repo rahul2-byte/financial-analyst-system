@@ -10,13 +10,9 @@ from uuid import uuid4
 import httpx
 import pytest
 from app.core.agent_loop import AgentLoop, AgentLoopConfig
-from app.events.models import EventFactory
 from app.models.request_models import Message
 from app.models.routing import NextAction
-from app.services.chatgpt_codex_service import (
-    ChatGPTCodexService,
-    classify_fallback_reason,
-)
+from app.services.openrouter_service import failure_reason
 from app.services.routing_policy import RoutingPolicy
 
 
@@ -112,64 +108,22 @@ async def test_policy_propagates_reviewer_errors_instead_of_denying() -> None:
 
 
 @pytest.mark.parametrize(
-    ("message", "timed_out", "expected"),
+    ("status", "timed_out", "expected"),
     [
-        (
-            'ChatGPT HTTP 429: {"error":{"type":"usage_limit_reached"}}',
-            False,
-            "quota",
-        ),
-        ("ChatGPT HTTP 429: slow down", False, "rate_limit"),
-        ("ChatGPT HTTP 401: nope", False, "auth"),
-        ("ChatGPT credentials unavailable", False, "auth"),
-        ("TimeoutError", True, "timeout"),
-        ("boom", False, "error"),
+        (402, False, "quota"),
+        (401, False, "auth"),
+        (403, False, "auth"),
+        (429, False, "rate_limit"),
+        (408, False, "timeout"),
+        (None, True, "timeout"),
+        (503, False, "server_error"),
+        (None, False, "error"),
     ],
 )
-def test_classify_fallback_reason(message: str, timed_out: bool, expected: str) -> None:
-    assert classify_fallback_reason(message, timed_out=timed_out) == expected
-
-
-@pytest.mark.asyncio
-async def test_provider_failed_event_carries_fallback_fields() -> None:
-    class Hive:
-        async def generate_stream(self, messages, model, **kwargs):
-            yield {"event": "token", "data": "ok"}
-
-    service = ChatGPTCodexService(
-        client=httpx.AsyncClient(), fallback=Hive(), fallback_model="glm-test"
-    )
-    raw = [
-        event
-        async for event in service._fallback_stream(
-            [Message(role="user", content="hi")],
-            "gpt-test",
-            'ChatGPT HTTP 429: {"error":{"type":"usage_limit_reached"}}',
-        )
-    ]
-    failed = raw[0]["data"]
-    assert failed["reason"] == "quota"
-    assert failed["next_provider"] == "hive"
-    assert failed["next_model"] == "glm-test"
-
-    from app.events.models import ProviderFailed
-
-    event = EventFactory(uuid4()).make(
-        ProviderFailed,
-        provider=failed["provider"],
-        attempts=1,
-        phase="unknown",
-        message=failed["message"],
-        fallback=failed["fallback"],
-        reason=failed["reason"],
-        next_provider=failed["next_provider"],
-        next_model=failed["next_model"],
-    )
-    dumped = event.model_dump(mode="json")
-    assert dumped["type"] == "provider.failed"
-    assert dumped["reason"] == "quota"
-    assert dumped["next_model"] == "glm-test"
-    await service.aclose()
+def test_failure_reason_mapping(
+    status: int | None, timed_out: bool, expected: str
+) -> None:
+    assert failure_reason(status, timeout=timed_out) == expected
 
 
 class _SlowTools:

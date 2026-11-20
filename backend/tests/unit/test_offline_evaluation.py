@@ -32,7 +32,7 @@ def _model_snapshot(tmp_path):
     archive = ProviderArchive(tmp_path)
     return archive.store(
         ProviderSnapshot(
-            provider="hive",
+            provider="openrouter",
             operation="model_stream",
             payload=[{"event": "token", "data": "replayed report"}],
             fetched_at=datetime(2026, 9, 18, tzinfo=UTC),
@@ -61,7 +61,7 @@ def _structured_report_snapshot(tmp_path):
     archive = ProviderArchive(tmp_path)
     return archive.store(
         ProviderSnapshot(
-            provider="hive",
+            provider="openrouter",
             operation="model_stream",
             payload=[{"event": "token", "data": json.dumps(report)}],
             fetched_at=datetime(2026, 9, 18, tzinfo=UTC),

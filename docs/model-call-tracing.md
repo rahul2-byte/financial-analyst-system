@@ -3,7 +3,7 @@
 Set `FINAI_MODEL_TRACE=full` for a local process to record exact outbound model
 request bodies, full assembled responses, streamed chunk timing, provider
 attempts, retries, failures, and fallback. This covers AgentLoop generation and
-repair, ChatGPT Codex and Hive, Jev routing and output review, and standalone
+repair, OpenRouter generation, Jev routing and output review, and standalone
 evaluation judge calls. Tracing is disabled unless explicitly enabled.
 
 Trace files are append-only JSONL under `.finai/model-traces/YYYY-MM-DD/` by
@@ -35,8 +35,8 @@ uv run python -m evals.execute \
   --results .finai/evals/gpt-pilot-model-trace-20260923/results.jsonl \
   --events .finai/evals/gpt-pilot-model-trace-20260923/events.jsonl \
   --metrics .finai/evals/gpt-pilot-model-trace-20260923/metrics.jsonl \
-  --model gpt-5.6-luna \
-  --escalation-model gpt-6-luna \
+  --model openai/gpt-5.6-luna \
+  --escalation-model openai/gpt-5.6-luna \
   --allow-live
 ```
 

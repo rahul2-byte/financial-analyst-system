@@ -57,7 +57,7 @@ def test_trace_reads_settings_loaded_from_dotenv(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(settings, "FINAI_MODEL_TRACE", "full")
     monkeypatch.setattr(settings, "FINAI_MODEL_TRACE_DIR", str(tmp_path))
 
-    trace = ModelCallTrace.create(provider="hive", model="m", run_id="run-1")
+    trace = ModelCallTrace.create(provider="openrouter", model="m", run_id="run-1")
 
     assert trace is not None
     assert trace.path.parent.parent == tmp_path
@@ -77,7 +77,7 @@ def test_trace_prunes_files_older_than_seven_days(tmp_path, monkeypatch) -> None
                 "schema_version": 1,
                 "event": "call.started",
                 "call_id": "old-call",
-                "provider": "hive",
+                "provider": "openrouter",
                 "model": "test-model",
                 "payload": {},
             }
@@ -153,8 +153,8 @@ def test_trace_reader_ignores_torn_utf8_bytes_at_end(tmp_path) -> None:
 def test_calls_in_same_run_share_one_trace_file(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("FINAI_MODEL_TRACE", "full")
     monkeypatch.setenv("FINAI_MODEL_TRACE_DIR", str(tmp_path))
-    first = ModelCallTrace.create(provider="hive", model="m", run_id="run-1")
-    second = ModelCallTrace.create(provider="hive", model="m", run_id="run-1")
+    first = ModelCallTrace.create(provider="openrouter", model="m", run_id="run-1")
+    second = ModelCallTrace.create(provider="openrouter", model="m", run_id="run-1")
 
     assert first is not None and second is not None
     assert first.path == second.path
@@ -173,7 +173,9 @@ async def test_capture_stream_persists_partial_response_on_provider_failure(
 ) -> None:
     monkeypatch.setenv("FINAI_MODEL_TRACE", "full")
     monkeypatch.setenv("FINAI_MODEL_TRACE_DIR", str(tmp_path))
-    trace = ModelCallTrace.create(provider="hive", model="m", run_id="run-partial")
+    trace = ModelCallTrace.create(
+        provider="openrouter", model="m", run_id="run-partial"
+    )
     assert trace is not None
 
     async def events():
@@ -199,11 +201,11 @@ async def test_agent_loop_records_end_to_end_provider_call_trace(
 ) -> None:
     from app.core.agent_loop import AgentLoop, AgentLoopConfig
     from app.models.request_models import Message
-    from app.services.hive_service import HiveService
+    from app.services.openrouter_service import OpenRouterService
 
     monkeypatch.setenv("FINAI_MODEL_TRACE", "full")
     monkeypatch.setenv("FINAI_MODEL_TRACE_DIR", str(tmp_path / "traces"))
-    monkeypatch.setattr(settings, "HIVE_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "test-key")
 
     def handler(request):
         return httpx.Response(
@@ -219,7 +221,7 @@ async def test_agent_loop_records_end_to_end_provider_call_trace(
         async def execute(self, name, arguments):
             raise AssertionError(f"unexpected tool call: {name} {arguments}")
 
-    service = HiveService(
+    service = OpenRouterService(
         client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
     )
     conversation_id = uuid4()

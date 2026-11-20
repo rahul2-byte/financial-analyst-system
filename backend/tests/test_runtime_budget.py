@@ -12,8 +12,7 @@ import pytest
 from app.core.agent_loop import AgentLoop, AgentLoopConfig
 from app.models.request_models import Message
 from app.models.routing import NextAction
-from app.services.chatgpt_codex_service import ChatGPTCodexService
-from app.services.hive_service import HiveProviderError
+from app.services.openrouter_service import OpenRouterProviderError
 
 _TOOL = "data:fetch_stock_data"
 _PAYLOAD = {
@@ -79,7 +78,9 @@ class _Scripted:
                 yield _tool_call_event(n)
                 return
             if self.later == "500":
-                raise HiveProviderError('Hive HTTP 500: {"status_code":500}')
+                raise OpenRouterProviderError(
+                    'OpenRouter HTTP 500: {"status_code":500}'
+                )
             if self.later == "hang":
                 await asyncio.sleep(30)
             yield {"event": "token", "data": "final wrapped-up answer"}
@@ -166,90 +167,6 @@ async def test_all_providers_fail_without_tool_success_still_fails() -> None:
     events = await _run(_Scripted("500"), _Tools(ok=False))
     assert events[-1].completion_reason is None
     assert "Model synthesis unavailable" not in _text(events)
-
-
-class _Primary:
-    """Quota-exhausted primary wrapped around a fallback, like the real service."""
-
-    def __init__(self) -> None:
-        self.primary_calls = 0
-        self.fallback_calls = 0
-
-    def generate_stream(self, messages: list[Message], model: str, **kwargs: Any):
-        prefer_fallback = kwargs.get("prefer_fallback")
-        if not prefer_fallback:
-            self.primary_calls += 1
-        self.fallback_calls += 1
-        n = self.fallback_calls
-
-        async def stream() -> Any:
-            if not prefer_fallback:
-                yield {
-                    "event": "provider_failed",
-                    "data": {
-                        "provider": "chatgpt_codex",
-                        "message": "quota reached",
-                        "fallback": True,
-                        "reason": "quota",
-                        "next_provider": "hive",
-                    },
-                }
-            if n <= 3:
-                yield _tool_call_event(n)
-                return
-            yield {"event": "token", "data": "done"}
-
-        return stream()
-
-
-@pytest.mark.asyncio
-async def test_sticky_fallback_calls_primary_once_across_rounds() -> None:
-    class Tools(_Tools):
-        counter = 0
-
-        async def execute(self, name, arguments):  # type: ignore[no-untyped-def]
-            Tools.counter += 1
-            return _PAYLOAD
-
-    model = _Primary()
-
-    events = await _run(model, Tools(), duplicate_reuse_limit=10)
-    failed = [e for e in events if e.type == "provider.failed"]
-    assert model.primary_calls == 1
-    assert model.fallback_calls >= 2
-    assert len(failed) == 1
-    assert failed[0].reason == "quota"
-
-
-@pytest.mark.asyncio
-async def test_real_service_skips_primary_when_prefer_fallback() -> None:
-    class Fallback:
-        calls = 0
-
-        def generate_stream(self, messages, model, **kwargs):  # type: ignore[no-untyped-def]
-            Fallback.calls += 1
-            assert "prefer_fallback" not in kwargs
-
-            async def stream() -> Any:
-                yield {"event": "token", "data": "x"}
-
-            return stream()
-
-    service = ChatGPTCodexService.__new__(ChatGPTCodexService)
-    service.fallback = Fallback()  # type: ignore[assignment]
-    service.fallback_model = "glm"
-
-    async def boom() -> None:
-        raise AssertionError("primary must not be touched")
-
-    service._credentials = boom  # type: ignore[method-assign]
-    events = [
-        e
-        async for e in service._generate_stream_events(
-            [], "m", {"prefer_fallback": True}
-        )
-    ]
-    assert events == [{"event": "token", "data": "x"}]
 
 
 @pytest.mark.asyncio

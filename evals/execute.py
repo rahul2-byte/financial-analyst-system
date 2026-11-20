@@ -518,23 +518,12 @@ async def execute(args: argparse.Namespace) -> int:
             flush=True,
         )
     archive = ProviderArchive(args.archive_root)
-    from app.services.chatgpt_codex_service import (
-        ChatGPTCodexService,
-        CodexCredentialStore,
-    )
+    from app.services.openrouter_service import OpenRouterService
 
-    credential_store = CodexCredentialStore(
-        Path(settings.FINAI_CHATGPT_CODEX_CREDENTIAL_PATH).expanduser()
-    )
-    if not credential_store.load():
-        raise ValueError("ChatGPT Codex credentials unavailable")
+    if not settings.OPENROUTER_API_KEY:
+        raise ValueError("OPENROUTER_API_KEY is not set")
     resources = build_runtime_resources(
-        llm_service=ChatGPTCodexService(
-            fallback=None,
-            credential_store=credential_store,
-            endpoint=settings.FINAI_CHATGPT_CODEX_API_ENDPOINT,
-            timeout_seconds=settings.FINAI_CHATGPT_CODEX_TIMEOUT_SECONDS,
-        ),
+        llm_service=OpenRouterService(fallback_models=[], provider_archive=archive),
         provider_archive=archive,
     )
     semaphore = asyncio.Semaphore(args.concurrency)
@@ -705,8 +694,8 @@ def main() -> int:
     parser.add_argument("--events", type=Path, required=True)
     parser.add_argument("--metrics", type=Path, required=True)
     parser.add_argument("--archive-root", type=Path, default=Path(".finai"))
-    parser.add_argument("--model", default="gpt-5.6-luna")
-    parser.add_argument("--escalation-model", default="gpt-6-luna")
+    parser.add_argument("--model", default=settings.OPENROUTER_MODEL)
+    parser.add_argument("--escalation-model", default=settings.OPENROUTER_MODEL)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--case-timeout-seconds", type=float, default=120.0)
     parser.add_argument("--concurrency", type=int, default=1)

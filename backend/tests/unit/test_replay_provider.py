@@ -39,7 +39,7 @@ def test_replay_model_stream_consumes_ordered_snapshots(tmp_path) -> None:
     archive = ProviderArchive(tmp_path)
     first = archive.store(
         ProviderSnapshot(
-            provider="hive",
+            provider="openrouter",
             operation="model_stream",
             payload=[{"event": "token", "data": "first"}],
             fetched_at=datetime(2026, 9, 18, tzinfo=UTC),
@@ -47,7 +47,7 @@ def test_replay_model_stream_consumes_ordered_snapshots(tmp_path) -> None:
     )
     second = archive.store(
         ProviderSnapshot(
-            provider="hive",
+            provider="openrouter",
             operation="model_stream",
             payload=[{"event": "token", "data": "second"}],
             fetched_at=datetime(2026, 9, 18, tzinfo=UTC),

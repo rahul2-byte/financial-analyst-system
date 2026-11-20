@@ -125,14 +125,14 @@ class ModelResponseCompleted(BaseModel):
 class ProviderAttemptStarted(BaseModel):
     type: Literal["provider.attempt.started"] = "provider.attempt.started"
     meta: EventMeta
-    provider: str = "hive"
+    provider: str = "openrouter"
     attempt: int
 
 
 class ProviderRetrying(BaseModel):
     type: Literal["provider.retrying"] = "provider.retrying"
     meta: EventMeta
-    provider: str = "hive"
+    provider: str = "openrouter"
     attempt: int
     status_code: int | None = None
     delay_ms: float
@@ -142,7 +142,7 @@ class ProviderRetrying(BaseModel):
 class ProviderStreamStarted(BaseModel):
     type: Literal["provider.stream.started"] = "provider.stream.started"
     meta: EventMeta
-    provider: str = "hive"
+    provider: str = "openrouter"
     attempt: int
     first_byte_ms: float
 
@@ -157,7 +157,7 @@ class TokenUsage(BaseModel):
 class ProviderCompleted(BaseModel):
     type: Literal["provider.completed"] = "provider.completed"
     meta: EventMeta
-    provider: str = "hive"
+    provider: str = "openrouter"
     attempts: int
     duration_ms: float
     first_token_ms: float | None = None
@@ -168,7 +168,7 @@ class ProviderCompleted(BaseModel):
 class ProviderFailed(BaseModel):
     type: Literal["provider.failed"] = "provider.failed"
     meta: EventMeta
-    provider: str = "hive"
+    provider: str = "openrouter"
     attempts: int
     phase: str
     message: str
@@ -178,12 +178,8 @@ class ProviderFailed(BaseModel):
     partial_output: bool | None = None
     model_id: str | None = None
     usage: TokenUsage | None = None
-    # Fallback visibility: set when the primary provider failed and another
-    # provider takes over. reason in {quota, auth, rate_limit, timeout, error}.
-    fallback: bool | None = None
+    # reason in {quota, auth, rate_limit, timeout, server_error, error}.
     reason: str | None = None
-    next_provider: str | None = None
-    next_model: str | None = None
 
 
 class ToolProgress(BaseModel):

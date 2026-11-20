@@ -35,7 +35,7 @@ def _repl(events: list, closed: list | None = None) -> SimpleNamespace:
     return SimpleNamespace(
         typed_stream=typed_stream,
         session_id="sess1",
-        hive_service=SimpleNamespace(aclose=aclose),
+        llm_service=SimpleNamespace(aclose=aclose),
     )
 
 
@@ -88,7 +88,7 @@ def test_one_shot_exit_codes(tail: tuple, code: int) -> None:
     assert _run(_events(tail), as_json=True) == code
 
 
-def test_one_shot_closes_hive_client_on_error() -> None:
+def test_one_shot_closes_llm_client_on_error() -> None:
     closed: list[bool] = []
 
     async def boom(_q: str):

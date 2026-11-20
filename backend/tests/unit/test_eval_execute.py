@@ -114,8 +114,7 @@ def test_checkpoint_writer_keeps_previous_snapshot_if_atomic_replace_fails(
 
 
 def test_live_execution_resumes_from_completed_case_artifacts(tmp_path, monkeypatch):
-    import app.services.chatgpt_codex_service as codex_service
-    from app.services.chatgpt_codex_service import CodexCredentialStore
+    import app.services.openrouter_service as openrouter_service
 
     from evals import upstox_benchmark
 
@@ -131,9 +130,7 @@ def test_live_execution_resumes_from_completed_case_artifacts(tmp_path, monkeypa
     calls = []
     interrupt = {"enabled": True}
 
-    monkeypatch.setattr(
-        CodexCredentialStore, "load", lambda self: {"access_token": "available"}
-    )
+    monkeypatch.setattr(execute_module.settings, "OPENROUTER_API_KEY", "available")
     monkeypatch.setattr(upstox_benchmark, "validate_cases", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         upstox_benchmark, "validate_archive_cases", lambda *args, **kwargs: []
@@ -154,7 +151,7 @@ def test_live_execution_resumes_from_completed_case_artifacts(tmp_path, monkeypa
             provider_archive=kwargs["provider_archive"],
         ),
     )
-    monkeypatch.setattr(codex_service, "ChatGPTCodexService", FakeService)
+    monkeypatch.setattr(openrouter_service, "OpenRouterService", FakeService)
 
     async def fake_execute_case(case, **kwargs):
         case_id = case["case_id"]

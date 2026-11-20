@@ -1,12 +1,11 @@
 # Live GPT benchmark workflow
 
-This workflow compares the FIN-AI report path using `gpt-5.6-luna` by default
-and `gpt-6-luna` for explicit escalations. It does not change the application's
-default Hive provider. Report quality and provider operations remain separate.
+This workflow compares the FIN-AI report path using the configured
+`OPENROUTER_MODEL`. It does not change the application's OpenRouter provider. Report quality and provider operations remain separate.
 
 ## Preconditions
 
-- Configure `UPSTOX_ACCESS_TOKEN` and the ChatGPT Codex credential file locally.
+- Configure `UPSTOX_ACCESS_TOKEN` and `OPENROUTER_API_KEY` locally.
 - Use data only for an authorized local evaluation. These commands do not
   publish or redistribute source data.
 - Choose a completed NSE trading date and record why it is appropriate.
@@ -45,7 +44,7 @@ resulting manifest and source snapshots before moving on.
 
 ```sh
 PYTHONPATH=backend:. UV_CACHE_DIR=.uv-cache uv run python -m evals.judge preflight \
-  --model gpt-6-luna
+  --model openai/gpt-5.6-luna
 
 FINAI_LIVE_EVAL=1 PYTHONPATH=backend:. UV_CACHE_DIR=.uv-cache uv run python -m evals.execute \
   --cases .finai/evals/upstox-pilot.jsonl \
@@ -60,7 +59,7 @@ PYTHONPATH=backend:. UV_CACHE_DIR=.uv-cache uv run python -m evals.judge evaluat
   --cases .finai/evals/upstox-pilot.jsonl \
   --artifacts-dir .finai/evals/gpt-pilot-first/artifacts \
   --output .finai/evals/gpt-pilot-first/judge.jsonl \
-  --model gpt-6-luna
+  --model openai/gpt-5.6-luna
 ```
 
 Each completed case is durably written to its artifact before the JSONL result

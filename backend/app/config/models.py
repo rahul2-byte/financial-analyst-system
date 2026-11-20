@@ -4,6 +4,12 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+# Defaults; override with OPENROUTER_MODEL / OPENROUTER_FALLBACK_MODELS.
+DEFAULT_OPENROUTER_MODEL = "openai/gpt-5.6-luna"
+DEFAULT_OPENROUTER_FALLBACK_MODELS = (
+    "anthropic/claude-haiku-5.5,deepseek/deepseek-v4.1-flash-1017"
+)
+
 _REPOSITORY_ENV = Path(__file__).resolve().parents[3] / ".env"
 
 
@@ -14,7 +20,6 @@ class EnvSettings(BaseSettings):
     API_VERSION: str = "v1"
     DEBUG: bool = False
 
-    DEFAULT_LLM_MODEL: str = "zai-org/glm-5.3-flash"
     FINAI_ROUTER_ENABLED: bool = True
     FINAI_ROUTER_TIMEOUT_SECONDS: float = 10.0
     FINAI_ROUTER_MAX_RETRIES: int = 1
@@ -22,41 +27,30 @@ class EnvSettings(BaseSettings):
     OPENROUTER_API_KEY: str | None = None
     OPENROUTER_JEV_BASE_URL: str = "https://openrouter.ai/api/alpha/decisions"
     OPENROUTER_JEV_MODEL: str = "~typesafe/jev-latest"
-    HIVE_API_KEY: str | None = None
-    HIVE_BASE_URL: str = "https://api-cdn.thehive.ai/api/v3"
-    HIVE_MODEL: str = "zai-org/glm-5.3-flash"
-    HIVE_TIMEOUT: float = 600.0
-    HIVE_CONNECT_TIMEOUT: float = 5.0
-    HIVE_POOL_TIMEOUT: float = 2.0
-    HIVE_WRITE_TIMEOUT: float = 10.0
-    HIVE_READ_TIMEOUT: float = 60.0
-    HIVE_MAX_RETRIES: int = 2
-    HIVE_BACKOFF_BASE: float = 0.5
-    HIVE_BACKOFF_CAP: float = 4.0
-    HIVE_CIRCUIT_FAILURE_THRESHOLD: int = 3
-    HIVE_CIRCUIT_RECOVERY_TIMEOUT: float = 30.0
-    HIVE_MAX_OUTPUT_TOKENS: int = 8192
-    HIVE_MAX_REPORT_TOKENS: int = 32768
-    HIVE_MAX_REPAIR_TOKENS: int = 8192
-    HIVE_MAX_REPORT_REPAIRS: int = 2
-    HIVE_REPAIR_TIMEOUT: float = 120.0
+    OPENROUTER_BASE_URL: str = "https://openrouter.ai/api/v1"
+    OPENROUTER_APP_URL: str | None = None
+    OPENROUTER_MODEL: str = DEFAULT_OPENROUTER_MODEL
+    # Comma-separated; sent via OpenRouter's native ``models`` failover array.
+    OPENROUTER_FALLBACK_MODELS: str = DEFAULT_OPENROUTER_FALLBACK_MODELS
+    OPENROUTER_TIMEOUT: float = 600.0
+    OPENROUTER_CONNECT_TIMEOUT: float = 5.0
+    OPENROUTER_POOL_TIMEOUT: float = 2.0
+    OPENROUTER_WRITE_TIMEOUT: float = 10.0
+    OPENROUTER_READ_TIMEOUT: float = 60.0
+    OPENROUTER_MAX_RETRIES: int = 2
+    OPENROUTER_BACKOFF_BASE: float = 0.5
+    OPENROUTER_BACKOFF_CAP: float = 4.0
+    OPENROUTER_CIRCUIT_FAILURE_THRESHOLD: int = 3
+    OPENROUTER_CIRCUIT_RECOVERY_TIMEOUT: float = 30.0
+    OPENROUTER_MAX_OUTPUT_TOKENS: int = 8192
+    OPENROUTER_MAX_REPORT_TOKENS: int = 32768
+    OPENROUTER_MAX_REPAIR_TOKENS: int = 8192
+    OPENROUTER_MAX_REPORT_REPAIRS: int = 2
+    OPENROUTER_REPAIR_TIMEOUT: float = 120.0
     FINAI_AGENT_MAX_RUN_SECONDS: float = 150.0
     FINAI_AGENT_EMERGENCY_MAX_TOOL_CALLS: int = 128
     FINAI_AGENT_MAX_INPUT_TOKENS: int = 32_000
     FINAI_AGENT_DUPLICATE_REUSE_LIMIT: int = 1
-    FINAI_CHATGPT_CODEX_ENABLED: bool = False
-    FINAI_CHATGPT_CODEX_PRIMARY: bool = True
-    FINAI_CHATGPT_CODEX_CLIENT_ID: str = "app_EMoamEEZ73f0CkXaXp7hrann"
-    FINAI_CHATGPT_CODEX_ISSUER: str = "https://auth.openai.com"
-    FINAI_CHATGPT_CODEX_API_ENDPOINT: str = (
-        "https://chatgpt.com/backend-api/codex/responses"
-    )
-    FINAI_CHATGPT_CODEX_LUNA_MODEL: str = "gpt-5.6-luna"
-    FINAI_CHATGPT_CODEX_ESCALATION_MODEL: str = "gpt-6-luna"
-    FINAI_CHATGPT_CODEX_REDIRECT_HOST: str = "localhost"
-    FINAI_CHATGPT_CODEX_REDIRECT_PORT: int = 1455
-    FINAI_CHATGPT_CODEX_TIMEOUT_SECONDS: float = 60.0
-    FINAI_CHATGPT_CODEX_CREDENTIAL_PATH: str = "~/.config/finai/chatgpt-codex.json"
     FINAI_CONTEXT_MAX_TOKENS: int = 250_000
     FINAI_CONTEXT_COMPACTION_RATIO: float = 0.9
     MIN_QUALITY_SCORE: float = 40.0
@@ -106,3 +100,11 @@ class EnvSettings(BaseSettings):
         case_sensitive=True,
         extra="ignore",
     )
+
+    @property
+    def openrouter_fallback_models(self) -> list[str]:
+        return [
+            item.strip()
+            for item in self.OPENROUTER_FALLBACK_MODELS.split(",")
+            if item.strip()
+        ]

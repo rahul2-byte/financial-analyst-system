@@ -214,31 +214,26 @@ async def test_direct_route_plain_text_and_full_payload_in_events() -> None:
 def _failed() -> ProviderFailed:
     return EventFactory(uuid4()).make(
         ProviderFailed,
-        provider="chatgpt_codex",
+        provider="openrouter",
         attempts=1,
         phase="request",
-        message="ChatGPT HTTP 429: usage limit\nsecond line Bearer abc123def456ghi789",
+        message="OpenRouter HTTP 500: boom\nsecond line Bearer abc123def456ghi789",
     )
 
 
-def test_provider_fallback_line_without_structured_fields() -> None:
+def test_provider_failure_line_without_structured_fields() -> None:
     line = render_event(_failed())
-    assert line.startswith("⚠ chatgpt_codex unavailable: ChatGPT HTTP 429")
+    assert line.startswith("⚠ OpenRouter error: OpenRouter HTTP 500")
     assert "second line" not in line and "abc123def456" not in line
     assert line.count("\n") == 1
 
 
-def test_provider_fallback_line_with_structured_fields() -> None:
+def test_provider_failure_line_with_reason() -> None:
     event = _failed()
-    for key, value in {
-        "reason": "quota",
-        "next_provider": "hive",
-        "next_model": "zai-org/glm-5.3-flash",
-    }.items():
-        object.__setattr__(event, key, value)  # tolerate models that lack the fields
+    object.__setattr__(event, "reason", "rate_limit")
+    object.__setattr__(event, "message", "OpenRouter HTTP 429")
     assert render_event(event) == (
-        "⚠ chatgpt_codex unavailable (quota reached) — using hive · "
-        "zai-org/glm-5.3-flash (slower)\n"
+        "⚠ OpenRouter error (rate_limit): rate limited — OpenRouter HTTP 429\n"
     )
 
 

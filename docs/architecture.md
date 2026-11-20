@@ -138,9 +138,9 @@ Provider snapshots are immutable JSON records keyed by a SHA-256 hash. Replay lo
 
 - The CLI runs one active research stream per session.
 - News connectors run concurrently; extraction is capped by a semaphore of five and moved to a one-worker thread executor so synchronous parsing does not block the event loop.
-- Hive streams use connect/pool/write/read timeouts, a whole-request budget, bounded retries for selected HTTP statuses, backoff, and a circuit breaker.
+- OpenRouter streams use connect/pool/write/read timeouts, a whole-request budget, bounded retries for selected HTTP statuses, backoff, and a circuit breaker.
 - Jev uses a ten-second request timeout and a bounded retry policy.
-- ChatGPT Codex uses the local OAuth credential and falls back to Hive when the request fails before streaming starts; it does not retry Codex requests.
+- OpenRouter performs model failover natively: `OPENROUTER_FALLBACK_MODELS` are sent in the request `models` array. The runtime does no cross-provider fallback; a failed call surfaces one `⚠ OpenRouter error (reason): …` line.
 - Upstox uses request quotas and response validation but has no provider retry policy in its adapter.
 - Phoenix and tracing are best effort. Tracing setup failure does not stop a run.
 
@@ -153,8 +153,8 @@ There is no queue, distributed lock, worker pool for research runs, external cac
 - `GET /`
 - `GET /api/health`
 
-The global exception handler returns a generic 500 payload with a generated request reference. `/api/health` checks API-key presence for Hive, import readiness for YFinance, a local normalization canary, and an optional live TinyFish canary. It is not an authenticated or comprehensive dependency probe.
+The global exception handler returns a generic 500 payload with a generated request reference. `/api/health` checks API-key presence for OpenRouter, import readiness for YFinance, a local normalization canary, and an optional live TinyFish canary. It is not an authenticated or comprehensive dependency probe.
 
 ## Security boundary
 
-Secrets are loaded from environment variables or the local ChatGPT credential file. Trace helpers redact common credential fields. Local artifacts are not encrypted or centrally access-controlled, and full model traces may contain sensitive prompts, evidence, and responses. There is no user authentication or authorization in the HTTP surface and no trading/order tool.
+Secrets are loaded from environment variables. Trace helpers redact common credential fields. Local artifacts are not encrypted or centrally access-controlled, and full model traces may contain sensitive prompts, evidence, and responses. There is no user authentication or authorization in the HTTP surface and no trading/order tool.

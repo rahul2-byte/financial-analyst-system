@@ -12,6 +12,15 @@ from app.core.skills import SkillRegistry
 from app.observability.provider_archive import ProviderArchive
 from app.services.routing_policy import RoutingPolicy
 
+MISSING_OPENROUTER_KEY_MESSAGE = (
+    "OPENROUTER_API_KEY is not set. Get a key at https://openrouter.ai/keys "
+    "and add it to .env."
+)
+
+
+class MissingOpenRouterKeyError(RuntimeError):
+    """Raised at startup when the only LLM provider has no API key."""
+
 
 @dataclass
 class RuntimeResources:
@@ -72,30 +81,11 @@ def build_runtime_resources(
             skills=skills,
         )
     if llm_service is None:
-        from app.services.hive_service import HiveService
+        from app.services.openrouter_service import OpenRouterService
 
-        hive_service = HiveService(provider_archive=archive)
-        llm_service = hive_service
-        if (
-            settings.FINAI_CHATGPT_CODEX_ENABLED
-            and settings.FINAI_CHATGPT_CODEX_PRIMARY
-        ):
-            from app.services.chatgpt_codex_service import (
-                ChatGPTCodexService,
-                CodexCredentialStore,
-            )
-
-            llm_service = ChatGPTCodexService(
-                fallback=hive_service,
-                credential_store=CodexCredentialStore(
-                    Path(settings.FINAI_CHATGPT_CODEX_CREDENTIAL_PATH).expanduser()
-                ),
-                client_id=settings.FINAI_CHATGPT_CODEX_CLIENT_ID,
-                issuer=settings.FINAI_CHATGPT_CODEX_ISSUER,
-                endpoint=settings.FINAI_CHATGPT_CODEX_API_ENDPOINT,
-                timeout_seconds=settings.FINAI_CHATGPT_CODEX_TIMEOUT_SECONDS,
-                fallback_model=settings.HIVE_MODEL,
-            )
+        if not settings.OPENROUTER_API_KEY:
+            raise MissingOpenRouterKeyError(MISSING_OPENROUTER_KEY_MESSAGE)
+        llm_service = OpenRouterService(provider_archive=archive)
     if yf_fetcher is None:
         from data.providers.yfinance import YFinanceFetcher
 

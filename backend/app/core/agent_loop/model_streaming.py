@@ -27,9 +27,6 @@ class ModelBudgetExceeded(TimeoutError):
     """The run time budget ran out while a model call was in flight."""
 
 
-_STICKY_FALLBACK_REASONS = {"quota", "auth"}
-
-
 class ModelStreaming:
     """Turn provider frames into typed events and one assistant message."""
 
@@ -103,11 +100,6 @@ class ModelStreaming:
             timeout_seconds=(
                 self._report_repair_timeout_seconds if is_repair else None
             ),
-            **(
-                {"prefer_fallback": True}
-                if self._run_state.get("prefer_fallback")
-                else {}
-            ),
         )
         async for event in self._bounded(source):
             event_name = event.get("event")
@@ -115,14 +107,14 @@ class ModelStreaming:
                 data = event.get("data", {})
                 yield factory.make(
                     ProviderAttemptStarted,
-                    provider=str(data.get("provider", "hive")),
+                    provider=str(data.get("provider", "openrouter")),
                     attempt=int(data.get("attempt", 1)),
                 )
             elif event_name == "provider_retrying":
                 data = event.get("data", {})
                 yield factory.make(
                     ProviderRetrying,
-                    provider=str(data.get("provider", "hive")),
+                    provider=str(data.get("provider", "openrouter")),
                     attempt=int(data.get("attempt", 1)),
                     status_code=data.get("status_code"),
                     delay_ms=float(data.get("delay_ms", 0)),
@@ -132,7 +124,7 @@ class ModelStreaming:
                 data = event.get("data", {})
                 yield factory.make(
                     ProviderStreamStarted,
-                    provider=str(data.get("provider", "hive")),
+                    provider=str(data.get("provider", "openrouter")),
                     attempt=int(data.get("attempt", 1)),
                     first_byte_ms=float(data.get("first_byte_ms", 0)),
                 )
@@ -140,7 +132,7 @@ class ModelStreaming:
                 data = event.get("data", {})
                 yield factory.make(
                     ProviderCompleted,
-                    provider=str(data.get("provider", "hive")),
+                    provider=str(data.get("provider", "openrouter")),
                     attempts=int(data.get("attempts", 1)),
                     duration_ms=float(data.get("duration_ms", 0)),
                     first_token_ms=data.get("first_token_ms"),
@@ -149,29 +141,19 @@ class ModelStreaming:
                 )
             elif event_name == "provider_failed":
                 data = event.get("data", {})
-                if data.get("fallback"):
-                    if data.get("reason") in _STICKY_FALLBACK_REASONS:
-                        self._run_state["prefer_fallback"] = True
-                    key = (data.get("provider"), data.get("reason"))
-                    if key in self._run_state.setdefault("fallback_notified", set()):
-                        continue
-                    self._run_state["fallback_notified"].add(key)
                 yield factory.make(
                     ProviderFailed,
-                    provider=str(data.get("provider", "hive")),
+                    provider=str(data.get("provider", "openrouter")),
                     attempts=int(data.get("attempts", 1)),
                     phase=str(data.get("phase", "unknown")),
                     status_code=data.get("status_code"),
-                    message=str(data.get("message", "Hive provider failed")),
+                    message=str(data.get("message", "OpenRouter provider failed")),
                     duration_ms=data.get("duration_ms"),
                     timeout=data.get("timeout"),
                     partial_output=data.get("partial_output"),
                     model_id=data.get("model_id"),
                     usage=usage or _parse_usage(data.get("usage")),
-                    fallback=data.get("fallback"),
                     reason=data.get("reason"),
-                    next_provider=data.get("next_provider"),
-                    next_model=data.get("next_model"),
                 )
             elif event_name == "usage":
                 usage = _parse_usage(event.get("data"))

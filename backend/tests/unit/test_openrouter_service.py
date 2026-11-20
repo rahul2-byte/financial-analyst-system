@@ -7,17 +7,17 @@ from app.config import settings
 from app.core.circuit_breaker import CircuitBreaker, CircuitBreakerOpen
 from app.models.request_models import Message
 from app.observability.provider_archive import ProviderArchive
-from app.services.hive_service import (
-    HiveProviderError,
-    HiveRetryPolicy,
-    HiveService,
+from app.services.openrouter_service import (
+    OpenRouterProviderError,
+    OpenRouterRetryPolicy,
+    OpenRouterService,
     _retry_delay,
     _retryable_status,
     merge_tool_call_deltas,
 )
 
 
-def test_hive_retries_transient_gateway_failures() -> None:
+def test_openrouter_retries_transient_gateway_failures() -> None:
     assert _retryable_status(408)
     assert _retryable_status(429)
     assert _retryable_status(502)
@@ -26,16 +26,16 @@ def test_hive_retries_transient_gateway_failures() -> None:
     assert not _retryable_status(501)
 
 
-def test_hive_default_total_timeout_is_ten_minutes() -> None:
-    assert settings.HIVE_TIMEOUT == 600.0
-    assert settings.HIVE_READ_TIMEOUT == 60.0
+def test_openrouter_default_total_timeout_is_ten_minutes() -> None:
+    assert settings.OPENROUTER_TIMEOUT == 600.0
+    assert settings.OPENROUTER_READ_TIMEOUT == 60.0
 
 
 @pytest.mark.asyncio
-async def test_hive_request_budget_uses_configured_timeout(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "HIVE_TIMEOUT", 123.0)
+async def test_openrouter_request_budget_uses_configured_timeout(monkeypatch) -> None:
+    monkeypatch.setattr(settings, "OPENROUTER_TIMEOUT", 123.0)
 
-    service = HiveService(
+    service = OpenRouterService(
         client=httpx.AsyncClient(
             transport=httpx.MockTransport(lambda request: httpx.Response(200))
         )
@@ -46,7 +46,7 @@ async def test_hive_request_budget_uses_configured_timeout(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_hive_reuses_injected_client_and_retries_504_before_streaming(
+async def test_openrouter_reuses_injected_client_and_retries_504_before_streaming(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     attempts = 0
@@ -64,16 +64,16 @@ async def test_hive_reuses_injected_client_and_retries_504_before_streaming(
             ),
         )
 
-    monkeypatch.setattr(settings, "HIVE_API_KEY", "test-key")
-    monkeypatch.setattr(settings, "HIVE_MAX_RETRIES", 1)
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "OPENROUTER_MAX_RETRIES", 1)
     client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
-    service = HiveService(client=client)
+    service = OpenRouterService(client=client)
 
     events = [
         event
         async for event in service._stream_request(
             [Message(role="user", content="hello")],
-            settings.HIVE_MODEL,
+            settings.OPENROUTER_MODEL,
         )
     ]
 
@@ -92,13 +92,13 @@ async def test_hive_reuses_injected_client_and_retries_504_before_streaming(
 
 
 @pytest.mark.asyncio
-async def test_hive_trace_records_each_attempt_and_full_response(
+async def test_openrouter_trace_records_each_attempt_and_full_response(
     tmp_path, monkeypatch
 ) -> None:
     monkeypatch.setenv("FINAI_MODEL_TRACE", "full")
     monkeypatch.setenv("FINAI_MODEL_TRACE_DIR", str(tmp_path / "traces"))
-    monkeypatch.setattr(settings, "HIVE_API_KEY", "must-not-be-written")
-    monkeypatch.setattr(settings, "HIVE_MAX_RETRIES", 1)
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "must-not-be-written")
+    monkeypatch.setattr(settings, "OPENROUTER_MAX_RETRIES", 1)
     attempts = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -112,7 +112,7 @@ async def test_hive_trace_records_each_attempt_and_full_response(
             content=b'data: {"choices":[{"delta":{"content":"ready"}}]}\n\ndata: [DONE]\n\n',
         )
 
-    service = HiveService(
+    service = OpenRouterService(
         client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
     )
     events = [
@@ -146,7 +146,7 @@ async def test_hive_trace_records_each_attempt_and_full_response(
 
 
 @pytest.mark.asyncio
-async def test_hive_reports_started_stream_timeout_before_budget_exhaustion(
+async def test_openrouter_reports_started_stream_timeout_before_budget_exhaustion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class StalledStream(httpx.AsyncByteStream):
@@ -162,10 +162,10 @@ async def test_hive_reports_started_stream_timeout_before_budget_exhaustion(
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(200, request=request, stream=StalledStream())
 
-    monkeypatch.setattr(settings, "HIVE_API_KEY", "test-key")
-    service = HiveService(
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "test-key")
+    service = OpenRouterService(
         client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
-        retry_policy=HiveRetryPolicy(
+        retry_policy=OpenRouterRetryPolicy(
             max_retries=2,
             total_budget_seconds=0.05,
             backoff_base_seconds=0.01,
@@ -175,9 +175,9 @@ async def test_hive_reports_started_stream_timeout_before_budget_exhaustion(
     )
 
     events = []
-    with pytest.raises(HiveProviderError, match="TimeoutError|budget exhausted"):
+    with pytest.raises(OpenRouterProviderError, match="TimeoutError|budget exhausted"):
         async for event in service._stream_request(
-            [Message(role="user", content="hello")], settings.HIVE_MODEL
+            [Message(role="user", content="hello")], settings.OPENROUTER_MODEL
         ):
             events.append(event)
 
@@ -190,8 +190,10 @@ async def test_hive_reports_started_stream_timeout_before_budget_exhaustion(
 
 
 @pytest.mark.asyncio
-async def test_hive_archives_completed_raw_model_stream(tmp_path, monkeypatch) -> None:
-    monkeypatch.setattr(settings, "HIVE_API_KEY", "test-key")
+async def test_openrouter_archives_completed_raw_model_stream(
+    tmp_path, monkeypatch
+) -> None:
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "test-key")
     client = httpx.AsyncClient(
         transport=httpx.MockTransport(
             lambda request: httpx.Response(
@@ -201,13 +203,15 @@ async def test_hive_archives_completed_raw_model_stream(tmp_path, monkeypatch) -
             )
         )
     )
-    service = HiveService(client=client, provider_archive=ProviderArchive(tmp_path))
+    service = OpenRouterService(
+        client=client, provider_archive=ProviderArchive(tmp_path)
+    )
 
     events = [
         event
         async for event in service._stream_request(
             [Message(role="user", content="hello")],
-            settings.HIVE_MODEL,
+            settings.OPENROUTER_MODEL,
             run_id="run-123",
         )
     ]
@@ -222,8 +226,8 @@ async def test_hive_archives_completed_raw_model_stream(tmp_path, monkeypatch) -
     await service.aclose()
 
 
-def test_hive_sse_parser_extracts_text_tool_calls_and_usage() -> None:
-    parser = HiveService.parse_sse_line
+def test_openrouter_sse_parser_extracts_text_tool_calls_and_usage() -> None:
+    parser = OpenRouterService.parse_sse_line
 
     token = parser("data: " + json.dumps({"choices": [{"delta": {"content": "Hi"}}]}))
     usage = parser(
@@ -242,53 +246,55 @@ def test_hive_sse_parser_extracts_text_tool_calls_and_usage() -> None:
     assert done == {"event": "done", "data": "[DONE]"}
 
 
-def test_hive_sse_parser_rejects_malformed_json() -> None:
-    with pytest.raises(HiveProviderError, match="malformed SSE"):
-        HiveService.parse_sse_line("data: {broken")
+def test_openrouter_sse_parser_rejects_malformed_json() -> None:
+    with pytest.raises(OpenRouterProviderError, match="malformed SSE"):
+        OpenRouterService.parse_sse_line("data: {broken")
 
 
 def test_retry_delay_honors_retry_after_and_jitters_without_server_hint() -> None:
-    policy = HiveRetryPolicy(2, 100.0, 0.5, 4.0)
+    policy = OpenRouterRetryPolicy(2, 100.0, 0.5, 4.0)
 
     assert _retry_delay(0, "12", policy) == 10.0
     assert 0.0 <= _retry_delay(1, None, policy) <= 1.0
 
 
 @pytest.mark.asyncio
-async def test_hive_circuit_breaker_fails_fast_after_exhausted_attempts(
+async def test_openrouter_circuit_breaker_fails_fast_after_exhausted_attempts(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, request=request, text="unavailable")
 
-    monkeypatch.setattr(settings, "HIVE_API_KEY", "test-key")
-    breaker = CircuitBreaker("test-hive", failure_threshold=2, recovery_timeout=60)
-    service = HiveService(
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "test-key")
+    breaker = CircuitBreaker(
+        "test-openrouter", failure_threshold=2, recovery_timeout=60
+    )
+    service = OpenRouterService(
         client=httpx.AsyncClient(transport=httpx.MockTransport(handler)),
-        retry_policy=HiveRetryPolicy(0, 10.0, 0.5, 1.0),
+        retry_policy=OpenRouterRetryPolicy(0, 10.0, 0.5, 1.0),
         circuit_breaker=breaker,
     )
 
     for _ in range(2):
-        with pytest.raises(HiveProviderError):
+        with pytest.raises(OpenRouterProviderError):
             [
                 event
                 async for event in service._stream_request(
-                    [Message(role="user", content="hello")], settings.HIVE_MODEL
+                    [Message(role="user", content="hello")], settings.OPENROUTER_MODEL
                 )
             ]
     with pytest.raises(CircuitBreakerOpen):
         [
             event
             async for event in service._stream_request(
-                [Message(role="user", content="hello")], settings.HIVE_MODEL
+                [Message(role="user", content="hello")], settings.OPENROUTER_MODEL
             )
         ]
     await service.aclose()
 
 
-def test_hive_sse_parser_preserves_content_and_usage_in_one_frame() -> None:
-    event = HiveService.parse_sse_line(
+def test_openrouter_sse_parser_preserves_content_and_usage_in_one_frame() -> None:
+    event = OpenRouterService.parse_sse_line(
         "data: "
         + json.dumps(
             {
@@ -337,3 +343,29 @@ def test_tool_call_fragments_are_assembled_by_index_and_id() -> None:
             "function": {"name": "search_web", "arguments": '{"q":"AAPL"}'},
         }
     }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("app_url", [None, "https://example.test/app"])
+async def test_openrouter_referer_header_only_when_configured(
+    monkeypatch: pytest.MonkeyPatch, app_url: str | None
+) -> None:
+    seen: dict[str, str | None] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen["referer"] = request.headers.get("HTTP-Referer")
+        seen["title"] = request.headers.get("X-Title")
+        return httpx.Response(200, request=request, content=b"data: [DONE]\n\n")
+
+    monkeypatch.setattr(settings, "OPENROUTER_API_KEY", "test-key")
+    monkeypatch.setattr(settings, "OPENROUTER_APP_URL", app_url)
+    service = OpenRouterService(
+        client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    )
+    async for _ in service._stream_request(
+        [Message(role="user", content="hi")], settings.OPENROUTER_MODEL
+    ):
+        pass
+    assert seen["referer"] == app_url
+    assert seen["title"] == "FIN-AI"
+    await service.aclose()

@@ -22,7 +22,7 @@ flowchart LR
     R --> P[RoutingPolicy]
     P --> J[Jev optional router]
     R --> L[AgentLoop]
-    L --> M[Hive streaming model]
+    L --> M[OpenRouter streaming model]
     L --> T[FinancialToolRunner]
     T --> Y[YFinance]
     T --> Q[Upstox optional]
@@ -55,7 +55,7 @@ There is no Dockerfile, deployment manifest, PostgreSQL, Redis, vector database,
 | --- | --- |
 | `backend/finai/` | CLI, Textual UI, rendering, sessions, local persistence |
 | `backend/app/core/agent_loop/` | Bounded model/tool orchestration and publication validation |
-| `backend/app/services/` | Hive, Jev, and optional ChatGPT Codex provider clients |
+| `backend/app/services/` | OpenRouter (generation) and Jev provider clients |
 | `backend/data/` | YFinance/Upstox adapters and the news search/extraction pipeline |
 | `backend/quant/` | Deterministic fundamental and technical calculations |
 | `backend/experiments/` | Separate offline feature, signal, simulation, and validation runtime |
@@ -73,8 +73,7 @@ cp .env.example .env
 
 Set the provider keys needed for the workflow:
 
-- `HIVE_API_KEY` for model generation
-- `OPENROUTER_API_KEY` for Jev routing when `FINAI_ROUTER_ENABLED=true`
+- `OPENROUTER_API_KEY` for model generation (required; startup fails without it) and Jev routing when `FINAI_ROUTER_ENABLED=true`
 - `TINYFISH_API_KEY` for live news search
 - `UPSTOX_ACCESS_TOKEN` is optional and enables Upstox instrument, market, and fundamentals paths
 

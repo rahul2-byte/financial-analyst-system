@@ -139,24 +139,24 @@ def reduce_event(state: PresentationState, event: ResearchEvent) -> Presentation
     if isinstance(event, ProviderAttemptStarted):
         activities = dict(state.activities)
         activities["provider"] = ActivityState(
-            "Contacting Hive", detail=f"attempt {event.attempt}"
+            "Contacting OpenRouter", detail=f"attempt {event.attempt}"
         )
         return replace(
             state,
             phase=PresentationPhase.GENERATING,
-            current_operation="Contacting Hive",
+            current_operation="Contacting OpenRouter",
             activities=activities,
         )
     if isinstance(event, ProviderRetrying):
         activities = dict(state.activities)
         activities["provider"] = ActivityState(
-            "Retrying Hive",
+            "Retrying OpenRouter",
             detail=f"{event.reason} · {event.delay_ms / 1000:.1f}s",
         )
         return replace(
             state,
             phase=PresentationPhase.GENERATING,
-            current_operation="Retrying Hive",
+            current_operation="Retrying OpenRouter",
             activities=activities,
         )
     if isinstance(event, ProviderStreamStarted):
@@ -175,11 +175,11 @@ def reduce_event(state: PresentationState, event: ResearchEvent) -> Presentation
         if isinstance(event, ProviderCompleted):
             detail = f"{event.attempts} attempt(s) · {event.duration_ms / 1000:.1f}s"
             status = "completed"
-            label = "Hive provider"
+            label = "OpenRouter"
         else:
             detail = friendly_error(event.message)
             status = "failed"
-            label = "Hive provider"
+            label = "OpenRouter"
             notice = provider_notice(event)
             if notice:
                 label, detail = notice, None

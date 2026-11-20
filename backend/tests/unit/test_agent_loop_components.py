@@ -99,8 +99,8 @@ async def test_model_streaming_preserves_provider_metadata() -> None:
                 yield {
                     "event": "provider_completed",
                     "data": {
-                        "provider": "chatgpt_codex",
-                        "model_id": "gpt-5.6-luna",
+                        "provider": "openrouter",
+                        "model_id": "openai/gpt-5-mini",
                     },
                 }
 
@@ -113,8 +113,8 @@ async def test_model_streaming_preserves_provider_metadata() -> None:
         )
     ]
 
-    assert events[0].provider == "chatgpt_codex"
-    assert events[0].model_id == "gpt-5.6-luna"
+    assert events[0].provider == "openrouter"
+    assert events[0].model_id == "openai/gpt-5-mini"
 
 
 @pytest.mark.asyncio

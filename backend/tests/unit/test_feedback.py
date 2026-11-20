@@ -14,8 +14,8 @@ def test_run_summary_exposes_route_and_failure_context() -> None:
             },
             {
                 "type": "provider.failed",
-                "provider": "hive",
-                "model_id": "glm",
+                "provider": "openrouter",
+                "model_id": "test-model",
                 "phase": "stream",
                 "message": "timeout",
             },

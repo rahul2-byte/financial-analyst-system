@@ -1,6 +1,6 @@
-"""Codex-only judge evaluation for FIN-AI artifacts.
+"""OpenRouter judge evaluation for FIN-AI artifacts.
 
-This module deliberately has no provider fallback.  A missing credential,
+This module deliberately has no model fallback.  A missing API key,
 unreachable endpoint, or malformed judge response is ``unavailable`` rather
 than a score.
 """
@@ -111,27 +111,20 @@ def _preflight_response_is_valid(response: str) -> bool:
 async def _evaluate(args: argparse.Namespace) -> int:
     from app.config import settings
     from app.models.request_models import Message
-    from app.services.chatgpt_codex_service import (
-        ChatGPTCodexError,
-        ChatGPTCodexService,
-        CodexCredentialStore,
+    from app.services.openrouter_service import (
+        OpenRouterProviderError,
+        OpenRouterService,
     )
 
-    model = args.model
-    store = CodexCredentialStore(Path(settings.FINAI_CHATGPT_CODEX_CREDENTIAL_PATH))
-    if not store.load():
+    model = args.model or settings.OPENROUTER_MODEL
+    if not settings.OPENROUTER_API_KEY:
         print(
             json.dumps(
-                {"status": "judge_unavailable", "reason": "credentials unavailable"}
+                {"status": "judge_unavailable", "reason": "OPENROUTER_API_KEY unset"}
             )
         )
         return 2
-    service = ChatGPTCodexService(
-        fallback=None,
-        credential_store=store,
-        endpoint=settings.FINAI_CHATGPT_CODEX_API_ENDPOINT,
-        timeout_seconds=settings.FINAI_CHATGPT_CODEX_TIMEOUT_SECONDS,
-    )
+    service = OpenRouterService(fallback_models=[])
     cases = [
         json.loads(line)
         for line in Path(args.cases).read_text().splitlines()
@@ -167,7 +160,7 @@ async def _evaluate(args: argparse.Namespace) -> int:
                 )
                 rows.append(_parse(raw, case_id, model, args.prompt_version))
             except (
-                ChatGPTCodexError,
+                OpenRouterProviderError,
                 ValidationError,
                 ValueError,
                 TypeError,
@@ -201,27 +194,20 @@ async def _evaluate(args: argparse.Namespace) -> int:
 async def _preflight(args: argparse.Namespace) -> int:
     from app.config import settings
     from app.models.request_models import Message
-    from app.services.chatgpt_codex_service import (
-        ChatGPTCodexError,
-        ChatGPTCodexService,
-        CodexCredentialStore,
+    from app.services.openrouter_service import (
+        OpenRouterProviderError,
+        OpenRouterService,
     )
 
-    store = CodexCredentialStore(Path(settings.FINAI_CHATGPT_CODEX_CREDENTIAL_PATH))
-    credentials = store.load()
-    available = bool(credentials)
-    reason = None if available else "credentials unavailable"
+    model = args.model or settings.OPENROUTER_MODEL
+    available = bool(settings.OPENROUTER_API_KEY)
+    reason = None if available else "OPENROUTER_API_KEY unset"
     if available:
-        service = ChatGPTCodexService(
-            fallback=None,
-            credential_store=store,
-            endpoint=settings.FINAI_CHATGPT_CODEX_API_ENDPOINT,
-            timeout_seconds=settings.FINAI_CHATGPT_CODEX_TIMEOUT_SECONDS,
-        )
+        service = OpenRouterService(fallback_models=[])
         try:
             response = await service.generate(
                 [Message(role="user", content="Return exactly: ok")],
-                args.model,
+                model,
                 max_tokens=16,
                 temperature=0,
                 run_id="judge-preflight",
@@ -229,7 +215,7 @@ async def _preflight(args: argparse.Namespace) -> int:
             if not _preflight_response_is_valid(response):
                 available = False
                 reason = "model did not return the expected preflight response"
-        except (ChatGPTCodexError, OSError) as exc:
+        except (OpenRouterProviderError, OSError) as exc:
             available = False
             reason = str(exc)
         finally:
@@ -238,8 +224,8 @@ async def _preflight(args: argparse.Namespace) -> int:
         json.dumps(
             {
                 "status": "ready" if available else "judge_unavailable",
-                "provider": "chatgpt_codex",
-                "model": args.model,
+                "provider": "openrouter",
+                "model": model,
                 "reason": reason,
             },
             indent=2,
@@ -255,10 +241,10 @@ def main() -> int:
     evaluate.add_argument("--cases", required=True)
     evaluate.add_argument("--artifacts-dir", required=True)
     evaluate.add_argument("--output", required=True)
-    evaluate.add_argument("--model", default="gpt-6-luna")
+    evaluate.add_argument("--model", default=None)
     evaluate.add_argument("--prompt-version", default="judge-v1")
     preflight = sub.add_parser("preflight")
-    preflight.add_argument("--model", default="gpt-6-luna")
+    preflight.add_argument("--model", default=None)
     args = parser.parse_args()
     if args.command == "evaluate":
         return asyncio.run(_evaluate(args))

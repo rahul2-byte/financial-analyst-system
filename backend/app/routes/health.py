@@ -3,8 +3,8 @@ from datetime import UTC, datetime, timedelta
 
 from app.config import settings
 from app.core.query_scope import normalize_research_scope
-from app.services.hive_service import HiveService
 from app.services.llm_interface import LLMServiceInterface
+from app.services.openrouter_service import OpenRouterService
 from data.news_pipeline.tinyfish_client import TinyFishSearchClient
 from fastapi import APIRouter, Depends
 
@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_llm_service() -> LLMServiceInterface:
-    return HiveService()
+    return OpenRouterService()
 
 
 def _check_market_data_readiness() -> bool:
@@ -91,8 +91,8 @@ async def health_check(
 
     components = {
         "llm_service": "up" if is_llm_up else "down",
-        "llm_provider": "hive",
-        "llm_server_url": settings.HIVE_BASE_URL,
+        "llm_provider": "openrouter",
+        "llm_server_url": settings.OPENROUTER_BASE_URL,
         "market_data": "up" if is_market_data_ready else "down",
         "tinyfish_search": "up" if settings.TINYFISH_API_KEY else "down",
     }

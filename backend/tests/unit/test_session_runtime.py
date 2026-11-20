@@ -2,32 +2,10 @@ import asyncio
 from uuid import uuid4
 
 import pytest
-from app.config import settings
 from app.core.resources import RuntimeResources
 from app.models.request_models import Message
 from app.models.routing import ExecutionMode, ModelTier, NextAction, RoutePlan
-from finai.session_runtime import ResearchRunner, _model_for_route, _wants_report
-
-
-def test_small_route_selects_luna(monkeypatch) -> None:
-    monkeypatch.setattr(settings, "FINAI_CHATGPT_CODEX_LUNA_MODEL", "luna-test")
-    monkeypatch.setattr(
-        settings, "FINAI_CHATGPT_CODEX_ESCALATION_MODEL", "gpt-6-luna-test"
-    )
-
-    route = RoutePlan(model_tier=ModelTier.SMALL)
-    repair = RoutePlan(
-        execution_mode=ExecutionMode.REPAIR,
-        model_tier=ModelTier.MAIN,
-    )
-    escalation = RoutePlan(
-        execution_mode=ExecutionMode.ESCALATE,
-        model_tier=ModelTier.MAIN,
-    )
-
-    assert _model_for_route(route, "chatgpt_codex") == "luna-test"
-    assert _model_for_route(repair, "chatgpt_codex") == "luna-test"
-    assert _model_for_route(escalation, "chatgpt_codex") == "gpt-6-luna-test"
+from finai.session_runtime import ResearchRunner, _wants_report
 
 
 def test_report_intent_accepts_polite_analysis_requests() -> None:

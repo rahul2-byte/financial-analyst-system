@@ -35,16 +35,37 @@ from app.services.llm_interface import LLMServiceInterface
 logger = logging.getLogger(__name__)
 
 
-class HiveProviderError(RuntimeError):
-    """A provider or stream protocol failure from Hive."""
+class OpenRouterProviderError(RuntimeError):
+    """A provider or stream protocol failure from OpenRouter."""
 
 
 def _retryable_status(status_code: int) -> bool:
     return status_code in {408, 429, 500, 502, 503, 504}
 
 
+def failure_reason(status_code: int | None = None, *, timeout: bool = False) -> str:
+    """Map an HTTP status or timeout to the runtime's provider reason classes."""
+    if timeout or status_code == 408:
+        return "timeout"
+    if status_code == 402:
+        return "quota"
+    if status_code in {401, 403}:
+        return "auth"
+    if status_code == 429:
+        return "rate_limit"
+    if status_code is not None and status_code >= 500:
+        return "server_error"
+    return "error"
+
+
+_MISSING_KEY_MESSAGE = (
+    "OPENROUTER_API_KEY is not set. Get a key at https://openrouter.ai/keys "
+    "and add it to .env."
+)
+
+
 @dataclass(frozen=True)
-class HiveRetryPolicy:
+class OpenRouterRetryPolicy:
     max_retries: int
     total_budget_seconds: float
     backoff_base_seconds: float
@@ -90,40 +111,46 @@ def merge_tool_call_deltas(
             )
 
 
-class HiveService(LLMServiceInterface):
-    """OpenAI-compatible streaming client for Hive GLM-5.3-Flash."""
+class OpenRouterService(LLMServiceInterface):
+    """OpenAI-compatible streaming client for OpenRouter chat completions."""
 
     def __init__(
         self,
         client: httpx.AsyncClient | None = None,
         *,
-        provider_name: str = "hive",
+        provider_name: str = "openrouter",
         base_url: str | None = None,
         api_key: str | None = None,
         default_model: str | None = None,
-        retry_policy: HiveRetryPolicy | None = None,
+        fallback_models: list[str] | None = None,
+        retry_policy: OpenRouterRetryPolicy | None = None,
         circuit_breaker: CircuitBreaker | None = None,
         provider_archive: ProviderArchive | None = None,
     ) -> None:
         self.provider_name = provider_name
-        self.base_url = str(base_url or settings.HIVE_BASE_URL).rstrip("/")
-        self.api_key = api_key if api_key is not None else settings.HIVE_API_KEY
-        self.default_model = str(default_model or settings.HIVE_MODEL)
+        self.base_url = str(base_url or settings.OPENROUTER_BASE_URL).rstrip("/")
+        self.api_key = api_key if api_key is not None else settings.OPENROUTER_API_KEY
+        self.default_model = str(default_model or settings.OPENROUTER_MODEL)
+        self.fallback_models = list(
+            settings.openrouter_fallback_models
+            if fallback_models is None
+            else fallback_models
+        )
         self.last_telemetry: dict[str, Any] = {}
         self.provider_archive = provider_archive
         self.metrics = ProviderMetrics()
-        self.retry_policy = retry_policy or HiveRetryPolicy(
-            max_retries=settings.HIVE_MAX_RETRIES,
-            total_budget_seconds=settings.HIVE_TIMEOUT,
-            backoff_base_seconds=settings.HIVE_BACKOFF_BASE,
-            backoff_cap_seconds=settings.HIVE_BACKOFF_CAP,
+        self.retry_policy = retry_policy or OpenRouterRetryPolicy(
+            max_retries=settings.OPENROUTER_MAX_RETRIES,
+            total_budget_seconds=settings.OPENROUTER_TIMEOUT,
+            backoff_base_seconds=settings.OPENROUTER_BACKOFF_BASE,
+            backoff_cap_seconds=settings.OPENROUTER_BACKOFF_CAP,
         )
         self._client = client or httpx.AsyncClient(
             timeout=httpx.Timeout(
-                connect=settings.HIVE_CONNECT_TIMEOUT,
-                pool=settings.HIVE_POOL_TIMEOUT,
-                write=settings.HIVE_WRITE_TIMEOUT,
-                read=settings.HIVE_READ_TIMEOUT,
+                connect=settings.OPENROUTER_CONNECT_TIMEOUT,
+                pool=settings.OPENROUTER_POOL_TIMEOUT,
+                write=settings.OPENROUTER_WRITE_TIMEOUT,
+                read=settings.OPENROUTER_READ_TIMEOUT,
             ),
             limits=httpx.Limits(
                 max_connections=settings.HTTP_POOL_MAX_CONNECTIONS,
@@ -132,8 +159,8 @@ class HiveService(LLMServiceInterface):
         )
         self._circuit = circuit_breaker or CircuitBreaker(
             self.provider_name,
-            failure_threshold=settings.HIVE_CIRCUIT_FAILURE_THRESHOLD,
-            recovery_timeout=settings.HIVE_CIRCUIT_RECOVERY_TIMEOUT,
+            failure_threshold=settings.OPENROUTER_CIRCUIT_FAILURE_THRESHOLD,
+            recovery_timeout=settings.OPENROUTER_CIRCUIT_RECOVERY_TIMEOUT,
         )
 
     async def aclose(self) -> None:
@@ -150,9 +177,15 @@ class HiveService(LLMServiceInterface):
         try:
             chunk = json.loads(payload)
         except json.JSONDecodeError as exc:
-            raise HiveProviderError(f"malformed SSE payload: {exc}") from exc
+            raise OpenRouterProviderError(f"malformed SSE payload: {exc}") from exc
         if not isinstance(chunk, dict):
-            raise HiveProviderError("malformed SSE payload: expected object")
+            raise OpenRouterProviderError("malformed SSE payload: expected object")
+        if isinstance(chunk.get("error"), dict):
+            err = chunk["error"]
+            raise OpenRouterProviderError(
+                f"OpenRouter stream error {err.get('code', '')}: "
+                f"{str(err.get('message', ''))[:300]}"
+            )
         usage = chunk.get("usage")
         choices = chunk.get("choices", [])
         if isinstance(usage, dict) and not choices:
@@ -177,14 +210,12 @@ class HiveService(LLMServiceInterface):
     def _model(self, model: str) -> str:
         return self.default_model if model == "reasoning" else model
 
-    @observe("llm.hive", as_type="llm", provider="hive")
+    @observe("llm.openrouter", as_type="llm", provider="openrouter")
     async def _stream_request(
         self, messages: list[Message], model: str, **kwargs: Any
     ) -> AsyncGenerator[dict[str, Any], None]:
         if not self.api_key:
-            raise HiveProviderError(
-                f"{self.provider_name.upper()}_API_KEY is not configured"
-            )
+            raise OpenRouterProviderError(_MISSING_KEY_MESSAGE)
         if not self._circuit.try_acquire():
             from app.core.circuit_breaker import CircuitBreakerOpen
 
@@ -194,9 +225,17 @@ class HiveService(LLMServiceInterface):
             "model": self._model(model),
             "messages": [message.model_dump(exclude_none=True) for message in messages],
             "stream": True,
-            "max_tokens": kwargs.get("max_tokens", settings.HIVE_MAX_OUTPUT_TOKENS),
+            "max_tokens": kwargs.get(
+                "max_tokens", settings.OPENROUTER_MAX_OUTPUT_TOKENS
+            ),
             "temperature": kwargs.get("temperature", 0.7),
         }
+        # OpenRouter performs model failover natively from the ``models`` array.
+        if self.fallback_models:
+            payload["models"] = [
+                payload["model"],
+                *(m for m in self.fallback_models if m != payload["model"]),
+            ]
         prompt_content, prompt_truncated, prompt_size = trace_content(
             payload["messages"]
         )
@@ -257,7 +296,7 @@ class HiveService(LLMServiceInterface):
             try:
                 remaining = request_deadline - time.perf_counter()
                 if remaining <= 0:
-                    raise HiveProviderError("Hive request budget exhausted")
+                    raise OpenRouterProviderError("OpenRouter request budget exhausted")
                 # The client's read timeout is only a per-read limit. The
                 # request budget must also cap the whole attempt, otherwise a
                 # stalled SSE stream can run past the configured deadline.
@@ -281,6 +320,12 @@ class HiveService(LLMServiceInterface):
                         json=payload,
                         headers={
                             "Authorization": f"Bearer {self.api_key}",
+                            "X-Title": "FIN-AI",
+                            **(
+                                {"HTTP-Referer": settings.OPENROUTER_APP_URL}
+                                if settings.OPENROUTER_APP_URL
+                                else {}
+                            ),
                             "Content-Type": "application/json",
                             "Accept": "text/event-stream",
                         },
@@ -307,8 +352,8 @@ class HiveService(LLMServiceInterface):
                                     self.retry_policy,
                                 )
                                 if time.perf_counter() + delay >= request_deadline:
-                                    raise HiveProviderError(
-                                        "Hive request budget exhausted during retry"
+                                    raise OpenRouterProviderError(
+                                        "OpenRouter request budget exhausted during retry"
                                     )
                                 retries += 1
                                 retry_event = {
@@ -338,15 +383,17 @@ class HiveService(LLMServiceInterface):
                                     "attempts": attempt,
                                     "phase": "http",
                                     "status_code": response.status_code,
-                                    "message": f"Hive HTTP {response.status_code}",
+                                    "message": f"OpenRouter HTTP {response.status_code}",
+                                    "provider": self.provider_name,
+                                    "reason": failure_reason(response.status_code),
                                     "model_id": self._model(model),
                                     "timeout": response.status_code == 408,
                                     "partial_output": False,
                                     "usage": usage,
                                 },
                             }
-                            raise HiveProviderError(
-                                f"Hive HTTP {response.status_code}: {body[:500]}"
+                            raise OpenRouterProviderError(
+                                f"OpenRouter HTTP {response.status_code}: {body[:500]}"
                             )
                         saw_done = False
                         stream_started_emitted = False
@@ -399,7 +446,7 @@ class HiveService(LLMServiceInterface):
                                 public_token_chars += len(str(parsed["data"]))
                                 public_text.append(str(parsed["data"]))
                                 logger.debug(
-                                    "Hive SSE token chunk received",
+                                    "OpenRouter SSE token chunk received",
                                     extra={
                                         "chunk_index": streamed_token_count,
                                         "chunk_chars": len(str(parsed["data"])),
@@ -437,7 +484,9 @@ class HiveService(LLMServiceInterface):
                                 raw_events.append(parsed)
                                 yield parsed
                         if not saw_done:
-                            raise HiveProviderError("incomplete Hive SSE stream")
+                            raise OpenRouterProviderError(
+                                "incomplete OpenRouter SSE stream"
+                            )
                 self.last_telemetry = {
                     "model_id": self._model(model),
                     "run_id": run_id,
@@ -524,6 +573,10 @@ class HiveService(LLMServiceInterface):
                             "attempts": attempt,
                             "phase": "transport",
                             "message": type(exc).__name__,
+                            "provider": self.provider_name,
+                            "reason": failure_reason(
+                                timeout=self.last_telemetry["timeout"]
+                            ),
                             "model_id": self.last_telemetry["model_id"],
                             "duration_ms": latency_ms,
                             "timeout": self.last_telemetry["timeout"],
@@ -532,8 +585,8 @@ class HiveService(LLMServiceInterface):
                         },
                     }
                     self._circuit.record_failure()
-                    raise HiveProviderError(
-                        f"Hive transport failed after the response had started: "
+                    raise OpenRouterProviderError(
+                        f"OpenRouter transport failed after the response had started: "
                         f"{type(exc).__name__}"
                     ) from exc
                 if retries < self.retry_policy.max_retries:
@@ -545,6 +598,10 @@ class HiveService(LLMServiceInterface):
                                 "attempts": attempt,
                                 "phase": "transport",
                                 "message": type(exc).__name__,
+                                "provider": self.provider_name,
+                                "reason": failure_reason(
+                                    timeout=self.last_telemetry["timeout"]
+                                ),
                                 "model_id": self.last_telemetry["model_id"],
                                 "duration_ms": latency_ms,
                                 "timeout": self.last_telemetry["timeout"],
@@ -553,8 +610,8 @@ class HiveService(LLMServiceInterface):
                             },
                         }
                         self._circuit.record_failure()
-                        raise HiveProviderError(
-                            f"Hive transport failure: {type(exc).__name__}"
+                        raise OpenRouterProviderError(
+                            f"OpenRouter transport failure: {type(exc).__name__}"
                         ) from exc
                     retries += 1
                     yield {
@@ -573,6 +630,10 @@ class HiveService(LLMServiceInterface):
                         "attempts": attempt,
                         "phase": "transport",
                         "message": type(exc).__name__,
+                        "provider": self.provider_name,
+                        "reason": failure_reason(
+                            timeout=self.last_telemetry["timeout"]
+                        ),
                         "model_id": self.last_telemetry["model_id"],
                         "duration_ms": latency_ms,
                         "timeout": self.last_telemetry["timeout"],
@@ -581,8 +642,10 @@ class HiveService(LLMServiceInterface):
                     },
                 }
                 self._circuit.record_failure()
-                raise HiveProviderError(f"Hive transport failure: {exc}") from exc
-            except HiveProviderError as exc:
+                raise OpenRouterProviderError(
+                    f"OpenRouter transport failure: {exc}"
+                ) from exc
+            except OpenRouterProviderError as exc:
                 latency_ms = round((time.perf_counter() - started) * 1000, 2)
                 self.last_telemetry = {
                     "model_id": self._model(model),
@@ -674,7 +737,7 @@ class HiveService(LLMServiceInterface):
         )
 
     async def check_health(self) -> bool:
-        # Hive documents chat completions, not a health endpoint. Avoid spending a
+        # OpenRouter documents chat completions, not a health endpoint. Avoid spending a
         # paid completion just to answer a health probe.
         return bool(self.api_key)
 
@@ -682,7 +745,7 @@ class HiveService(LLMServiceInterface):
 def _retry_delay(
     retry_index: int,
     retry_after: str | None,
-    policy: HiveRetryPolicy,
+    policy: OpenRouterRetryPolicy,
 ) -> float:
     server_delay = _retry_after_seconds(retry_after)
     if server_delay is not None:

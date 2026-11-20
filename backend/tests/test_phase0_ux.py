@@ -227,7 +227,7 @@ def test_one_shot_clarification_exits_2(capsys: pytest.CaptureFixture[str]) -> N
     repl = SimpleNamespace(
         typed_stream=typed_stream,
         session_id="sess123",
-        hive_service=SimpleNamespace(aclose=aclose),
+        llm_service=SimpleNamespace(aclose=aclose),
     )
     code = asyncio.run(cli.run_one_shot(repl, "q", as_json=False))  # type: ignore[arg-type]
     out = capsys.readouterr().out

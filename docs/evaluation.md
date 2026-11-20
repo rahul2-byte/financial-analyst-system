@@ -48,7 +48,7 @@ Retrieval metrics are zero/unavailable in this fixture because it has no real re
 
 ## Recorded live operational evidence
 
-The recorded 21 September 2026 run used Hive `zai-org/glm-5.3-flash`, three workers, and 150 attempted cases:
+The recorded 21 September 2026 run used a previous provider and model (recorded before the OpenRouter-only migration), three workers, and 150 attempted cases:
 
 | Measure | Reported result |
 | --- | ---: |
@@ -112,18 +112,18 @@ LLM-judge semantic scoring is not done here. Grounding checks numbers only, not 
 
 ## Semantic judge
 
-The supported semantic evaluator is the independently configured ChatGPT Codex model (`gpt-6-luna`). It is separate from the agent provider and has no Hive fallback. Missing credentials, malformed output, incomplete cases, or failed judgments are unavailable rather than passing.
+The supported semantic evaluator is the independently configured OpenRouter model (`--model`, default `OPENROUTER_MODEL`). It uses no fallback models. A missing `OPENROUTER_API_KEY`, malformed output, incomplete cases, or failed judgments are unavailable rather than passing.
 
 ```bash
 PYTHONPATH=backend:. UV_CACHE_DIR=.uv-cache \
-  uv run python -m evals.judge preflight --model gpt-6-luna
+  uv run python -m evals.judge preflight --model openai/gpt-5.6-luna
 
 PYTHONPATH=backend:. UV_CACHE_DIR=.uv-cache \
   uv run python -m evals.judge evaluate \
   --cases evals/gold/v1/tasks.jsonl \
   --artifacts-dir .finai/evals/artifacts \
   --output .finai/evals/judge-v1.jsonl \
-  --model gpt-6-luna --prompt-version judge-v1
+  --model openai/gpt-5.6-luna --prompt-version judge-v1
 ```
 
 A run is eligible for benchmark reporting only when the summary reports `quality_gate: passed` for every case. This does not create independent ground truth.

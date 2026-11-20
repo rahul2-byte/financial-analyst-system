@@ -15,10 +15,9 @@ The repository does not contain a training pipeline for an LLM, embeddings, a ve
 | Role | Implementation | Default | Failure behavior |
 | --- | --- | --- | --- |
 | Typed route decision | `JevService` | `~typesafe/jev-latest` through OpenRouter | Deterministic/baseline route on missing key, low confidence, invalid response, or failure |
-| Main generation | `HiveService` | `zai-org/glm-5.3-flash` through Hive | Bounded retry, circuit breaker, partial-output handling, or terminal failure |
-| Optional primary generation | `ChatGPTCodexService` | `gpt-5.6-luna`; escalation `gpt-6-luna` | Local OAuth credential refresh and fallback to Hive before streaming |
+| Main generation | `OpenRouterService` | `openai/gpt-5.6-luna` with OpenRouter-side fallbacks (`OPENROUTER_FALLBACK_MODELS`) | Bounded retry, circuit breaker, partial-output handling, or terminal failure |
 
-The provider stream is OpenAI-compatible SSE for Hive. Tool-call fragments are merged before they reach the loop. Completed provider events are archived when a `ProviderArchive` is configured.
+The provider stream is OpenAI-compatible SSE for OpenRouter. Tool-call fragments are merged before they reach the loop. Completed provider events are archived when a `ProviderArchive` is configured.
 
 ## Orchestration
 

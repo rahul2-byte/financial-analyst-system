@@ -13,10 +13,9 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import TypeVar
 
-from app.config import settings
+from app.core.resources import MissingOpenRouterKeyError
 from app.events.models import ResearchEvent
 from app.observability.tracing import initialize_tracing
-from app.services.chatgpt_codex_service import ChatGPTCodexService, CodexCredentialStore
 
 from .app import FinAIApp
 from .plain import render_event
@@ -77,14 +76,6 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     )
     parser.add_argument(
         "--mode", choices=("guided", "review", "autonomous"), default="guided"
-    )
-    parser.add_argument(
-        "--chatgpt-login", action="store_true", help="Log in with ChatGPT in a browser"
-    )
-    parser.add_argument(
-        "--chatgpt-logout",
-        action="store_true",
-        help="Remove the local ChatGPT credential",
     )
     parser.add_argument("query", nargs="*", help="One-shot research query")
     return parser.parse_args(argv)
@@ -203,7 +194,7 @@ async def run_one_shot(repl: FinAIRepl, query: str, *, as_json: bool) -> int:
             sys.stdout.write("\n")
         return exit_code_for(events)
     finally:
-        await repl.hive_service.aclose()
+        await repl.llm_service.aclose()
 
 
 async def run_plain_terminal(repl: FinAIRepl) -> None:
@@ -211,7 +202,7 @@ async def run_plain_terminal(repl: FinAIRepl) -> None:
     try:
         await repl.run()
     finally:
-        await repl.hive_service.aclose()
+        await repl.llm_service.aclose()
 
 
 def build_app(repl: FinAIRepl) -> FinAIApp:
@@ -250,34 +241,12 @@ async def run_interactive(repl: FinAIRepl) -> None:
     try:
         await app.run_async()
     finally:
-        await repl.hive_service.aclose()
+        await repl.llm_service.aclose()
 
 
 def main() -> None:
     args = parse_arguments()
     try:
-        if args.chatgpt_login or args.chatgpt_logout:
-            service = ChatGPTCodexService(
-                credential_store=CodexCredentialStore(
-                    Path(settings.FINAI_CHATGPT_CODEX_CREDENTIAL_PATH).expanduser()
-                ),
-                client_id=settings.FINAI_CHATGPT_CODEX_CLIENT_ID,
-                issuer=settings.FINAI_CHATGPT_CODEX_ISSUER,
-                endpoint=settings.FINAI_CHATGPT_CODEX_API_ENDPOINT,
-                timeout_seconds=settings.FINAI_CHATGPT_CODEX_TIMEOUT_SECONDS,
-            )
-            if args.chatgpt_logout:
-                service.credential_store.delete()
-                print("ChatGPT credential removed.")
-            else:
-                asyncio.run(
-                    service.login(
-                        settings.FINAI_CHATGPT_CODEX_REDIRECT_HOST,
-                        settings.FINAI_CHATGPT_CODEX_REDIRECT_PORT,
-                    )
-                )
-                print("ChatGPT login complete.")
-            return
         # Keep stdout clean for --json/--plain: tracing diagnostics go to stderr.
         tracing = quiet_stdout(initialize_tracing)
         if args.debug_payloads:
@@ -312,5 +281,8 @@ def main() -> None:
         else:
             asyncio.run(run_plain_terminal(repl))
         tracing.shutdown()
+    except MissingOpenRouterKeyError as exc:
+        print(str(exc), file=sys.stderr)
+        sys.exit(EXIT_FAILED)
     except KeyboardInterrupt:
         sys.exit(130)
