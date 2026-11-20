@@ -15,6 +15,7 @@
 .sources-message { margin: 1 0; padding: 1 1; border-left: solid $fin-success; background: $fin-source-surface; }
 .error { border-left: thick $fin-error; color: $fin-error; padding: 1 1; background: $fin-error-surface; }
 
-ApprovalScreen, SessionScreen { align: center middle; background: $fin-background 80%; }
+ApprovalScreen, SessionScreen, HelpScreen { align: center middle; background: $fin-background 80%; }
 #approval-modal { width: 70; max-width: 90%; padding: 2 3; border: round $fin-accent; background: $fin-surface-raised; }
+#help-modal { width: 80; max-width: 95%; padding: 2 3; border: round $fin-accent; background: $fin-surface-raised; }
 #session-modal { width: 90; max-width: 95%; padding: 2 3; border: round $fin-accent; background: $fin-surface-raised; }

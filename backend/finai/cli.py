@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from pathlib import Path
+from typing import TypeVar
 
 from app.config import settings
 from app.observability.tracing import initialize_tracing
@@ -18,6 +20,14 @@ from app.services.chatgpt_codex_service import ChatGPTCodexService, CodexCredent
 from .app import FinAIApp
 from .plain import render_json, render_plain
 from .session import FinAIRepl
+
+_T = TypeVar("_T")
+
+
+def quiet_stdout(call: Callable[[], _T]) -> _T:
+    """Run a call whose console output must not reach machine-readable stdout."""
+    with contextlib.redirect_stdout(sys.stderr):
+        return call()
 
 
 def _validate_cli_paths(data_dir: Path, replay_path: Path | None) -> None:
@@ -73,12 +83,21 @@ def parse_arguments(argv: Sequence[str] | None = None) -> argparse.Namespace:
     return parser.parse_args(argv)
 
 
-async def run_one_shot(repl: FinAIRepl, query: str, *, as_json: bool) -> None:
-    """Stream one query and render it without starting the TUI."""
+async def run_one_shot(repl: FinAIRepl, query: str, *, as_json: bool) -> int:
+    """Stream one query and render it without starting the TUI.
+
+    Returns the process exit code: 2 when the run ends asking for clarification.
+    """
     try:
         events = [event async for event in repl.typed_stream(query)]
-        output = render_json(events) if as_json else render_plain(events)
+        clarification = any(event.type == "clarification.requested" for event in events)
+        output = (
+            render_json(events) if as_json else render_plain(events, repl.session_id)
+        )
         sys.stdout.write(output)
+        if clarification and as_json:
+            sys.stderr.write(f"Needs clarification; session {repl.session_id}\n")
+        return 2 if clarification else 0
     finally:
         await repl.hive_service.aclose()
 
@@ -91,8 +110,8 @@ async def run_plain_terminal(repl: FinAIRepl) -> None:
         await repl.hive_service.aclose()
 
 
-async def run_interactive(repl: FinAIRepl) -> None:
-    """Start the Textual shell and connect it to the session stream."""
+def build_app(repl: FinAIRepl) -> FinAIApp:
+    """Create the Textual shell wired to the REPL's current session."""
     app = FinAIApp(
         session_store=repl.store,
         compact_callback=repl.compact_context,
@@ -109,7 +128,8 @@ async def run_interactive(repl: FinAIRepl) -> None:
 
     app.session_callback = resume_session
     app.new_session_callback = new_session
-    app.clear_pending_callback = repl.store.clear_pending
+    # Late-bound: /new and resume replace repl.store.
+    app.clear_pending_callback = lambda: repl.store.clear_pending()
 
     async def stream(query: str):
         repl.mode = app.mode
@@ -117,6 +137,12 @@ async def run_interactive(repl: FinAIRepl) -> None:
             yield event
 
     app.event_stream = stream
+    return app
+
+
+async def run_interactive(repl: FinAIRepl) -> None:
+    """Start the Textual shell and connect it to the session stream."""
+    app = build_app(repl)
     try:
         await app.run_async()
     finally:
@@ -148,7 +174,8 @@ def main() -> None:
                 )
                 print("ChatGPT login complete.")
             return
-        tracing = initialize_tracing()
+        # Keep stdout clean for --json/--plain: tracing diagnostics go to stderr.
+        tracing = quiet_stdout(initialize_tracing)
         if args.debug_payloads:
             os.environ["FINAI_DIAGNOSTICS"] = "payloads"
         elif args.debug:
@@ -171,9 +198,11 @@ def main() -> None:
         repl = FinAIRepl(args.data_dir, args.session, replay_snapshots)
         repl.mode = args.mode
         if args.query:
-            asyncio.run(run_one_shot(repl, " ".join(args.query), as_json=args.json))
-            tracing.shutdown()
-            return
+            code = asyncio.run(
+                run_one_shot(repl, " ".join(args.query), as_json=args.json)
+            )
+            quiet_stdout(tracing.shutdown)
+            sys.exit(code)
         if sys.stdin.isatty() and sys.stdout.isatty():
             asyncio.run(run_interactive(repl))
         else:

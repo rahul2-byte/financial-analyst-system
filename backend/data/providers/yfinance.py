@@ -17,6 +17,7 @@ Usage:
 
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import quote
 
 import numpy as np
 import pandas as pd
@@ -325,7 +326,7 @@ class YFinanceFetcher(IDataFetcher):
                     "adjusted_close_available" if has_adjusted_close else "unadjusted"
                 ),
                 "as_of": observed_at.isoformat(),
-                "source_url": f"https://finance.yahoo.com/quote/{formatted_ticker}/history/",
+                "source_url": f"https://finance.yahoo.com/quote/{quote(formatted_ticker, safe='^=.-')}/history/",
             },
             "quality_issues": [
                 issue.model_dump(mode="json") for issue in quality_issues

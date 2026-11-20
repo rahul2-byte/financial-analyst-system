@@ -936,6 +936,7 @@ class AgentLoop:
                     tool_calls_seen += 1
                     if tool_calls_seen > self.config.emergency_max_tool_calls:
                         stop_reason = "emergency tool-call safety ceiling reached"
+                        _append_skipped_tool_results(history, assistant, message_writer)
                         break
                     try:
                         name, call_id, arguments = _tool_call_parts(call)
@@ -1023,6 +1024,7 @@ class AgentLoop:
                             )
                             continue
                         tools_disabled = True
+                        _append_skipped_tool_results(history, assistant, message_writer)
                         history.append(
                             Message(
                                 role="system",
@@ -1564,8 +1566,58 @@ def _compact_model_history(messages: list[Message], max_tokens: int) -> list[Mes
         )
         if removable is None:
             break
-        compacted.pop(removable)
+        owner = next(
+            (
+                index
+                for index in range(removable - 1, -1, -1)
+                if compacted[index].role == "assistant"
+                and compacted[index].tool_calls
+                and compacted[removable].tool_call_id
+                in {
+                    _tool_call_identity(call)[1]
+                    for call in compacted[index].tool_calls or []
+                }
+            ),
+            None,
+        )
+        if owner is None:
+            compacted.pop(removable)
+            continue
+        # Drop the assistant tool-call message together with all its results so
+        # providers never see orphaned tool_calls or tool messages.
+        call_ids = {
+            _tool_call_identity(call)[1] for call in compacted[owner].tool_calls or []
+        }
+        compacted = [
+            message
+            for index, message in enumerate(compacted)
+            if index != owner
+            and not (message.role == "tool" and message.tool_call_id in call_ids)
+        ]
     return compacted
+
+
+def _append_skipped_tool_results(
+    history: list[Message],
+    assistant: Message,
+    message_writer: Any = None,
+) -> None:
+    """Answer every assistant tool call that will not be executed."""
+    answered = {message.tool_call_id for message in history if message.role == "tool"}
+    for call in assistant.tool_calls or []:
+        _, call_id = _tool_call_identity(call)
+        if call_id in answered:
+            continue
+        history.append(
+            Message(
+                role="tool",
+                content=json.dumps({"success": False, "error": "tool call skipped"}),
+                tool_call_id=call_id,
+            )
+        )
+        answered.add(call_id)
+        if message_writer:
+            message_writer(history[-1])
 
 
 def _estimate_message_tokens(messages: list[Message]) -> int:

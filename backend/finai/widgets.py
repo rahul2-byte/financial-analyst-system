@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from rich.text import Text
 from textual.containers import Vertical
 from textual.message import Message as TextualMessage
 from textual.widgets import Button, Static, TextArea
@@ -36,12 +37,19 @@ class NavigationRail(Vertical):
         yield Button("Sessions", id="nav-sessions", classes="nav-item")
         yield Button("Trace", id="nav-trace", classes="nav-item")
         yield Button("Reports", id="nav-reports", classes="nav-item")
-        yield Button("Watchlist", id="nav-watchlist", classes="nav-item")
-        yield Button("Settings", id="nav-settings", classes="nav-item")
-        yield Static(
-            "\nRECENT SESSIONS\n\n● HDFC Bank Analysis\n  Just now\n\n● Reliance Industries\n  2 hours ago\n\n● TCS Q4 Results\n  5 hours ago",
-            classes="recent-sessions",
-        )
+        yield Static("", id="recent-sessions", classes="recent-sessions")
+
+    def show_sessions(
+        self, sessions: list[dict[str, str]], active: str | None = None
+    ) -> None:
+        text = Text("RECENT SESSIONS\n", style="bold")
+        if not sessions:
+            text.append("\nNo saved sessions yet", style="dim")
+        for session in sessions[:5]:
+            marker = "●" if session["id"] == active else "○"
+            text.append(f"\n{marker} {session['title'][:26]}\n")
+            text.append(f"  {session['id'][:8]}\n", style="dim")
+        self.query_one("#recent-sessions", Static).update(text)
 
 
 class ContextRail(Static):
@@ -63,6 +71,10 @@ class Composer(TextArea):
             action = getattr(self.app, "action_quit_app", None)
             if action is not None:
                 action()
+        elif event.key == "ctrl+k":
+            # TextArea binds ctrl+k to delete-to-line-end; the app owns it.
+            event.stop()
+            self.app.call_later(self.app.run_action, "sessions")
         elif event.key == "enter":
             event.stop()
             self.post_message(self.Submitted(self, self.text))

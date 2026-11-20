@@ -125,3 +125,40 @@ class SessionScreen(ModalScreen[str | None]):
 
     def action_cancel(self) -> None:
         self.dismiss(None)
+
+
+class HelpScreen(ModalScreen[None]):
+    """Command and key-binding reference."""
+
+    BINDINGS: ClassVar[list[tuple[str, str] | tuple[str, str, str]]] = [  # type: ignore[assignment]
+        ("escape", "close", "Close"),
+        ("f1", "close", "Close"),
+        ("question_mark", "close", "Close"),
+        ("enter", "close", "Close"),
+    ]
+
+    def __init__(
+        self, commands: str, bindings: list[tuple[str, str] | tuple[str, str, str]]
+    ) -> None:
+        super().__init__()
+        self._commands = commands
+        self._key_rows = bindings
+
+    def compose(self) -> ComposeResult:
+        keys = "\n".join(
+            f"{binding[0]:<14} {binding[2]}"
+            for binding in self._key_rows
+            if len(binding) == 3 and binding[0] != "question_mark"
+        )
+        body = (
+            "Help\n\nCommands\n"
+            + escape(self._commands)
+            + "\n\nKeys\n"
+            + escape(keys)
+            + "\n?             Help (outside the input box)"
+            + "\n\nEsc close"
+        )
+        yield Static(body, id="help-modal")
+
+    def action_close(self) -> None:
+        self.dismiss(None)

@@ -4,13 +4,34 @@ from __future__ import annotations
 
 import json
 from collections.abc import Iterable
+from urllib.parse import urlparse
 
 from app.events.models import ResearchEvent
 
 from .safety import sanitize_terminal_text
 
 
-def render_event(event: ResearchEvent) -> str:
+def render_sources_plain(sources: list[dict[str, str]]) -> str:
+    lines = [f"\nSources · {len(sources)}"]
+    for index, source in enumerate(sources, 1):
+        url = source.get("url", "")
+        title = source.get("title") or source.get("source") or "Untitled source"
+        publisher = (
+            source.get("publisher")
+            or source.get("source")
+            or urlparse(url).netloc
+            or source.get("source_type", "")
+        )
+        lines.append(
+            f"[{index}] {sanitize_terminal_text(title)}"
+            + (f" — {sanitize_terminal_text(publisher)}" if publisher else "")
+        )
+        if url:
+            lines.append(f"    {sanitize_terminal_text(url)}")
+    return "\n".join(lines) + "\n"
+
+
+def render_event(event: ResearchEvent, session_id: str | None = None) -> str:
     if event.type == "run.started":
         return f"\nYou\n{sanitize_terminal_text(event.query)}\n\nFIN-AI\n"
     if event.type == "stage.started":
@@ -25,11 +46,19 @@ def render_event(event: ResearchEvent) -> str:
     if event.type == "response.delta":
         return sanitize_terminal_text(event.text)
     if event.type == "sources.updated":
-        return f"\nSources · {len(event.sources)}\n"
+        return render_sources_plain(event.sources)
     if event.type == "approval.requested":
         return f"\n? Approval required\n{sanitize_terminal_text(event.prompt)}\n"
     if event.type == "clarification.requested":
-        return f"\nFIN-AI needs clarification\n{sanitize_terminal_text(event.prompt)}\n"
+        session = (
+            f'Session: {session_id}\nReply with: --session {session_id} "<your answer>"\n'
+            if session_id
+            else ""
+        )
+        return (
+            "\nFIN-AI needs clarification\n"
+            f"{sanitize_terminal_text(event.prompt)}\n{session}"
+        )
     if event.type == "run.failed":
         return f"\n✗ {sanitize_terminal_text(event.category)}: {sanitize_terminal_text(event.message)}\n"
     if event.type == "run.cancelled":
@@ -52,8 +81,8 @@ def render_event(event: ResearchEvent) -> str:
     return ""
 
 
-def render_plain(events: Iterable[ResearchEvent]) -> str:
-    return "".join(render_event(event) for event in events)
+def render_plain(events: Iterable[ResearchEvent], session_id: str | None = None) -> str:
+    return "".join(render_event(event, session_id) for event in events)
 
 
 def render_json(events: Iterable[ResearchEvent]) -> str:

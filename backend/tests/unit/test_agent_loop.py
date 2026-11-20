@@ -204,11 +204,11 @@ def test_report_mode_publishes_only_after_structured_evidence_validation() -> No
     }
     report = (
         '{"executive_summary":"Verified.","key_drivers":["Demand."],'
-        '"detailed_analysis":"Close [[fact:prices:data.latest.close]].",'
+        '"detailed_analysis":"Close [[fact:prices:ABC.NS:data.latest.close]].",'
         '"risks":["Execution."],"final_view":"Review.","claims":['
-        '{"claim_id":"c1","text":"Close [[fact:prices:data.latest.close]].",'
+        '{"claim_id":"c1","text":"Close [[fact:prices:ABC.NS:data.latest.close]].",'
         '"importance":"major","evidence_refs":["src"],'
-        '"numeric_refs":["prices:data.latest.close"]}],'
+        '"numeric_refs":["prices:ABC.NS:data.latest.close"]}],'
         '"citations":[{"citation_id":"src","source_id":"prices"}]}'
     )
     model = FakeModel(
@@ -893,11 +893,11 @@ def test_report_mode_synthesizes_available_evidence_after_optional_tool_failure(
     report = (
         '{"executive_summary":"Available price evidence only.",'
         '"key_drivers":["Price history is available."],'
-        '"detailed_analysis":"Close [[fact:prices:data.latest.close]].",'
+        '"detailed_analysis":"Close [[fact:prices:ABC.NS:data.latest.close]].",'
         '"risks":["News was unavailable."],"final_view":"Review with caution.",'
-        '"claims":[{"claim_id":"c1","text":"Close [[fact:prices:data.latest.close]].",'
+        '"claims":[{"claim_id":"c1","text":"Close [[fact:prices:ABC.NS:data.latest.close]].",'
         '"importance":"major","evidence_refs":["src"],'
-        '"numeric_refs":["prices:data.latest.close"]}],'
+        '"numeric_refs":["prices:ABC.NS:data.latest.close"]}],'
         '"citations":[{"citation_id":"src","source_id":"prices"}]}'
     )
     model = FakeModel(
@@ -1202,11 +1202,11 @@ def test_report_mode_repairs_a_plain_text_draft_once() -> None:
     }
     repaired_report = (
         '{"executive_summary":"Verified.","key_drivers":["Demand."],'
-        '"detailed_analysis":"Close [[fact:prices:data.latest.close]].",'
+        '"detailed_analysis":"Close [[fact:prices:ABC.NS:data.latest.close]].",'
         '"risks":["Execution."],"final_view":"Review.","claims":['
-        '{"claim_id":"c1","text":"Close [[fact:prices:data.latest.close]].",'
+        '{"claim_id":"c1","text":"Close [[fact:prices:ABC.NS:data.latest.close]].",'
         '"importance":"major","evidence_refs":["src"],'
-        '"numeric_refs":["prices:data.latest.close"]}],'
+        '"numeric_refs":["prices:ABC.NS:data.latest.close"]}],'
         '"citations":[{"citation_id":"src","source_id":"prices"}]}'
     )
     model = FakeModel(
@@ -1251,11 +1251,11 @@ def test_report_mode_repairs_publication_validation_once() -> None:
     }
     base = (
         '{"executive_summary":"Verified.","key_drivers":["Demand."],'
-        '"detailed_analysis":"Close [[fact:prices:data.latest.close]].",'
+        '"detailed_analysis":"Close [[fact:prices:ABC.NS:data.latest.close]].",'
         '"risks":["Execution."],"final_view":"Review.","claims":['
-        '{"claim_id":"c1","text":"Close [[fact:prices:data.latest.close]].",'
+        '{"claim_id":"c1","text":"Close [[fact:prices:ABC.NS:data.latest.close]].",'
         '"importance":"major","evidence_refs":["src"],'
-        '"numeric_refs":["prices:data.latest.close"]}],'
+        '"numeric_refs":["prices:ABC.NS:data.latest.close"]}],'
     )
     invalid = base + '"citations":[{"citation_id":"src","source_id":"missing"}]}'
     valid = base + '"citations":[{"citation_id":"src","source_id":"prices"}]}'
@@ -1347,14 +1347,14 @@ def test_successful_report_retains_validated_structured_artifact() -> None:
         "function": {"name": "data:fetch_stock_data", "arguments": '{"ticker":"ABC"}'},
     }
     report = (
-        '{"executive_summary":"Close [[fact:prices:data.latest.close]].",'
+        '{"executive_summary":"Close [[fact:prices:ABC.NS:data.latest.close]].",'
         '"key_drivers":["Price evidence returned."],'
-        '"detailed_analysis":"Close [[fact:prices:data.latest.close]].",'
+        '"detailed_analysis":"Close [[fact:prices:ABC.NS:data.latest.close]].",'
         '"risks":["Coverage is limited."],"final_view":"Review.",'
         '"claims":[{"claim_id":"c1",'
-        '"text":"Close [[fact:prices:data.latest.close]].",'
+        '"text":"Close [[fact:prices:ABC.NS:data.latest.close]].",'
         '"importance":"major","evidence_refs":["src"],'
-        '"numeric_refs":["prices:data.latest.close"]}],'
+        '"numeric_refs":["prices:ABC.NS:data.latest.close"]}],'
         '"citations":[{"citation_id":"src","source_id":"prices"}]}'
     )
     model = FakeModel(
@@ -1411,11 +1411,11 @@ def test_lookup_contract_repairs_and_publishes_only_validated_json() -> None:
     }
     valid = (
         '{"outcome":"answered","answer":"Close '
-        '[[fact:prices:data.latest.close]].",'
+        '[[fact:prices:ABC.NS:data.latest.close]].",'
         '"claims":[{"claim_id":"close",'
-        '"text":"Close [[fact:prices:data.latest.close]].",'
+        '"text":"Close [[fact:prices:ABC.NS:data.latest.close]].",'
         '"importance":"major","evidence_refs":["src"],'
-        '"numeric_refs":["prices:data.latest.close"]}],'
+        '"numeric_refs":["prices:ABC.NS:data.latest.close"]}],'
         '"citations":[{"citation_id":"src","source_id":"prices"}],'
         '"limitations":[]}'
     )

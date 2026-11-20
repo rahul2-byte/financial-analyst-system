@@ -7,7 +7,19 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict
 
-_SECRET_KEYS = {"api_key", "token", "authorization", "password", "secret"}
+# One pattern-based redactor shared by logging, feedback and tracing. Keys match
+# by substring so access_token, x-api-key and HIVE_API_KEY are all covered;
+# plural ``tokens`` (usage counters) is deliberately not a secret.
+_SECRET_KEY = re.compile(
+    r"(?i)(api[-_]?key|apikey|authorization|cookie|passw(?:or)?d|passphrase|secret|"
+    r"credential|private[-_]?key|session[-_]?id|token(?!s\b))"
+)
+_BEARER_VALUE = re.compile(r"(?i)\bBearer\s+[^\s,;}\"']+")
+_KEYED_VALUE = re.compile(
+    r"(?i)((?:api[-_]?key|apikey|token|secret|passw(?:or)?d)[\w-]*\s*[:=]\s*)"
+    r"[^\s,;}\"']+"
+)
+_PROVIDER_KEY = re.compile(r"\bsk-[A-Za-z0-9_-]{8,}")
 
 
 class Permission(BaseModel):
@@ -36,19 +48,17 @@ def license_is_valid(license: DataLicense, now: datetime | None = None) -> bool:
 
 
 def redact_secrets(value: Any) -> Any:
-    """Return a log-safe copy of mappings and sequences."""
+    """Return a log-safe copy of mappings, sequences and strings."""
     if isinstance(value, Mapping):
         redacted: dict[str, Any] = {}
         for key, item in value.items():
             key_text = str(key)
-            if (
-                key_text.lower() in _SECRET_KEYS
-                and isinstance(item, str)
-                and item.lower().startswith("bearer ")
-            ):
-                redacted[key_text] = "Bearer [REDACTED]"
-            elif key_text.lower() in _SECRET_KEYS:
-                redacted[key_text] = "[REDACTED]"
+            if _SECRET_KEY.search(key_text):
+                redacted[key_text] = (
+                    "Bearer [REDACTED]"
+                    if isinstance(item, str) and item.lower().startswith("bearer ")
+                    else "[REDACTED]"
+                )
             else:
                 redacted[key_text] = redact_secrets(item)
         return redacted
@@ -57,5 +67,7 @@ def redact_secrets(value: Any) -> Any:
     if isinstance(value, tuple):
         return tuple(redact_secrets(item) for item in value)
     if isinstance(value, str):
-        return re.sub(r"Bearer\s+\S+", "Bearer [REDACTED]", value, flags=re.IGNORECASE)
+        text = _BEARER_VALUE.sub("Bearer [REDACTED]", value)
+        text = _KEYED_VALUE.sub(r"\1[REDACTED]", text)
+        return _PROVIDER_KEY.sub("[REDACTED]", text)
     return value

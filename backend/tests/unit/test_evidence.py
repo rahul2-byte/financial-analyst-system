@@ -21,10 +21,10 @@ def test_verified_iso_candle_timestamp_is_available_as_a_fact() -> None:
 
     facts = extract_evidence_facts(payload)
 
-    timestamp = facts["upstox_historical_candle:data.0.timestamp"]
+    timestamp = facts["upstox_historical_candle:NSE_EQ_TEST:data.0.timestamp"]
     assert timestamp.value == "2026-09-22T00:00:00+05:30"
     assert timestamp.unit == "provider_timestamp"
-    assert facts["upstox_historical_candle:data.0.close"].value == 93.0
+    assert facts["upstox_historical_candle:NSE_EQ_TEST:data.0.close"].value == 93.0
 
 
 def test_evidence_facts_reject_untyped_arbitrary_text() -> None:

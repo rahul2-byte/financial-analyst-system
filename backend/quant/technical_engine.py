@@ -25,6 +25,8 @@ def _last(series: pd.Series | np.ndarray | None) -> float | None:
     value = series.iloc[-1] if isinstance(series, pd.Series) else series[-1]
     return float(value) if np.isfinite(value) else None
 
+_MAX_BAD_ROW_FRACTION = 0.02
+
 
 def _measurement(
     name: str, category: str, value: float | None, rows: int
@@ -59,7 +61,7 @@ class TechnicalEngine:
         interval: str = "1d",
         provenance: dict[str, Any] | None = None,
     ) -> TechnicalSnapshot:
-        data = self._validate(frame)
+        data, dropped_rows = self._validate(frame)
         as_of = data.index[-1].to_pydatetime().astimezone(UTC)
         measurements: list[IndicatorMeasurement] = []
         close = data["close"].to_numpy(dtype=float)
@@ -107,9 +109,17 @@ class TechnicalEngine:
                 ),
             ]
         )
-        macd, signal, _ = talib.MACD(close, 12, 26, 9)
-        measurements.append(
-            _measurement("MACD_12_26_9", "momentum", _last(macd - signal), len(data))
+        macd, signal, hist = talib.MACD(close, 12, 26, 9)
+        measurements.extend(
+            [
+                # The MACD line is the primary value; signal and histogram are
+                # separately labelled outputs.
+                _measurement("MACD_12_26_9", "momentum", _last(macd), len(data)),
+                _measurement(
+                    "MACD_SIGNAL_12_26_9", "momentum", _last(signal), len(data)
+                ),
+                _measurement("MACD_HIST_12_26_9", "momentum", _last(hist), len(data)),
+            ]
         )
         bb_upper, _, bb_lower = talib.BBANDS(close, 20, 2, 2)
         measurements.extend(
@@ -174,13 +184,14 @@ class TechnicalEngine:
                 as_of=as_of,
             ),
             metadata={
+                "dropped_rows": dropped_rows,
                 "registry_size": len(CORE_REGISTRY),
                 "config_hash": sha256(repr(CORE_REGISTRY).encode()).hexdigest(),
             },
         )
 
     @staticmethod
-    def _validate(frame: pd.DataFrame) -> pd.DataFrame:
+    def _validate(frame: pd.DataFrame) -> tuple[pd.DataFrame, int]:
         required = ("open", "high", "low", "close", "volume")
         columns = {str(column).lower(): column for column in frame.columns}
         missing = [column for column in required if column not in columns]
@@ -201,12 +212,26 @@ class TechnicalEngine:
         )
         data.index = pd.to_datetime(timestamps, utc=True)
         data = data.sort_index()
-        if data.empty or not np.isfinite(data.to_numpy(dtype=float)).all():
+        total_rows = len(data)
+        if total_rows == 0:
             raise ValueError("OHLCV data must be non-empty and finite")
-        if (data[["open", "high", "low", "close"]] <= 0).any().any():
-            raise ValueError("OHLC prices must be positive")
-        if (data["high"] < data[["open", "close"]].max(axis=1)).any() or (
-            data["low"] > data[["open", "close"]].min(axis=1)
-        ).any():
-            raise ValueError("OHLC relationships are invalid")
-        return data
+        values = data.to_numpy(dtype=float)
+        finite = np.isfinite(values).all(axis=1)
+        # Comparisons below are only meaningful for finite rows.
+        safe = data.where(pd.Series(finite, index=data.index), 1.0)
+        ohlc = safe[["open", "high", "low", "close"]]
+        positive = (ohlc > 0).all(axis=1).to_numpy()
+        body_max = safe[["open", "close"]].max(axis=1)
+        body_min = safe[["open", "close"]].min(axis=1)
+        consistent = ((safe["high"] >= body_max) & (safe["low"] <= body_min)).to_numpy()
+        good = finite & positive & consistent
+        dropped = int((~good).sum())
+        if dropped / total_rows > _MAX_BAD_ROW_FRACTION:
+            raise ValueError(
+                f"too many invalid OHLCV rows: {dropped} of {total_rows} "
+                f"(limit {_MAX_BAD_ROW_FRACTION:.0%})"
+            )
+        data = data.loc[good]
+        if data.empty:
+            raise ValueError("OHLCV data must be non-empty and finite")
+        return data, dropped

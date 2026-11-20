@@ -40,8 +40,9 @@ def test_engine_uses_talib_values_and_typed_snapshot() -> None:
 
 def test_engine_rejects_invalid_ohlc() -> None:
     frame = bars()
-    frame.loc[frame.index[-1], "high"] = frame.loc[frame.index[-1], "close"] - 1
-    with pytest.raises(ValueError, match="OHLC relationships"):
+    half = len(frame) // 2
+    frame.loc[frame.index[:half], "high"] = frame.loc[frame.index[:half], "close"] - 1
+    with pytest.raises(ValueError, match="too many invalid"):
         TechnicalEngine().analyze(frame, ticker="ABC")
 
 

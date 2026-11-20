@@ -25,6 +25,10 @@ _PROVENANCE_REQUIRED_TOOLS = {
 }
 
 
+class EvidenceCollisionError(ValueError):
+    """Two different observations produced the same fact ID."""
+
+
 class EvidenceAccounting:
     """Track only validated evidence that may support publication."""
 
@@ -40,7 +44,24 @@ class EvidenceAccounting:
         if name not in _EVIDENCE_TOOLS:
             return
         self.successful_evidence_tools += 1
-        extracted = extract_evidence_facts(payload)
+        try:
+            extracted = extract_evidence_facts(payload)
+            for fact_id, fact in extracted.items():
+                existing = self.facts.get(fact_id)
+                if existing is not None and (
+                    existing.value != fact.value
+                    or existing.observed_at != fact.observed_at
+                ):
+                    raise EvidenceCollisionError(f"fact id collision: {fact_id}")
+        except EvidenceCollisionError:
+            self.invalid_evidence = True
+            self.availability[_source_name(name)] = {
+                "source": _source_name(name),
+                "status": "unavailable",
+                "reason": "fact id collision",
+                "evidence_count": 0,
+            }
+            return
         self.facts.update(extracted)
         source = _source_name(name)
         source_records = payload.get("sources")
@@ -132,6 +153,19 @@ def extract_evidence_facts(payload: dict[str, Any]) -> dict[str, EvidenceFact]:
     except (TypeError, ValueError):
         return {}
     facts: dict[str, EvidenceFact] = {}
+    data = payload.get("data")
+    period = interval = None
+    if isinstance(data, dict):
+        period = data.get("period") if isinstance(data.get("period"), str) else None
+        interval = (
+            data.get("interval") if isinstance(data.get("interval"), str) else None
+        )
+    scope = fact_scope(source_id, instrument, period, interval)
+
+    def add(fact_id: str, fact: EvidenceFact) -> None:
+        if fact_id in facts:
+            raise EvidenceCollisionError(f"fact id collision: {fact_id}")
+        facts[fact_id] = fact
 
     def safe_path(value: str) -> str:
         return re.sub(r"[^a-zA-Z0-9_.:-]+", "_", value).strip("_") or "field"
@@ -142,8 +176,8 @@ def extract_evidence_facts(payload: dict[str, Any]) -> dict[str, EvidenceFact]:
         if isinstance(value, (int, float)):
             if isinstance(value, float) and not math.isfinite(value):
                 return
-            fact_id = f"{source_id}:{safe_path(path)}"
-            facts[fact_id] = EvidenceFact(
+            fact_id = f"{scope}:{safe_path(path)}"
+            add(fact_id, EvidenceFact(
                 fact_id=fact_id,
                 value=value,
                 unit="provider_value",
@@ -152,7 +186,7 @@ def extract_evidence_facts(payload: dict[str, Any]) -> dict[str, EvidenceFact]:
                 observed_at=observed,
                 quality_status="verified",
                 source_url=str(provenance.get("source_url") or "") or None,
-            )
+            ))
         elif isinstance(value, str):
             try:
                 if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
@@ -165,8 +199,8 @@ def extract_evidence_facts(payload: dict[str, Any]) -> dict[str, EvidenceFact]:
                     return
             except ValueError:
                 return
-            fact_id = f"{source_id}:{safe_path(path)}"
-            facts[fact_id] = EvidenceFact(
+            fact_id = f"{scope}:{safe_path(path)}"
+            add(fact_id, EvidenceFact(
                 fact_id=fact_id,
                 value=value,
                 unit=unit,
@@ -175,7 +209,7 @@ def extract_evidence_facts(payload: dict[str, Any]) -> dict[str, EvidenceFact]:
                 observed_at=observed,
                 quality_status="verified",
                 source_url=str(provenance.get("source_url") or "") or None,
-            )
+            ))
         elif isinstance(value, dict):
             for key, item in value.items():
                 visit(item, f"{path}.{key}" if path else str(key))
@@ -185,6 +219,19 @@ def extract_evidence_facts(payload: dict[str, Any]) -> dict[str, EvidenceFact]:
 
     visit(payload.get("data"), "data")
     return facts
+
+
+def fact_scope(
+    dataset: str, instrument: str, period: str | None = None, interval: str | None = None
+) -> str:
+    """Return the ``dataset:INSTRUMENT[:period:interval]`` prefix of a fact ID."""
+    parts = [dataset, _safe_part(instrument)]
+    parts.extend(_safe_part(item) for item in (period, interval) if item)
+    return ":".join(parts)
+
+
+def _safe_part(value: str) -> str:
+    return re.sub(r"[^a-zA-Z0-9_.-]+", "_", value).strip("_") or "x"
 
 
 def valid_provenance(payload: dict[str, Any]) -> bool:

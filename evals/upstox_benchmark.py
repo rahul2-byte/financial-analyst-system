@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import httpx
+from app.core.agent_loop.evidence import fact_scope
 
 _HASH = re.compile(r"^[0-9a-f]{64}$")
 
@@ -390,9 +391,15 @@ def score_artifacts(
             )
             if not source_is_cited:
                 continue
+            scope = fact_scope(
+                "upstox_historical_candle",
+                str(case.get("instrument_key") or ""),
+                str(case.get("period") or "1d"),
+                str(case.get("interval") or "1d"),
+            )
             for row_name in ("first", "latest"):
-                close_id = f"upstox_historical_candle:data.{row_name}.close"
-                timestamp_id = f"upstox_historical_candle:data.{row_name}.timestamp"
+                close_id = f"{scope}:data.{row_name}.close"
+                timestamp_id = f"{scope}:data.{row_name}.timestamp"
                 for fact_name, fact_id in (("close", close_id), ("timestamp", timestamp_id)):
                     if fact_id in refs and f"[[fact:{fact_id}]]" in text:
                         bound_rows[row_name][fact_name] = True

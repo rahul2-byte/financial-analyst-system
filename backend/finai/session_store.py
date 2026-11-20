@@ -183,7 +183,8 @@ class SessionStore:
         self._atomic_json(self.session_dir / "context.json", context)
 
     def read_context(self) -> dict[str, Any]:
-        return self._read_json(self.session_dir / "context.json")
+        path = self.session_dir / "context.json"
+        return self._read_json(path) if path.exists() else {}
 
     def write_pending(self, pending: dict[str, Any]) -> None:
         self._atomic_json(self.session_dir / "pending.json", pending)

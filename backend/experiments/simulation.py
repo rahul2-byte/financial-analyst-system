@@ -24,6 +24,7 @@ class SimulationResult:
     fills: tuple[Fill, ...]
     equity: tuple[dict[str, Any], ...]
     ending_cash: float
+    rejections: tuple[dict[str, Any], ...] = ()
 
 
 def constrain_weights(
@@ -90,6 +91,7 @@ def simulate(
     cash = float(initial_cash)
     holdings: dict[str, float] = {}
     fills: list[Fill] = []
+    rejections: list[dict[str, Any]] = []
     equity: list[dict[str, Any]] = []
     previous_weights: dict[str, float] = {}
     for timestamp in sorted(set(bars["timestamp"])):
@@ -124,9 +126,35 @@ def simulate(
                     / 10000
                     * (1 if quantity > 0 else -1)
                 )
-                fee = abs(quantity * price) * costs.commission_bps / 10000
+                cost_rate = costs.commission_bps / 10000
+                if quantity > 0:
+                    # Size the buy so price plus commission fits within cash.
+                    affordable = max(cash, 0.0) / (price * (1 + cost_rate))
+                    if quantity > affordable:
+                        quantity = (
+                            affordable
+                            if limits.allow_fractional
+                            else float(int(affordable))
+                        )
+                    if quantity <= 0:
+                        rejections.append(
+                            {
+                                "timestamp": str(timestamp),
+                                "ticker": ticker,
+                                "reason": "insufficient_cash",
+                            }
+                        )
+                        continue
+                fee = abs(quantity * price) * cost_rate
                 total = quantity * price + fee
-                if quantity > 0 and total > cash:
+                if quantity > 0 and total > cash * (1 + 1e-12):
+                    rejections.append(
+                        {
+                            "timestamp": str(timestamp),
+                            "ticker": ticker,
+                            "reason": "insufficient_cash",
+                        }
+                    )
                     continue
                 cash -= total
                 holdings[ticker] = holdings.get(ticker, 0.0) + quantity
@@ -154,4 +182,4 @@ def simulate(
                 ),
             }
         )
-    return SimulationResult(tuple(fills), tuple(equity), cash)
+    return SimulationResult(tuple(fills), tuple(equity), cash, tuple(rejections))

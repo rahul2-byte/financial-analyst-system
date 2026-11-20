@@ -280,14 +280,14 @@ def test_live_executor_persists_validated_structured_report_before_rendering(
         },
     }
     report = (
-        '{"executive_summary":"Close [[fact:upstox_historical_candle:data.latest.close]].",'
+        '{"executive_summary":"Close [[fact:upstox_historical_candle:NSE_EQ_INE000000001:1d:1d:data.latest.close]].",'
         '"key_drivers":["Returned market observation."],'
-        '"detailed_analysis":"Close [[fact:upstox_historical_candle:data.latest.close]].",'
+        '"detailed_analysis":"Close [[fact:upstox_historical_candle:NSE_EQ_INE000000001:1d:1d:data.latest.close]].",'
         '"risks":["Historical observation only."],"final_view":"Review.",'
         '"claims":[{"claim_id":"close","text":"Close '
-        '[[fact:upstox_historical_candle:data.latest.close]].","importance":"major",'
+        '[[fact:upstox_historical_candle:NSE_EQ_INE000000001:1d:1d:data.latest.close]].","importance":"major",'
         '"evidence_refs":["citation-upstox"],'
-        '"numeric_refs":["upstox_historical_candle:data.latest.close"]}],'
+        '"numeric_refs":["upstox_historical_candle:NSE_EQ_INE000000001:1d:1d:data.latest.close"]}],'
         '"citations":[{"citation_id":"citation-upstox",'
         '"source_id":"upstox_historical_candle"}]}'
     )

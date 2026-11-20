@@ -10,7 +10,6 @@
 #composer .text-area--cursor-line { background: #222222; }
 #composer .text-area--selection { background: #2b4160; }
 #send { display: none; }
-#composer-tools { height: 1; padding: 0 2; color: $fin-muted; background: $fin-composer-surface; }
 #command-menu { display: none; height: auto; max-height: 9; padding: 1 2; color: $fin-muted; background: $fin-surface-raised; border-top: solid $fin-border; }
 #command-menu.visible { display: block; }
 #hints { height: 1; padding: 0 2; color: $fin-muted; }

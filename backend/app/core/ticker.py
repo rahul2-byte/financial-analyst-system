@@ -10,7 +10,7 @@ YFINANCE_PAIR_QUOTE_LEGS = frozenset(
     {"USD", "USDT", "INR", "EUR", "GBP", "JPY", "BTC", "ETH"}
 )
 
-_VALID_TICKER_RE = re.compile(r"^[A-Z0-9.\-^=]+$")
+_VALID_TICKER_RE = re.compile(r"^[A-Z0-9.\-^=&]+$")
 _HAS_ALNUM_RE = re.compile(r"[A-Z0-9]")
 _VALID_DEFAULT_SUFFIX_RE = re.compile(r"^\.[A-Z0-9]+$")
 

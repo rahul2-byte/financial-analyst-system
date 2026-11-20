@@ -2,47 +2,24 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
-import re
+import sys
 from collections.abc import Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
 from app.config import settings
+from app.security.policy import redact_secrets
 
 logger = logging.getLogger(__name__)
 
-_SECRET_KEY = re.compile(
-    r"(?i)(api[-_]?key|authorization|cookie|password|secret|token)"
-)
-_SECRET_VALUE = re.compile(r"(?i)(bearer\s+|api[-_]?key\s*[:=]\s*)[^\s,}]+")
-
-
 def redact_trace_value(value: Any) -> Any:
     """Recursively remove credentials while preserving safe diagnostic values."""
-    if isinstance(value, Mapping):
-        result: dict[str, Any] = {}
-        for key, item in value.items():
-            key_text = str(key)
-            if _SECRET_KEY.search(key_text):
-                result[key_text] = (
-                    "Bearer [REDACTED]"
-                    if isinstance(item, str) and item.lower().startswith("bearer ")
-                    else "[REDACTED]"
-                )
-            else:
-                result[key_text] = redact_trace_value(item)
-        return result
-    if isinstance(value, list):
-        return [redact_trace_value(item) for item in value]
-    if isinstance(value, tuple):
-        return tuple(redact_trace_value(item) for item in value)
-    if isinstance(value, str):
-        return _SECRET_VALUE.sub(r"\1[REDACTED]", value)
-    return value
+    return redact_secrets(value)
 
 
 def trace_content(value: Any) -> tuple[str, bool, int]:
@@ -122,13 +99,15 @@ def initialize_tracing() -> TracingHandle:
             os.environ.setdefault("OTEL_TRACES_SAMPLER", "traceidratio")
             os.environ.setdefault("OTEL_TRACES_SAMPLER_ARG", str(sample_rate))
 
-        provider = register(
-            endpoint=settings.FINAI_PHOENIX_ENDPOINT,
-            protocol="http/protobuf",
-            project_name=settings.FINAI_PHOENIX_PROJECT,
-            batch=True,
-            auto_instrument=False,
-        )
+        # Phoenix prints a banner on stdout; keep stdout clean for --json/--plain.
+        with contextlib.redirect_stdout(sys.stderr):
+            provider = register(
+                endpoint=settings.FINAI_PHOENIX_ENDPOINT,
+                protocol="http/protobuf",
+                project_name=settings.FINAI_PHOENIX_PROJECT,
+                batch=True,
+                auto_instrument=False,
+            )
     except Exception:
         logger.exception("Phoenix tracing setup failed; continuing without tracing")
         return _handle

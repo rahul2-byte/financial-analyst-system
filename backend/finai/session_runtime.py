@@ -188,29 +188,25 @@ class ResearchRunner:
                 yield event
             return
         if route is not None and route.execution_mode is ExecutionMode.TOOL_ONLY:
-            direct_arguments = _direct_tool_arguments(route, query)
-            if (
-                direct_arguments is not None
-                and route.required_tools[0]
-                not in {"data:fetch_market_status", "data:fetch_market_holidays"}
-            ):
-                if resolution.status in {"ambiguous", "unresolved"}:
-                    clarification = route.model_copy(
-                        update={
-                            "execution_mode": ExecutionMode.DETERMINISTIC,
-                            "next_action": NextAction.ASK_CLARIFICATION,
-                            "reason": resolution.reason or "Instrument identity is ambiguous.",
-                            "required_tools": [],
-                            "allowed_tools": set(),
-                        }
-                    )
-                    async for event in _run_clarification_route(
-                        clarification, query, conversation_id, history, checkpoint_writer
-                    ):
-                        yield event
-                    return
-                if resolution.status == "resolved" and resolution.ticker:
-                    direct_arguments = {"ticker": resolution.ticker}
+            direct_arguments = _direct_tool_arguments(route, query, resolution)
+            if _is_ticker_tool(route) and resolution.status in {
+                "ambiguous",
+                "unresolved",
+            }:
+                clarification = route.model_copy(
+                    update={
+                        "execution_mode": ExecutionMode.DETERMINISTIC,
+                        "next_action": NextAction.ASK_CLARIFICATION,
+                        "reason": resolution.reason or "Instrument identity is ambiguous.",
+                        "required_tools": [],
+                        "allowed_tools": set(),
+                    }
+                )
+                async for event in _run_clarification_route(
+                    clarification, query, conversation_id, history, checkpoint_writer
+                ):
+                    yield event
+                return
             if direct_arguments is not None:
                 async for event in _run_direct_tool(
                     self.tool_runner,
@@ -326,6 +322,12 @@ class ResearchRunner:
         if _has_instrument_reference(query):
             fetcher = self.resources.upstox_fetcher
             if fetcher is None:
+                bare = _single_bare_symbol(query)
+                if bare:
+                    return (
+                        InstrumentResolution("resolved", ticker=bare),
+                        "bare_symbol",
+                    )
                 return (
                     InstrumentResolution("not_requested"),
                     "provider_unavailable",
@@ -353,21 +355,6 @@ def _model_for_route(route: RoutePlan | None, provider: str) -> str:
     return settings.FINAI_CHATGPT_CODEX_LUNA_MODEL
 
 
-_TICKER_TOKEN = re.compile(r"\b[A-Z][A-Z0-9.-]{1,14}\b")
-_TICKER_STOPWORDS = {
-    "WHAT",
-    "THE",
-    "CURRENT",
-    "PRICE",
-    "LATEST",
-    "CLOSE",
-    "OF",
-    "FOR",
-    "IS",
-    "SHOW",
-    "GET",
-    "STOCK",
-}
 _EXCHANGE_TOKEN = re.compile(r"\b(?:NSE|BSE)\b", re.IGNORECASE)
 _CANONICAL_TICKER = re.compile(r"\b[A-Z][A-Z0-9&-]{1,14}\.(?:NS|BO)\b", re.IGNORECASE)
 _INSTRUMENT_MARKERS = re.compile(
@@ -375,6 +362,7 @@ _INSTRUMENT_MARKERS = re.compile(
     r"fundamental|technical|valuation|news|bank)\b",
     re.IGNORECASE,
 )
+_BARE_EXTRA_STOPWORDS = {"NSE", "BSE", "WHATS", "GIVE", "TELL", "FETCH", "ME", "LIVE", "SHOW", "GET", "TO"}
 _INSTRUMENT_STOPWORDS = {
     "ANALYSE",
     "ANALYZE",
@@ -422,6 +410,18 @@ def _has_instrument_reference(query: str) -> bool:
     return any(word not in _INSTRUMENT_STOPWORDS for word in words)
 
 
+def _single_bare_symbol(query: str) -> str | None:
+    """Return the only plausible bare NSE symbol; default suffix is applied by tools."""
+    tokens = {
+        token
+        for token in re.findall(r"\b[A-Z][A-Z0-9&-]{1,14}\b", query.upper())
+        if token not in _INSTRUMENT_STOPWORDS and token not in _BARE_EXTRA_STOPWORDS
+    }
+    if len(tokens) != 1:
+        return None
+    return next(iter(tokens))
+
+
 def _history_ticker(history: list[Message]) -> str | None:
     for message in reversed(history):
         matches = _CANONICAL_TICKER.findall(message.content.upper())
@@ -439,7 +439,9 @@ def _route_requests_instrument_clarification(route: RoutePlan) -> bool:
     return any(term in text for term in ("ticker", "instrument", "exchange", "symbol"))
 
 
-def _direct_tool_arguments(route: RoutePlan, query: str) -> dict[str, object] | None:
+def _direct_tool_arguments(
+    route: RoutePlan, query: str, resolution: InstrumentResolution | None = None
+) -> dict[str, object] | None:
     if len(route.required_tools) != 1:
         return None
     if route.required_tools[0] not in {
@@ -458,17 +460,18 @@ def _direct_tool_arguments(route: RoutePlan, query: str) -> dict[str, object] | 
     if route.required_tools[0] == "data:fetch_market_holidays":
         match = re.search(r"\b\d{4}-\d{2}-\d{2}\b", query)
         return {"date": match.group(0) if match else ""}
-    ticker = next(
-        (
-            token
-            for token in _TICKER_TOKEN.findall(query.upper())
-            if token not in _TICKER_STOPWORDS
-        ),
-        None,
-    )
-    if not ticker:
+    # Tickers come only from the instrument resolver; an empty ticker never
+    # reaches a provider (ambiguous/unresolved take the clarification path).
+    if resolution is None or resolution.status != "resolved" or not resolution.ticker:
         return None
-    return {"ticker": ticker}
+    return {"ticker": resolution.ticker}
+
+
+def _is_ticker_tool(route: RoutePlan) -> bool:
+    return len(route.required_tools) == 1 and route.required_tools[0] not in {
+        "data:fetch_market_status",
+        "data:fetch_market_holidays",
+    }
 
 
 async def _run_direct_tool(

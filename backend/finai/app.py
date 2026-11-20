@@ -32,7 +32,7 @@ from .render import (
     render_status,
     render_user_message,
 )
-from .screens import ApprovalScreen
+from .screens import ApprovalScreen, HelpScreen
 from .session_store import SessionStore
 from .state import PresentationPhase, PresentationState, reduce_event
 from .theme import CSS_VARIABLES
@@ -95,6 +95,8 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         ("escape", "cancel_run", "Cancel"),
         ("ctrl+z", "quit_app", "Exit"),
         ("ctrl+l", "clear_screen", "Clear"),
+        ("f1", "help", "Help"),
+        ("question_mark", "help", "Help"),
     ]
 
     def __init__(
@@ -126,6 +128,7 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         self._event_log: list[str] = []
         self._command_selection = 0
         self._queued_prompts: list[str] = []
+        self._last_query: str | None = None
 
     def compose(self) -> ComposeResult:
         yield AppHeader(id="topbar")
@@ -139,13 +142,9 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         with Horizontal(id="composer-row"):
             yield Composer(placeholder="Ask FIN-AI...", id="composer")
             yield Button("Send", variant="primary", id="send")
-        yield Static(
-            "[Attach]  [Web Search]  [Deep Research]    /context  /sources  /trace",
-            id="composer-tools",
-        )
         yield Static("", id="command-menu")
         yield Static(
-            "Enter send · Shift+Enter newline · / commands · Esc cancel · ? help",
+            "Enter send · Shift+Enter newline · / commands · Esc cancel · F1 help",
             id="hints",
         )
 
@@ -156,6 +155,7 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         self.console.push_theme(FINAI_RICH_THEME)
         self._apply_layout(self.size.width)
         self._refresh_chrome()
+        self._refresh_sessions()
         self.query_one("#composer", Composer).focus()
         self.set_interval(0.2, self._tick_activity)
 
@@ -164,6 +164,16 @@ class FinAIApp(CommandDispatchMixin, App[None]):
 
     async def action_sessions(self) -> None:
         await self._command("sessions", [])
+
+    def action_help(self) -> None:
+        if not isinstance(self.screen, HelpScreen):
+            self.push_screen(HelpScreen(self.registry.help_text(), self.BINDINGS))
+
+    def _refresh_sessions(self) -> None:
+        root = self.session_store.root if self.session_store else None
+        active = self.session_store.session_id if self.session_store else None
+        sessions = SessionStore.list_sessions(root) if root else []
+        self.query_one("#navigation", NavigationRail).show_sessions(sessions, active)
 
     def action_toggle_sidebar(self) -> None:
         self.query_one("#navigation").display = not self.query_one(
@@ -175,6 +185,7 @@ class FinAIApp(CommandDispatchMixin, App[None]):
 
     def on_resize(self, event: events.Resize) -> None:
         self._apply_layout(event.size.width)
+        self._refresh_chrome()
 
     def _apply_layout(self, width: int) -> None:
         layout = (
@@ -194,7 +205,12 @@ class FinAIApp(CommandDispatchMixin, App[None]):
     def _refresh_chrome(self) -> None:
         session_id = self.session_store.session_id if self.session_store else None
         self.query_one("#topbar", AppHeader).update(
-            render_header(self.state, mode=self.mode, session_id=session_id)
+            render_header(
+                self.state,
+                mode=self.mode,
+                session_id=session_id,
+                width=self.size.width,
+            )
         )
         self.query_one("#context-rail", ContextRail).update(
             render_context(self.state, mode=self.mode, session_id=session_id)
@@ -333,6 +349,7 @@ class FinAIApp(CommandDispatchMixin, App[None]):
         self._update_command_menu(composer.text)
 
     def _mount_user(self, query: str) -> None:
+        self._last_query = query
         for welcome in self.query("#welcome"):
             welcome.display = False
         self.query_one("#conversation", VerticalScroll).mount(

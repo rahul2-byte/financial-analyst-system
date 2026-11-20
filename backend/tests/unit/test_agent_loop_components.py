@@ -49,7 +49,7 @@ def test_evidence_fact_ids_normalize_provider_field_names() -> None:
             },
         }
     )
-    assert "historical_prices:data.first.Adj_Close" in facts
+    assert "historical_prices:ABC.NS:data.first.Adj_Close" in facts
 
 
 def test_tool_message_content_bounds_large_provider_results() -> None:

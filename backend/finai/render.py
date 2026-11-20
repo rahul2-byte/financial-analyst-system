@@ -99,23 +99,30 @@ def render_activity(state: PresentationState) -> Text:
 
 
 def render_header(
-    state: PresentationState, *, mode: str, session_id: str | None
+    state: PresentationState,
+    *,
+    mode: str,
+    session_id: str | None,
+    width: int | None = None,
 ) -> Text:
-    """Render compact, persistent chrome without inventing research metadata."""
+    """Render one-line chrome that drops detail as the terminal narrows."""
     status = state.phase.value.replace("_", " ")
     session = (session_id or "local")[:8]
-    output = Text("FIN-AI", style=f"bold {COLORS['text']}")
-    output.append(
-        "  Financial intelligence, grounded in evidence.", style=COLORS["secondary"]
+    width = width or 120
+    output = Text(
+        "FIN-AI", style=f"bold {COLORS['text']}", no_wrap=True, overflow="ellipsis"
     )
-    output.append(
-        "\n  Research companies · Analyze filings · Trace sources",
-        style=COLORS["muted"],
+    if width >= 100:
+        output.append(
+            "  Financial intelligence, grounded in evidence.", style=COLORS["secondary"]
+        )
+    detail = (
+        f"● {status} · {mode} · session {session}" if width >= 70 else f"● {status}"
     )
-    output.append(
-        f"                                      ● Online · {status} · session {session} · v0.1.0",
-        style=COLORS["muted"],
-    )
+    left = len(output.plain)
+    pad = max(2, width - 4 - left - len(detail))
+    if left + pad + len(detail) <= max(width - 4, 0) or width >= 40:
+        output.append(" " * pad + detail, style=COLORS["muted"])
     return output
 
 

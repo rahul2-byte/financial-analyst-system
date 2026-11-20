@@ -200,14 +200,15 @@ def test_score_artifacts_requires_published_close_and_matching_timestamp_facts()
         "case_id": "case-1",
         "trading_date": "2026-09-22",
         "expected_outcome": "answer",
+        "instrument_key": "NSE_EQ|ONE",
         "gold_numbers": {"close": 8.25},
         "frozen_candle": {
             "timestamp": "2026-09-22T00:00:00+05:30",
             "close": 8.25,
         },
     }
-    close_id = "upstox_historical_candle:data.first.close"
-    timestamp_id = "upstox_historical_candle:data.first.timestamp"
+    close_id = "upstox_historical_candle:NSE_EQ_ONE:1d:1d:data.first.close"
+    timestamp_id = "upstox_historical_candle:NSE_EQ_ONE:1d:1d:data.first.timestamp"
     good = {
         "case_id": "case-1",
         "terminal_status": "completed",
@@ -240,14 +241,15 @@ def test_score_artifacts_accepts_close_and_timestamp_across_cited_major_claims()
         "case_id": "case-1",
         "trading_date": "2026-09-22",
         "expected_outcome": "answer",
+        "instrument_key": "NSE_EQ|ONE",
         "gold_numbers": {"close": 8.25},
         "frozen_candle": {
             "timestamp": "2026-09-22T00:00:00+05:30",
             "close": 8.25,
         },
     }
-    close_id = "upstox_historical_candle:data.first.close"
-    timestamp_id = "upstox_historical_candle:data.first.timestamp"
+    close_id = "upstox_historical_candle:NSE_EQ_ONE:1d:1d:data.first.close"
+    timestamp_id = "upstox_historical_candle:NSE_EQ_ONE:1d:1d:data.first.timestamp"
     artifact = {
         "case_id": "case-1",
         "terminal_status": "completed",

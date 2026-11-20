@@ -144,7 +144,13 @@ class ReportParseError(PublicationError):
         super().__init__(["structured_report_invalid", detail])
 
 
-_NUMBER = re.compile(r"(?<![A-Za-z0-9])[+-]?(?:\d+(?:\.\d+)?|\.\d+)(?:%|\b)")
+# Numbers, optionally unit-suffixed (12bn, 5x, 20bps, 3Cr, 12k, +5pp). The
+# lookbehind keeps identifiers such as NIFTY50 or Q3 from matching.
+_NUMBER = re.compile(
+    r"(?<![A-Za-z0-9_])[+-]?(?:\d+(?:\.\d+)?|\.\d+)"
+    r"(?:%|(?:bn|bps|bp|pp|pps|cr|crore|crores|lakh|lakhs|mn|tn|k|m|b|x)\b|\b)",
+    re.IGNORECASE,
+)
 _UNSAFE_GUARANTEE = re.compile(
     r"\b(?:guaranteed?\s+(?:return|profit|gain)|cannot\s+lose|risk[- ]free)\b",
     re.IGNORECASE,
@@ -574,7 +580,8 @@ def _render(
             f"{max(fact.observed_at for fact in evidence.values()).isoformat()}"
         )
     if any(
-        "historical_prices:data.period_return_pct" == fact.fact_id
+        fact.fact_id.startswith("historical_prices:")
+        and fact.fact_id.endswith(":data.period_return_pct")
         for fact in evidence.values()
     ):
         metadata.append("Price return basis: see provider adjustment metadata")

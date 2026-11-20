@@ -16,8 +16,21 @@ class DecisionProvider(Protocol):
     async def review_output(self, context: dict[str, Any]) -> NextAction: ...
 
 
+_SUBJECT = r"[\w.&-]+(?:\s+[\w.&-]+){0,3}"
+# Only short imperative price/quote requests are direct lookups; analytical
+# phrasings ("price to earnings of TCS") must reach the research path.
 _TICKER_LOOKUP = re.compile(
-    r"\b(?:price|quote|close|latest price|current price)\b", re.IGNORECASE
+    r"^\s*(?:(?:what(?:'s|s)?|what\s+is|show|get|give|tell|fetch)\s+(?:me\s+)?)?"
+    r"(?:the\s+)?(?:(?:current|latest|live|last|closing)\s+)?"
+    r"(?:(?:share|stock)\s+)?(?:price|quote|close)\s*(?:of|for)?\s+"
+    rf"(?:the\s+)?(?:(?:stock|share)\s+)?{_SUBJECT}\s*\??\s*$"
+    r"|^\s*" + _SUBJECT + r"\s+(?:(?:share|stock)\s+)?(?:price|quote)\s*\??\s*$",
+    re.IGNORECASE,
+)
+_ANALYTICAL_PRICE_TERMS = re.compile(
+    r"\b(?:to|earnings|ratio|pe|p/e|vs|versus|and|compare|history|target|forecast|"
+    r"trend|change|performance|growth|multiple|book|sales|per|why|should|will)\b",
+    re.IGNORECASE,
 )
 _MARKET_STATUS_LOOKUP = re.compile(
     r"\b(?:market status|market open|market closed|is\s+(?:nse|bse)\s+(?:open|closed)|pre[- ]open|holiday)\b",
@@ -165,7 +178,11 @@ class RoutingPolicy:
                 reason_codes=["deterministic_operation", "market_state_tool"],
                 confidence=1.0,
             )
-        if _TICKER_LOOKUP.search(query) and "data:fetch_stock_data" in available_tools:
+        if (
+            _TICKER_LOOKUP.search(query)
+            and not _ANALYTICAL_PRICE_TERMS.search(query)
+            and "data:fetch_stock_data" in available_tools
+        ):
             return RoutePlan(
                 intent="market_lookup",
                 execution_mode=ExecutionMode.TOOL_ONLY,
