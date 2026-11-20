@@ -14,17 +14,23 @@ def test_help_has_no_ui_flag(capsys: pytest.CaptureFixture[str]) -> None:
     assert "--ui" not in capsys.readouterr().out
 
 
-def test_exec_hands_off_to_node(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_exec_hands_off_to_node(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
     bundle = tmp_path / "cli.js"
     bundle.write_text("", encoding="utf-8")
     calls: list[tuple[str, list[str]]] = []
     monkeypatch.setattr(cli, "TS_CLI", bundle)
     monkeypatch.setattr(cli.shutil, "which", lambda name: "/usr/bin/node")
-    monkeypatch.setattr(cli.os, "execvp", lambda file, args: calls.append((file, list(args))))
+    monkeypatch.setattr(
+        cli.os, "execvp", lambda file, args: calls.append((file, list(args)))
+    )
 
     cli.exec_ts_ui(["--mode", "review"])
 
-    assert calls == [("/usr/bin/node", ["/usr/bin/node", str(bundle), "--mode", "review"])]
+    assert calls == [
+        ("/usr/bin/node", ["/usr/bin/node", str(bundle), "--mode", "review"])
+    ]
 
 
 def test_missing_bundle_tells_user_to_build(

@@ -60,26 +60,60 @@ def _fact(fact_id: str, value: float | int, unit: str, source_id: str) -> Eviden
 
 def _facts(kind: Kind) -> dict[str, EvidenceFact]:
     items = [
-        _fact(f"{_HISTORY}:data.latest.close", 846.0, "provider_value", "historical_prices"),
-        _fact(f"{_HISTORY}:data.period_return_pct", 14.82, "provider_value", "historical_prices"),
-        _fact(f"{_HISTORY}:data.latest.volume", 6240100, "provider_value", "historical_prices"),
+        _fact(
+            f"{_HISTORY}:data.latest.close",
+            846.0,
+            "provider_value",
+            "historical_prices",
+        ),
+        _fact(
+            f"{_HISTORY}:data.period_return_pct",
+            14.82,
+            "provider_value",
+            "historical_prices",
+        ),
+        _fact(
+            f"{_HISTORY}:data.latest.volume",
+            6240100,
+            "provider_value",
+            "historical_prices",
+        ),
     ]
     if kind != "lookup":
         items += [
             _fact(f"{_FUND}:data.peRatio", 15.13, "ratio", "fundamentals_snapshot"),
             _fact(f"{_FUND}:data.priceToBook", 2.1, "ratio", "fundamentals_snapshot"),
-            _fact(f"{_FUND}:data.returnOnEquity", 0.1375, "fraction", "fundamentals_snapshot"),
-            _fact(f"{_FUND}:data.marketCap", 1.3e13, "currency", "fundamentals_snapshot"),
-            _fact(f"{_FUND}:data.profitMargins", 0.2711, "fraction", "fundamentals_snapshot"),
+            _fact(
+                f"{_FUND}:data.returnOnEquity",
+                0.1375,
+                "fraction",
+                "fundamentals_snapshot",
+            ),
+            _fact(
+                f"{_FUND}:data.marketCap", 1.3e13, "currency", "fundamentals_snapshot"
+            ),
+            _fact(
+                f"{_FUND}:data.profitMargins",
+                0.2711,
+                "fraction",
+                "fundamentals_snapshot",
+            ),
         ]
     if kind == "full":
-        items.append(_fact(f"{_NEWS}:data.article_count", 8, "provider_value", "news_articles"))
+        items.append(
+            _fact(f"{_NEWS}:data.article_count", 8, "provider_value", "news_articles")
+        )
     return {item.fact_id: item for item in items}
 
 
 def _availability(kind: Kind) -> dict[str, dict[str, Any]]:
     def ok(source: str, count: int) -> dict[str, Any]:
-        return {"source": source, "status": "available", "reason": None, "evidence_count": count}
+        return {
+            "source": source,
+            "status": "available",
+            "reason": None,
+            "evidence_count": count,
+        }
 
     rows = {"market_data": ok("market_data", 3)}
     if kind == "lookup":
@@ -114,7 +148,8 @@ def _ohlcv() -> list[dict[str, Any]]:
             close = first
         rows.append(
             {
-                "timestamp": (start + timedelta(days=i)).isoformat() + "T00:00:00+05:30",
+                "timestamp": (start + timedelta(days=i)).isoformat()
+                + "T00:00:00+05:30",
                 "close": round(close, 2),
             }
         )
@@ -122,7 +157,14 @@ def _ohlcv() -> list[dict[str, Any]]:
 
 
 def _technical() -> dict[str, Any]:
-    def m(indicator: str, value: float, direction: str, state: str, strength: float, pct: float) -> dict[str, Any]:
+    def m(
+        indicator: str,
+        value: float,
+        direction: str,
+        state: str,
+        strength: float,
+        pct: float,
+    ) -> dict[str, Any]:
         return {
             "indicator": indicator,
             "category": "momentum",
@@ -161,7 +203,7 @@ _FULL_DRAFT: dict[str, Any] = {
         "Valuation: P/E of [[fact:@F@:data.peRatio]] and price/book of [[fact:@F@:data.priceToBook]] look undemanding for the franchise.",
         "Profitability: return on equity of [[fact:@F@:data.returnOnEquity]] with a [[fact:@F@:data.profitMargins]] profit margin.",
         "Trend: price holds above its 20, 50 and 200 day averages.",
-        "Newsflow: Q2 results coverage points to steady loan growth." ,
+        "Newsflow: Q2 results coverage points to steady loan growth.",
     ],
     "detailed_analysis": (
         "The stock gained [[fact:@H@:data.period_return_pct]] over the last year and "
@@ -192,7 +234,10 @@ _FULL_DRAFT: dict[str, Any] = {
             "text": "Profitability: return on equity of [[fact:@F@:data.returnOnEquity]] with a [[fact:@F@:data.profitMargins]] profit margin.",
             "importance": "major",
             "evidence_refs": ["c2"],
-            "numeric_refs": [f"{_FUND}:data.returnOnEquity", f"{_FUND}:data.profitMargins"],
+            "numeric_refs": [
+                f"{_FUND}:data.returnOnEquity",
+                f"{_FUND}:data.profitMargins",
+            ],
         },
         {
             "claim_id": "k3",
@@ -235,7 +280,10 @@ _LOOKUP_DRAFT: dict[str, Any] = {
             "text": "HDFC Bank last closed at ₹[[fact:@H@:data.latest.close]].",
             "importance": "major",
             "evidence_refs": ["c1"],
-            "numeric_refs": [f"{_HISTORY}:data.latest.close", f"{_HISTORY}:data.period_return_pct"],
+            "numeric_refs": [
+                f"{_HISTORY}:data.latest.close",
+                f"{_HISTORY}:data.period_return_pct",
+            ],
         }
     ],
     "citations": [{"citation_id": "c1", "source_id": "historical_prices"}],
@@ -310,7 +358,9 @@ def fake_events(base: list[ResearchEvent], kind: Kind) -> list[ResearchEvent]:
             event = event.model_copy(
                 update={
                     "terminal_status": (
-                        "completed_with_limited_evidence" if kind == "partial" else "success"
+                        "completed_with_limited_evidence"
+                        if kind == "partial"
+                        else "success"
                     ),
                     "evidence_status": "limited" if kind == "partial" else "complete",
                     "evidence_availability": list(_availability(kind).values()),
@@ -318,12 +368,17 @@ def fake_events(base: list[ResearchEvent], kind: Kind) -> list[ResearchEvent]:
             )
         events.append(event)
     if kind == "lookup":
-        keep = {"run.started", "stage.started", "response.delta", "run.completed", "sources.updated"}
+        keep = {
+            "run.started",
+            "stage.started",
+            "response.delta",
+            "run.completed",
+            "sources.updated",
+        }
         events = [
             e
             for e in events
-            if e.type in keep
-            or (getattr(e, "tool", None) == "data:fetch_fundamentals")
+            if e.type in keep or (getattr(e, "tool", None) == "data:fetch_fundamentals")
         ]
         events = [
             e.model_copy(update={"tool": "data:fetch_stock_data"})

@@ -149,9 +149,7 @@ def _build(material: Mapping[str, Any], draft: dict[str, Any]) -> p.ReportView:
 
     sources, citation_ref = _sources(material, draft, facts)
     source_ref = {item.ref: item for item in sources}
-    ref_by_source_id = {
-        sid: ref for ref, sid in _ordered_source_ids(draft).items()
-    }
+    ref_by_source_id = {sid: ref for ref, sid in _ordered_source_ids(draft).items()}
 
     def refs_for(claim: dict[str, Any] | None) -> list[int]:
         if claim is None:
@@ -182,9 +180,7 @@ def _build(material: Mapping[str, Any], draft: dict[str, Any]) -> p.ReportView:
     instrument_symbol = _instrument(facts)
     evidence_rows = _availability_rows(availability)
     limited = any(row.status != "available" for row in evidence_rows)
-    observed = (
-        max(fact.observed_at for fact in facts.values()) if facts else None
-    )
+    observed = max(fact.observed_at for fact in facts.values()) if facts else None
     limitations = [clean_text(str(item)) for item in draft.get("limitations") or []]
     for row in evidence_rows:
         if row.status != "available":
@@ -262,7 +258,10 @@ def _key_figures(
 ) -> list[p.ReportKeyFigure]:
     referenced: list[str] = []
     for claim in sorted(
-        claims, key=lambda item: ("major", "supporting", "minor").index(item.get("importance", "minor"))
+        claims,
+        key=lambda item: ("major", "supporting", "minor").index(
+            item.get("importance", "minor")
+        ),
     ):
         for fact_id in claim.get("numeric_refs") or []:
             if fact_id in facts and fact_id not in referenced:
@@ -392,7 +391,9 @@ def _availability_rows(
             status = "unavailable"
         if status not in {"available", "degraded", "unavailable"}:
             continue
-        name = SOURCE_NAMES.get(str(item.get("source", key)), str(item.get("source", key)))
+        name = SOURCE_NAMES.get(
+            str(item.get("source", key)), str(item.get("source", key))
+        )
         if name in seen and status == "available":
             continue
         seen.add(name)
@@ -470,16 +471,20 @@ def _quote(
     symbol: str | None,
 ) -> p.ReportQuote | None:
     series = _price_series(material, symbol)
-    if series is None or not any(f.source_id == "historical_prices" for f in facts.values()):
+    if series is None or not any(
+        f.source_id == "historical_prices" for f in facts.values()
+    ):
         return None
     key, closes = series
     stamp, last = closes[-1]
     change: str | None = None
     direction: p.Direction | None = None
     for fact in facts.values():
-        if fact.source_id == "historical_prices" and fact.fact_id.endswith(
-            ":data.period_return_pct"
-        ) and isinstance(fact.value, (int, float)):
+        if (
+            fact.source_id == "historical_prices"
+            and fact.fact_id.endswith(":data.period_return_pct")
+            and isinstance(fact.value, (int, float))
+        ):
             value = float(fact.value)
             direction = "up" if value > 0 else "down" if value < 0 else "flat"
             change = f"{value:+.2f}% ({key[1]})"
@@ -526,7 +531,9 @@ def _signals(
     symbol: str | None,
 ) -> list[p.ReportSignal]:
     snapshot = material.get("technical")
-    if not isinstance(snapshot, Mapping) or not _same(str(snapshot.get("ticker")), symbol):
+    if not isinstance(snapshot, Mapping) or not _same(
+        str(snapshot.get("ticker")), symbol
+    ):
         return []
     if not any(
         availability.get(name, {}).get("status") == "available"
@@ -555,7 +562,8 @@ def _signals(
         signals.append(
             p.ReportSignal(
                 name=name,
-                value_text=f"{value:,.2f}" + (f" {unit}" if unit and unit != "ratio" else ""),
+                value_text=f"{value:,.2f}"
+                + (f" {unit}" if unit and unit != "ratio" else ""),
                 direction=direction,
                 state_text=(
                     clean_text(str(item["state"])).replace("_", " ")
@@ -579,7 +587,11 @@ def _signals(
 
 
 def _ordinal(number: int) -> str:
-    suffix = "th" if 10 <= number % 100 <= 20 else {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
+    suffix = (
+        "th"
+        if 10 <= number % 100 <= 20
+        else {1: "st", 2: "nd", 3: "rd"}.get(number % 10, "th")
+    )
     return f"{number}{suffix}"
 
 

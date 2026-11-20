@@ -357,9 +357,9 @@ def _tool_display(event: ResearchEvent) -> Display:
     )
     if isinstance(event, ToolFailed):
         display.detail = clean_text(tool_detail(event.tool, event.message)) or None
-        display.failure_detail = clean_text(
-            failure_detail(event.tool, event.message)
-        ) or None
+        display.failure_detail = (
+            clean_text(failure_detail(event.tool, event.message)) or None
+        )
         display.friendly = tool_failure_text(event.message, event.tool)
     elif isinstance(event, ToolProgress):
         display.detail = clean_text(tool_detail(event.tool, event.message)) or None
@@ -368,9 +368,7 @@ def _tool_display(event: ResearchEvent) -> Display:
     return display
 
 
-def build_display(
-    event: ResearchEvent, run_state: Any
-) -> Display | None:
+def build_display(event: ResearchEvent, run_state: Any) -> Display | None:
     """Build the bridge ``Display`` payload for one event.
 
     ``run_state`` is the presentation state *after* this event is reduced.
@@ -400,14 +398,10 @@ def build_display(
         )
     if isinstance(event, ProviderRetrying):
         return Display(
-            detail=clean_text(
-                provider_retrying_detail(event.reason, event.delay_ms)
-            )
+            detail=clean_text(provider_retrying_detail(event.reason, event.delay_ms))
         )
     if isinstance(event, ProviderStreamStarted):
-        return Display(
-            detail=clean_text(provider_stream_detail(event.first_byte_ms))
-        )
+        return Display(detail=clean_text(provider_stream_detail(event.first_byte_ms)))
     if isinstance(event, ProviderCompleted):
         return Display(
             detail=clean_text(

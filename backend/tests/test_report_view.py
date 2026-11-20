@@ -51,7 +51,11 @@ def test_no_markers_or_raw_ids_leak_into_text() -> None:
         assert view is not None
         text = _dump(view)
         assert not FACT_MARKER.search(text)
-        for field in (view.summary, view.final_view or "", view.detailed_analysis or ""):
+        for field in (
+            view.summary,
+            view.final_view or "",
+            view.detailed_analysis or "",
+        ):
             assert not RAW_ID.search(field), field
 
 

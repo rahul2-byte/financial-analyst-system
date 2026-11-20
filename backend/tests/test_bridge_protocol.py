@@ -69,9 +69,7 @@ def _display() -> p.Display:
             )
         ],
         candidates=[
-            p.DisplayCandidate(
-                symbol="HDFCBANK.NS", name="HDFC Bank", exchange="NSE"
-            )
+            p.DisplayCandidate(symbol="HDFCBANK.NS", name="HDFC Bank", exchange="NSE")
         ],
         lines=["Which HDFC entity did you mean?"],
         review_unavailable=False,
@@ -181,9 +179,7 @@ def _protocol_instances() -> dict[type[BaseModel], BaseModel]:
         p.ErrorObject: p.ErrorObject(
             code=p.INVALID_PARAMS, message="Invalid params", data={"field": "mode"}
         ),
-        p.Request: p.Request(
-            id=1, method="initialize", params={"protocol_version": 1}
-        ),
+        p.Request: p.Request(id=1, method="initialize", params={"protocol_version": 1}),
         p.Response: p.Response(id=1, result={"accepted": True}),
         p.Notification: p.Notification(
             method="run.event", params={"client_run_id": "6f1e4d3c"}
@@ -229,9 +225,7 @@ def test_protocol_model_round_trip(model: type[BaseModel]) -> None:
         lambda: p.RunStartParams(
             client_run_id="6f1e4d3c", query="q", mode="guided", unexpected=True
         ),
-        lambda: p.RunStartParams(
-            client_run_id="6f1e4d3c", query="q", mode="turbo"
-        ),
+        lambda: p.RunStartParams(client_run_id="6f1e4d3c", query="q", mode="turbo"),
         lambda: p.InitializeParams(
             protocol_version=1,
             client=p.ClientInfo(name="t", version="0"),
@@ -239,9 +233,7 @@ def test_protocol_model_round_trip(model: type[BaseModel]) -> None:
             unexpected=True,
         ),
         lambda: p.ClientInfo(name="t", version="0", unexpected=True),
-        lambda: p.Request(
-            id=1, method="initialize", params={}, unexpected=True
-        ),
+        lambda: p.Request(id=1, method="initialize", params={}, unexpected=True),
         lambda: p.Request(jsonrpc="1.0", id=1, method="initialize"),
     ],
     ids=[
@@ -320,8 +312,6 @@ def test_protocol_schema_contains_every_model() -> None:
         (COMMITTED_SCHEMA_DIR / PROTOCOL_FILE).read_text(encoding="utf-8")
     )
     defs = schema["$defs"]
-    missing = {
-        model.__name__ for model in p.PROTOCOL_MODELS
-    } - set(defs)
+    missing = {model.__name__ for model in p.PROTOCOL_MODELS} - set(defs)
     assert not missing, f"models missing from protocol schema: {sorted(missing)}"
     assert "ResearchEvent" in defs or "RunEventParams" in defs

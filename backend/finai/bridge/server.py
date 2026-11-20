@@ -78,8 +78,7 @@ def _as_int(value: object, default: int = 0) -> int:
 def _params_error(exc: ValidationError) -> dict[str, Any]:
     return {
         "errors": [
-            {"loc": list(error["loc"]), "msg": error["msg"]}
-            for error in exc.errors()
+            {"loc": list(error["loc"]), "msg": error["msg"]} for error in exc.errors()
         ]
     }
 
@@ -326,9 +325,7 @@ class BridgeServer:
             outcome = "error"
             message = friendly_error(str(exc))
         finally:
-            report = (
-                self._report_for(repl) if outcome == "completed" else None
-            )
+            report = self._report_for(repl) if outcome == "completed" else None
             finished = p.RunFinishedParams(
                 client_run_id=client_run_id,
                 outcome=outcome,
@@ -339,9 +336,7 @@ class BridgeServer:
                 evidence_status=evidence_status,
                 evidence_availability=evidence_availability(availability),
             )
-            await self._writer.notify(
-                "run.finished", finished.model_dump(mode="json")
-            )
+            await self._writer.notify("run.finished", finished.model_dump(mode="json"))
 
     @staticmethod
     def _report_for(repl: ReplLike) -> p.ReportView | None:
@@ -420,9 +415,7 @@ class BridgeServer:
             )
             for item in sessions[: parsed.limit]
         ]
-        return {
-            "sessions": [item.model_dump(mode="json") for item in summaries]
-        }
+        return {"sessions": [item.model_dump(mode="json") for item in summaries]}
 
     async def _session_history(self, params: dict[str, Any]) -> dict[str, Any]:
         p.SessionHistoryParams.model_validate(params)

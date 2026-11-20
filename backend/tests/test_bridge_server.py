@@ -54,7 +54,12 @@ class _Buffer:
 def _request(
     request_id: int, method: str, params: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    return {"jsonrpc": "2.0", "id": request_id, "method": method, "params": params or {}}
+    return {
+        "jsonrpc": "2.0",
+        "id": request_id,
+        "method": method,
+        "params": params or {},
+    }
 
 
 def _initialize_params() -> dict[str, Any]:
@@ -71,9 +76,7 @@ def _run_start_params(
     return {"client_run_id": client_run_id, "query": query, "mode": mode}
 
 
-def _server(
-    events: list[Any], *, delay_ms: int = 0
-) -> tuple[BridgeServer, _Buffer]:
+def _server(events: list[Any], *, delay_ms: int = 0) -> tuple[BridgeServer, _Buffer]:
     repl = FakeRepl(events, session_id="fake-session", delay_ms=delay_ms)
     buffer = _Buffer()
     server = BridgeServer(lambda: repl, NdjsonWriter(buffer))
@@ -132,9 +135,7 @@ async def test_run_emits_events_and_completed() -> None:
     await server._dispatch(_request(1, "initialize", _initialize_params()))
     assert _result_for(buffer, 1) is not None
 
-    await server._dispatch(
-        _request(2, "run.start", _run_start_params("r1"))
-    )
+    await server._dispatch(_request(2, "run.start", _run_start_params("r1")))
     assert _result_for(buffer, 2) == {"accepted": True}
 
     task = server._run_task
@@ -216,7 +217,9 @@ async def test_unknown_method_is_32601() -> None:
 async def test_bad_params_are_32602() -> None:
     server, buffer = _server([])
     await server._dispatch(_request(1, "initialize", _initialize_params()))
-    bad = _request(10, "run.start", {"client_run_id": "r", "query": "q", "mode": "turbo"})
+    bad = _request(
+        10, "run.start", {"client_run_id": "r", "query": "q", "mode": "turbo"}
+    )
     await server._dispatch(bad)
     error = _error_for(buffer, 10)
     assert error is not None

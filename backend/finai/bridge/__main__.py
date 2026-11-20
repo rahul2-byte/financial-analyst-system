@@ -69,15 +69,11 @@ def _repl_factory(args: argparse.Namespace) -> Callable[[], Any]:
             material = fake_material(args.fake_report)
         root = args.data_dir
         delay_ms = args.fake_delay_ms
-        return lambda: FakeRepl(
-            events, root=root, delay_ms=delay_ms, material=material
-        )
+        return lambda: FakeRepl(events, root=root, delay_ms=delay_ms, material=material)
 
     replay_snapshots: dict[str, str] | None = None
     if args.replay_snapshots is not None:
-        replay_snapshots = json.loads(
-            args.replay_snapshots.read_text(encoding="utf-8")
-        )
+        replay_snapshots = json.loads(args.replay_snapshots.read_text(encoding="utf-8"))
         if not isinstance(replay_snapshots, dict):
             raise ValueError("--replay-snapshots must contain a JSON object")
     data_dir = args.data_dir

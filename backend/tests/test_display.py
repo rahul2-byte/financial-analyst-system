@@ -166,7 +166,9 @@ def test_stage_failed_display() -> None:
 
     assert result is not None
     assert result.label == "Checking numbers"
-    assert result.detail == "validation error: Value error, bad totals [type=value_error]"
+    assert (
+        result.detail == "validation error: Value error, bad totals [type=value_error]"
+    )
     assert result.friendly == "bad totals"
 
 
@@ -185,7 +187,9 @@ def test_provider_failed_display() -> None:
     result = build_display(event, state)
 
     assert result is not None
-    assert result.notice == "⚠ OpenRouter error (timeout): timed out — upstream exploded"
+    assert (
+        result.notice == "⚠ OpenRouter error (timeout): timed out — upstream exploded"
+    )
     assert result.friendly == "upstream exploded"
 
 
@@ -393,9 +397,12 @@ def test_display_and_plain_helpers_keep_their_output() -> None:
     )
     assert display.short("a" * 80) == "a" * 71 + "…"
     assert display.title_name("HDFC BANK LTD") == "HDFC Bank Ltd"
-    assert plain.source_label(
-        {"name": "yfinance", "url": "https://x/quote/TCS.NS/history"}
-    ) == "Yahoo Finance · price history · TCS.NS"
+    assert (
+        plain.source_label(
+            {"name": "yfinance", "url": "https://x/quote/TCS.NS/history"}
+        )
+        == "Yahoo Finance · price history · TCS.NS"
+    )
     assert plain.friendly_error("Value error, bad [type=value_error]") == (
         "Value error, bad [type=value_error]"
     )
