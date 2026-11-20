@@ -434,9 +434,10 @@ def report_validation_fallback(
         for fact in facts
     )
     source_lines = "\n".join(
-        f"- {fact.source_id}: {fact.source_url or 'URL unavailable'}"
-        for fact in facts
-        if fact.source_url
+        f"- {label}: {url}"
+        for label, url in dict.fromkeys(
+            (fact.source_id, fact.source_url) for fact in facts if fact.source_url
+        )
     )
     limitation_lines = "\n".join(
         f"- {source.replace('_', ' ').title()} {details.get('status')}: "
@@ -460,6 +461,7 @@ def report_validation_fallback(
         + (source_lines or "- No source URLs were returned.")
         + "\n\n"
         + observations
+        + _data_gaps_section(availability)
         + "\n\n## Data limitations\n"
         + (limitation_lines + "\n" if limitation_lines else "")
         + "- Some requested data or source evidence was unavailable.\n"
@@ -607,9 +609,11 @@ def _render(
         (
             "Sources",
             "\n".join(
-                f"- {source_id}: {_source_display(fact)}"
-                for source_id, fact in sorted(records.items())
-                if source_id in cited_source_ids
+                dict.fromkeys(
+                    f"- {source_id}: {_source_display(fact)}"
+                    for source_id, fact in sorted(records.items())
+                    if source_id in cited_source_ids
+                )
             ),
         ),
     ]
@@ -626,7 +630,39 @@ def _render(
             for item in unavailable
         )
         sections.append(("Evidence limitations", limitations))
+    gaps = _data_gaps_lines(availability)
+    if gaps:
+        sections.append(("Data gaps", "\n".join(gaps)))
     return "\n\n".join(f"## {title}\n{body}" for title, body in sections)
+
+
+_GAP_LABELS = {
+    "market_data": "Price history",
+    "fundamentals": "Fundamentals",
+    "news": "News",
+    "technical_analysis": "Technical scan",
+    "technical_overview": "Technical overview",
+    "fundamental_analysis": "Fundamental scan",
+}
+_MAX_GAP_LINES = 5
+
+
+def _data_gaps_lines(
+    availability: dict[str, dict[str, object]] | None,
+) -> list[str]:
+    """One line per failed tool using only the recorded error text."""
+    lines = [
+        f"- {_GAP_LABELS.get(str(item.get('source')), str(item.get('source')))}: "
+        f"{item['reason']}"
+        for item in (availability or {}).values()
+        if item.get("status") == "unavailable" and item.get("reason")
+    ]
+    return lines[:_MAX_GAP_LINES]
+
+
+def _data_gaps_section(availability: dict[str, dict[str, object]] | None) -> str:
+    lines = _data_gaps_lines(availability)
+    return "\n\n## Data gaps\n" + "\n".join(lines) if lines else ""
 
 
 def _format_fact_value(fact: EvidenceFact) -> str:

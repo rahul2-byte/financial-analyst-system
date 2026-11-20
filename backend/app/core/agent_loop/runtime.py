@@ -928,6 +928,7 @@ class AgentLoop:
                                 published = report_validation_fallback(
                                     evidence.facts,
                                     (*exc.reasons, "runtime_failure"),
+                                    availability=evidence.availability,
                                 )
                                 status = "completed_with_limited_evidence"
                                 set_current_span_attributes(
@@ -1000,6 +1001,7 @@ class AgentLoop:
                                 published = report_validation_fallback(
                                     evidence.facts,
                                     (*exc.reasons, "runtime_failure"),
+                                    availability=evidence.availability,
                                 )
                                 status = "completed_with_limited_evidence"
                                 set_current_span_attributes(
