@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from collections.abc import Iterable
 from typing import Any
@@ -198,9 +197,3 @@ def render_event(event: ResearchEvent, session_id: str | None = None) -> str:
 
 def render_plain(events: Iterable[ResearchEvent], session_id: str | None = None) -> str:
     return "".join(render_event(event, session_id) for event in events)
-
-
-def render_json(events: Iterable[ResearchEvent]) -> str:
-    return (
-        json.dumps([event.model_dump(mode="json") for event in events], indent=2) + "\n"
-    )

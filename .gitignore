@@ -85,3 +85,6 @@ backend/mempalace.yaml
 !.env.example
 *.pem
 *.key
+
+# internal audit/work notes
+audit/

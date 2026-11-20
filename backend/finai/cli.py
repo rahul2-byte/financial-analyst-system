@@ -286,4 +286,4 @@ def main() -> None:
         print(str(exc), file=sys.stderr)
         sys.exit(EXIT_FAILED)
     except KeyboardInterrupt:
-        sys.exit(130)
+        sys.exit(EXIT_INTERRUPTED)

@@ -36,13 +36,6 @@ class _ProviderSearchError(Exception):
     """A timeout or transport error raised by the search provider."""
 
 
-def _httpx_limits() -> httpx.Limits:
-    return httpx.Limits(
-        max_connections=int(settings.HTTP_POOL_MAX_CONNECTIONS),
-        max_keepalive_connections=int(settings.HTTP_POOL_MAX_KEEPALIVE_CONNECTIONS),
-    )
-
-
 def _parse_datetime(value: Any) -> datetime | None:
     if value is None:
         return None

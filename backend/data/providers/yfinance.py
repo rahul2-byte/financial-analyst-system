@@ -51,7 +51,6 @@ from data.schemas.text import NewsArticle
 logger = logging.getLogger(__name__)
 
 INDIAN_STOCK_SUFFIX = ".NS"
-DEFAULT_TICKER_SUFFIXES = [".NS", ".BO", ".SS"]
 _INR_CRORE = 10_000_000
 
 
