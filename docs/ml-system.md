@@ -15,7 +15,7 @@ The repository does not contain a training pipeline for an LLM, embeddings, a ve
 | Role | Implementation | Default | Failure behavior |
 | --- | --- | --- | --- |
 | Typed route decision | `JevService` | `~typesafe/jev-latest` through OpenRouter | Deterministic/baseline route on missing key, low confidence, invalid response, or failure |
-| Main generation | `OpenRouterService` | `anthropic/claude-haiku-5.5` with OpenRouter-side fallbacks (`OPENROUTER_FALLBACK_MODELS`) | Bounded retry, circuit breaker, partial-output handling, or terminal failure |
+| Main generation | `OpenRouterService` | `openai/gpt-6.2-sol` with OpenRouter-side fallbacks (`OPENROUTER_FALLBACK_MODELS`) | Bounded retry, circuit breaker, partial-output handling, or terminal failure |
 
 The provider stream is OpenAI-compatible SSE for OpenRouter. Tool-call fragments are merged before they reach the loop. Completed provider events are archived when a `ProviderArchive` is configured.
 
@@ -39,6 +39,8 @@ The loop yields `ResearchEvent` values rather than mutating the UI. The Textual 
 Research schemas in `backend/app/core/research_schemas.py` distinguish citations, provenance, evidence records, findings, claims, and agent results. Provenance includes source, dataset, instrument, observation and ingestion times, version, quality status, and optional currency/timezone/adjustment/hash fields.
 
 The publication layer in `backend/app/core/agent_loop/publication.py` parses lookup/report outputs, checks required fields and evidence references, detects unreferenced fact markers, and allows bounded repairs. A report is not equivalent to a validated financial conclusion: the system can only validate the structural relationship between claims and the evidence available in the current run.
+
+Every report draft passes three ordered stages: Report check (JSON contract, citations, required sections), Fact check (every number bound to a verified fact), and Safety review (the Jev output reviewer). A failed stage sends its concrete reasons, the fact catalog and the source IDs back to the model through `publication.report_repair`, then all stages re-run. Retries share the `OPENROUTER_MAX_REPORT_REPAIRS` budget and stop at the run deadline. A reviewer `deny` is never retried. When retries run out, the deterministic evidence summary names the failing stage under "Data limitations". Each result is emitted as a `check.stage` event (CLI lines such as `✗ Fact check — 2 unsupported number(s), retrying (1/2)`) and stored in the run artifact.
 
 ## Deterministic quantitative layer
 

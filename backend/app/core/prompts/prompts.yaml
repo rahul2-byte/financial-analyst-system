@@ -40,7 +40,18 @@ prompts:
         template: 'The tool rejected its arguments. Correct only the invalid arguments using the registered schema and retry within the bounded retry budget. If correction is not clear, ask one targeted clarification; do not guess.'
   publication:
     report_repair:
-      template: 'Formatting repair required: {reasons}{parse_error_detail}. Return only the required report JSON. Do not call tools. Unreferenced fact IDs: {unreferenced_fact_ids}. Available verified facts relevant to this repair (fact ID = value and unit): {fact_catalog}. Available citation source IDs: {source_list}. Correct only the listed contract failures: for each unreferenced fact either add its marker and bare ID to a cited claim that states that fact, or remove that fact from report prose. Do not introduce new facts, markers, or numeric claims. Every number must remain bound to a verified fact and claim; write the marker [[fact:FACT_ID]] in prose and its bare ID in that claim numeric_refs. For a requested trading-date close, put both the close and its matching timestamp in the same major claim with both fact markers and references. Every conclusion needs supporting evidence.'
+      template: 'Formatting repair required. Verification failed at stage "{stage}". Fix these concrete problems: {details} Reason codes: {reasons}{parse_error_detail}. Return only the required report JSON. Do not call tools. Unreferenced fact IDs: {unreferenced_fact_ids}. Available verified facts relevant to this repair (fact ID = value and unit): {fact_catalog}. Available citation source IDs: {source_list}. Correct only the listed contract failures: for each unreferenced fact either add its marker and bare ID to a cited claim that states that fact, or remove that fact from report prose. Do not introduce new facts, markers, or numeric claims. Every number must remain bound to a verified fact and claim; write the marker [[fact:FACT_ID]] in prose and its bare ID in that claim numeric_refs. For a requested trading-date close, put both the close and its matching timestamp in the same major claim with both fact markers and references. Every conclusion needs supporting evidence.'
+    hint:
+      numeric_claim_unbound:
+        template: 'Replace each with its [[fact:FACT_ID]] marker from the catalog, or remove it.'
+      numeric_fact_not_rendered:
+        template: 'Put the [[fact:ID]] marker in that claim text.'
+      numeric_fact_source_missing:
+        template: 'Cite the source of that fact in the claim evidence_refs.'
+      degraded_source_claim:
+        template: 'Cite a verified source instead, or mark the claim supporting and state the limitation.'
+      numeric_fact_missing:
+        template: 'Use only fact IDs from the catalog; replace or remove each listed ID.'
   session:
     resolved_instrument:
       template: 'Runtime-resolved active Indian instrument: {ticker}. Use this identity for the current request unless the user explicitly names a different instrument.'

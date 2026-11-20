@@ -17,7 +17,7 @@ Settings are defined by `backend/app/config/models.py` and loaded by Pydantic Se
 
 ## OpenRouter models
 
-OpenRouter is the only LLM provider. Startup fails with `OPENROUTER_API_KEY is not set. Get a key at https://openrouter.ai/keys and add it to .env.` when the key is missing. `OPENROUTER_MODEL` defaults to `anthropic/claude-haiku-5.5` ($0.10/$0.50 per 1M). `OPENROUTER_FALLBACK_MODELS` (comma-separated, default `openai/gpt-6.2-sol` ($2/$10 per 1M)) is sent as OpenRouter's native `models` array (`[primary, *fallbacks]`), so OpenRouter performs the failover. The premium option is `anthropic/claude-sonnet-5.5` ($2/$10 per 1M): set it as `OPENROUTER_MODEL` for higher quality at higher cost.
+OpenRouter is the only LLM provider. Startup fails with `OPENROUTER_API_KEY is not set. Get a key at https://openrouter.ai/keys and add it to .env.` when the key is missing. `OPENROUTER_MODEL` defaults to `openai/gpt-6.2-sol` ($2/$10 per 1M). `OPENROUTER_FALLBACK_MODELS` (comma-separated, default `anthropic/claude-haiku-5.5` ($0.10/$0.50 per 1M)) is sent as OpenRouter's native `models` array (`[primary, *fallbacks]`), so OpenRouter performs the failover. The premium option is `anthropic/claude-sonnet-5.5` ($2/$10 per 1M): set it as `OPENROUTER_MODEL` for higher quality at higher cost.
 
 ## Observability variables
 

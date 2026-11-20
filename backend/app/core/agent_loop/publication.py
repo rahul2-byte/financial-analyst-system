@@ -6,7 +6,7 @@ import json
 import math
 import re
 from datetime import date, datetime
-from typing import Annotated, Literal
+from typing import Annotated, Literal, NamedTuple
 
 from app.core.observability import observe
 from app.core.prompts import PromptRegistry
@@ -381,6 +381,178 @@ _REASON_TEXT = {
 }
 
 
+STAGE_LABELS = {
+    "report_check": "Report check",
+    "fact_check": "Fact check",
+    "safety_review": "Safety review",
+}
+_FACT_CHECK_REASONS = frozenset(
+    {
+        "numeric_claim_unbound",
+        "numeric_fact_missing",
+        "numeric_fact_reference_missing",
+        "numeric_fact_not_rendered",
+        "numeric_fact_source_missing",
+        "numeric_fact_unverified",
+    }
+)
+
+
+class CheckFailure(NamedTuple):
+    """One failed check: stage, stable code, short summary, repair-grade detail."""
+
+    stage: str
+    code: str
+    summary: str
+    detail: str
+
+
+def _draft_text(draft: ReportDraft) -> str:
+    return "\n".join(
+        [
+            draft.executive_summary,
+            *draft.key_drivers,
+            draft.detailed_analysis,
+            *draft.risks,
+            draft.final_view,
+            *(claim.text for claim in draft.claims),
+        ]
+    )
+
+
+def _matching_facts(literal: str, evidence: dict[str, EvidenceFact]) -> list[str]:
+    digits = re.sub(r"[^0-9.]", "", literal)
+    try:
+        number = float(digits)
+    except ValueError:
+        return []
+    return [
+        fact.fact_id
+        for fact in evidence.values()
+        if not isinstance(fact.value, str)
+        and math.isclose(float(fact.value), number, rel_tol=1e-3, abs_tol=1e-9)
+    ][:3]
+
+
+def _unbound_detail(
+    draft: ReportDraft, evidence: dict[str, EvidenceFact], hint: str
+) -> tuple[str, str]:
+    text = _FACT_MARKER.sub("", _draft_text(draft))
+    seen: dict[str, re.Match[str]] = {}
+    for match in _NUMBER.finditer(text):
+        seen.setdefault(match.group(0), match)
+    found = list(seen.values())[:5]
+    parts = []
+    for match in found:
+        context = " ".join(text[max(0, match.start() - 40) : match.end() + 20].split())
+        matches = _matching_facts(match.group(0), evidence)
+        expected = f" (matching fact: {', '.join(matches)})" if matches else ""
+        parts.append(f'"{match.group(0)}" in "...{context}..."{expected}')
+    return (
+        f"{len(found)} unsupported number(s)",
+        f"unbound numbers: {'; '.join(parts)}. {hint}",
+    )
+
+
+def _claim_pairs_detail(
+    draft: ReportDraft, evidence: dict[str, EvidenceFact], code: str, fix: str
+) -> tuple[str, str]:
+    rendered = code == "numeric_fact_not_rendered"
+    bad: list[str] = []
+    for claim in draft.claims:
+        cited = {
+            c.source_id for c in draft.citations if c.citation_id in claim.evidence_refs
+        }
+        for ref in claim.numeric_refs:
+            fact = evidence.get(ref)
+            if fact is None:
+                continue
+            if rendered and ref not in _FACT_MARKER.findall(claim.text):
+                bad.append(f"{claim.claim_id}:{ref}")
+            elif not rendered and fact.source_id not in cited:
+                bad.append(f"{claim.claim_id}:{ref} (source {fact.source_id})")
+    return (
+        f"{len(bad)} claim fact(s) {'unrendered' if rendered else 'uncited'}",
+        f"claim:fact pairs {', '.join(bad[:6])}. {fix}",
+    )
+
+
+def describe_check_failures(
+    draft: ReportDraft | None,
+    evidence: dict[str, EvidenceFact],
+    sources: dict[str, dict[str, str]] | None,
+    reasons: tuple[str, ...],
+    prompts: PromptRegistry | None = None,
+) -> list[CheckFailure]:
+    """Turn publication reason codes into stage-tagged, concrete failures."""
+    registry = prompts or PromptRegistry.bundled()
+
+    def hint(code: str) -> str:
+        key = f"publication.hint.{code}"
+        return registry.get(key) if key in set(registry.keys()) else ""
+
+    failures: list[CheckFailure] = []
+    records = sources or {}
+    for code in dict.fromkeys(reasons):
+        stage = "fact_check" if code in _FACT_CHECK_REASONS else "report_check"
+        summary = _REASON_TEXT.get(code, f"{code.replace('_', ' ')}.")
+        detail = summary
+        if draft is not None:
+            claims = draft.claims
+            if code == "numeric_claim_unbound":
+                summary, detail = _unbound_detail(draft, evidence, hint(code))
+            elif code == "numeric_fact_missing":
+                ids = sorted(
+                    {
+                        fid
+                        for fid in [
+                            *_FACT_MARKER.findall(_draft_text(draft)),
+                            *(r for c in claims for r in c.numeric_refs),
+                        ]
+                        if fid not in evidence
+                    }
+                )
+                summary = f"{len(ids)} unknown fact ID(s)"
+                detail = f"fact IDs not in the catalog: {', '.join(ids)}. " + hint(code)
+            elif code == "numeric_fact_reference_missing":
+                ids = list(unreferenced_fact_markers(draft))
+                summary = f"{len(ids)} unreferenced fact marker(s)"
+                detail = (
+                    f"markers without a claim numeric_refs entry: {', '.join(ids)}."
+                )
+            elif code in {"numeric_fact_not_rendered", "numeric_fact_source_missing"}:
+                summary, detail = _claim_pairs_detail(draft, evidence, code, hint(code))
+            elif code in {"claim_unsupported", "major_claim_unsupported"}:
+                ids = [c.claim_id for c in claims if not c.evidence_refs]
+                detail = f"claims without evidence_refs: {', '.join(ids)}."
+            elif code == "degraded_source_claim":
+                bad = [
+                    c.claim_id
+                    for c in claims
+                    if c.importance == "major"
+                    and any(
+                        records.get(ct.source_id, {}).get("quality_status")
+                        == "degraded"
+                        for ct in draft.citations
+                        if ct.citation_id in c.evidence_refs
+                    )
+                ]
+                detail = (
+                    f"major claims {', '.join(bad)} cite a degraded source. "
+                    + hint(code)
+                )
+        failures.append(CheckFailure(stage, code, summary, f"[{code}] {detail}"))
+    return failures
+
+
+def _failed_stage_line(stage: str | None, summaries: tuple[str, ...]) -> str:
+    if not stage:
+        return ""
+    label = STAGE_LABELS.get(stage, stage)
+    reasons = "; ".join(dict.fromkeys(summaries)) or "verification failed"
+    return f"- {label} failed after repair attempts: {reasons}\n"
+
+
 def _source_records(evidence: dict[str, EvidenceFact]) -> dict[str, EvidenceFact]:
     sources: dict[str, EvidenceFact] = {}
     for fact in sorted(evidence.values(), key=lambda item: item.fact_id):
@@ -400,8 +572,12 @@ def report_validation_fallback(
     evidence: dict[str, EvidenceFact],
     reasons: tuple[str, ...] = (),
     availability: dict[str, dict[str, object]] | None = None,
+    *,
+    failed_stage: str | None = None,
+    failure_summaries: tuple[str, ...] = (),
 ) -> str:
     """Give the user a safe result when a model draft fails publication checks."""
+    stage_line = _failed_stage_line(failed_stage, failure_summaries)
     explanation = " ".join(
         dict.fromkeys(
             _REASON_TEXT.get(reason, "The report failed a verification check.")
@@ -419,7 +595,8 @@ def report_validation_fallback(
             + "\n\n## Verified evidence\n"
             "No verified evidence was returned.\n\n"
             "## Data limitations\n"
-            "- The requested data or provider response was unavailable.\n"
+            + stage_line
+            + "- The requested data or provider response was unavailable.\n"
             "- No unsupported financial figure or conclusion was inferred.\n"
             "- Missing evidence is reported explicitly; rerun when the source is available.\n\n"
             "## Conclusion\n"
@@ -463,6 +640,7 @@ def report_validation_fallback(
         + observations
         + _data_gaps_section(availability)
         + "\n\n## Data limitations\n"
+        + stage_line
         + (limitation_lines + "\n" if limitation_lines else "")
         + "- Some requested data or source evidence was unavailable.\n"
         "- No unsupported investment conclusion was inferred.\n"
@@ -478,8 +656,10 @@ def report_repair_instruction(
     unreferenced_fact_ids: tuple[str, ...] = (),
     sources: dict[str, dict[str, str]] | None = None,
     prompts: PromptRegistry | None = None,
+    stage: str = "report_check",
+    details: tuple[str, ...] = (),
 ) -> str:
-    """Return one bounded correction request after a report-format failure."""
+    """Return one bounded correction request after a failed check stage."""
     selected_ids = set(unreferenced_fact_ids)
     facts = [
         fact
@@ -498,7 +678,9 @@ def report_repair_instruction(
     registry = prompts or PromptRegistry.bundled()
     return registry.render(
         "publication.report_repair",
+        stage=STAGE_LABELS.get(stage, stage),
         reasons=", ".join(reasons),
+        details=" ".join(details) or "none.",
         parse_error_detail=detail,
         fact_catalog=fact_catalog,
         source_list=source_list,

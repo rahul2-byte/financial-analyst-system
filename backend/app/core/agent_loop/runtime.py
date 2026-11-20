@@ -17,10 +17,13 @@ import httpx
 from app.core.agent_loop.evidence import EvidenceAccounting
 from app.core.agent_loop.model_streaming import ModelBudgetExceeded, ModelStreaming
 from app.core.agent_loop.publication import (
+    STAGE_LABELS,
+    CheckFailure,
     LookupAnswerV1,
     PublicationError,
     ReportDraft,
     ReportParseError,
+    describe_check_failures,
     lookup_repair_instruction,
     parse_lookup_answer,
     parse_report_draft,
@@ -45,6 +48,7 @@ from app.core.prompts import PromptRegistry
 from app.core.skills import SkillPackage, SkillRegistry
 from app.core.ticker import parse_ticker
 from app.events.models import (
+    CheckStageResult,
     ClarificationRequested,
     EventFactory,
     ModelRequestStarted,
@@ -325,6 +329,7 @@ class AgentLoop:
         evidence = EvidenceAccounting()
         evidence_warning_added = False
         report_parse_repair_attempts = 0
+        all_stages: list[dict[str, Any]] = []
         report_validation_repair_attempts = 0
         lookup_repair_attempts = 0
         model_generation_retry_attempts = 0
@@ -855,6 +860,10 @@ class AgentLoop:
                                 category="model_generation",
                             )
                         draft = None
+                        failures: list[CheckFailure] = []
+                        fail_reasons: tuple[str, ...] = ()
+                        parse_failure = False
+                        published = ""
                         try:
                             draft = parse_report_draft(assistant.content)
                             self.last_report_result = {
@@ -892,64 +901,17 @@ class AgentLoop:
                                 factory.run_id,
                                 exc.detail,
                             )
-                            if (
-                                report_parse_repair_attempts
-                                + report_validation_repair_attempts
-                                < self.config.max_report_repairs
-                            ):
-                                report_parse_repair_attempts += 1
-                                with span(
-                                    "report.repair",
-                                    {
-                                        "repair.reason": "parse_failure",
-                                        "report.parse_error": exc.detail,
-                                        "repair.attempt": report_parse_repair_attempts,
-                                    },
-                                ) as repair_span:
-                                    repair_span.add_event(
-                                        "repair.requested", {"error": exc.detail}
-                                    )
-                                    history.append(
-                                        Message(
-                                            role="system",
-                                            content=report_repair_instruction(
-                                                evidence.facts,
-                                                exc.reasons,
-                                                parse_error=exc.detail,
-                                                sources=evidence.sources,
-                                                prompts=self.prompt_registry,
-                                            ),
-                                            prompt_key="publication.report_repair",
-                                        )
-                                    )
-                                continue
-                            if evidence.facts:
-                                published = report_validation_fallback(
-                                    evidence.facts,
-                                    (*exc.reasons, "runtime_failure"),
-                                    availability=evidence.availability,
+                            parse_failure = True
+                            fail_reasons = exc.reasons
+                            failures = [
+                                CheckFailure(
+                                    "report_check",
+                                    "structured_report_invalid",
+                                    "report is not valid contract JSON",
+                                    "[structured_report_invalid] The draft was not "
+                                    "valid JSON for the required report contract.",
                                 )
-                                status = "completed_with_limited_evidence"
-                                set_current_span_attributes(
-                                    {
-                                        "fallback.used": True,
-                                        "fallback.reason": "report_parse_repair_failure",
-                                    }
-                                )
-                                logger.error(
-                                    "using evidence fallback after report repair failure "
-                                    "run_id=%s stream_error=%s parse_error=%s",
-                                    factory.run_id,
-                                    type(stream_error).__name__
-                                    if stream_error
-                                    else None,
-                                    exc.detail,
-                                )
-                            else:
-                                raise AgentLoopError(
-                                    f"report parsing failed after repair: {exc.detail}",
-                                    category="report_parse",
-                                ) from exc
+                            ]
                         except PublicationError as exc:
                             self.last_report_result = {
                                 "status": "structured",
@@ -964,18 +926,64 @@ class AgentLoop:
                                 factory.run_id,
                                 exc.reasons,
                             )
-                            if (
-                                report_parse_repair_attempts
-                                + report_validation_repair_attempts
-                                < self.config.max_report_repairs
-                            ):
-                                report_validation_repair_attempts += 1
+                            fail_reasons = exc.reasons
+                            failures = describe_check_failures(
+                                draft,
+                                evidence.facts,
+                                evidence.sources,
+                                exc.reasons,
+                                self.prompt_registry,
+                            )
+                        stage_log = all_stages
+                        self.last_report_result["stages"] = stage_log
+                        repairs_used = (
+                            report_parse_repair_attempts
+                            + report_validation_repair_attempts
+                        )
+                        if not failures:
+                            for stage in ("report_check", "fact_check"):
+                                yield self._stage_event(
+                                    factory, stage_log, stage, [], repairs_used
+                                )
+                        if failures:
+                            failed = {failure.stage for failure in failures}
+                            failed_stage = next(
+                                stage
+                                for stage in ("report_check", "fact_check")
+                                if stage in failed
+                            )
+                            summaries = tuple(f.summary for f in failures)
+                            can_retry = (
+                                repairs_used < self.config.max_report_repairs
+                                and time.perf_counter() - started
+                                < self.config.max_run_seconds
+                            )
+                            if parse_failure:
+                                shown: tuple[str, ...] = ("report_check",)
+                            else:
+                                shown = ("report_check", "fact_check")
+                            for stage in shown:
+                                yield self._stage_event(
+                                    factory,
+                                    stage_log,
+                                    stage,
+                                    [f.summary for f in failures if f.stage == stage],
+                                    repairs_used + 1 if can_retry else repairs_used,
+                                    retrying=can_retry,
+                                )
+                            if can_retry:
+                                if parse_failure:
+                                    report_parse_repair_attempts += 1
+                                else:
+                                    report_validation_repair_attempts += 1
                                 with span(
                                     "report.repair",
                                     {
-                                        "repair.reason": "publication_validation_failure",
-                                        "report.validation_error": str(exc),
-                                        "repair.attempt": report_validation_repair_attempts,
+                                        "repair.reason": failed_stage,
+                                        "report.validation_error": "; ".join(
+                                            fail_reasons
+                                        ),
+                                        "repair.attempt": repairs_used + 1,
                                     },
                                 ):
                                     history.append(
@@ -983,7 +991,10 @@ class AgentLoop:
                                             role="system",
                                             content=report_repair_instruction(
                                                 evidence.facts,
-                                                exc.reasons,
+                                                fail_reasons,
+                                                parse_error=(
+                                                    "parse" if parse_failure else None
+                                                ),
                                                 unreferenced_fact_ids=(
                                                     unreferenced_fact_markers(draft)
                                                     if draft
@@ -991,6 +1002,10 @@ class AgentLoop:
                                                 ),
                                                 sources=evidence.sources,
                                                 prompts=self.prompt_registry,
+                                                stage=failed_stage,
+                                                details=tuple(
+                                                    f.detail for f in failures
+                                                ),
                                             ),
                                             prompt_key="publication.report_repair",
                                         )
@@ -999,31 +1014,45 @@ class AgentLoop:
                             if evidence.facts:
                                 published = report_validation_fallback(
                                     evidence.facts,
-                                    (*exc.reasons, "runtime_failure"),
+                                    (*fail_reasons, "runtime_failure"),
                                     availability=evidence.availability,
+                                    failed_stage=failed_stage,
+                                    failure_summaries=summaries,
                                 )
                                 status = "completed_with_limited_evidence"
                                 set_current_span_attributes(
                                     {
                                         "fallback.used": True,
-                                        "fallback.reason": "publication_repair_failure",
+                                        "fallback.reason": (
+                                            "report_parse_repair_failure"
+                                            if parse_failure
+                                            else "publication_repair_failure"
+                                        ),
+                                        "fallback.stage": failed_stage,
                                     }
                                 )
                                 logger.error(
-                                    "using evidence fallback after publication repair failure "
-                                    "run_id=%s stream_error=%s reasons=%s",
+                                    "using evidence fallback after repair failure "
+                                    "run_id=%s stage=%s stream_error=%s reasons=%s",
                                     factory.run_id,
+                                    failed_stage,
                                     type(stream_error).__name__
                                     if stream_error
                                     else None,
-                                    exc.reasons,
+                                    fail_reasons,
+                                )
+                            elif parse_failure:
+                                raise AgentLoopError(
+                                    "report parsing failed after repair: "
+                                    + "; ".join(summaries),
+                                    category="report_parse",
                                 )
                             else:
                                 raise AgentLoopError(
                                     "report publication validation failed after repair: "
-                                    + "; ".join(exc.reasons),
+                                    + "; ".join(fail_reasons),
                                     category="report_validation",
-                                ) from exc
+                                )
                         if message_writer:
                             message_writer(Message(role="assistant", content=published))
                         for offset in range(0, len(published), 64):
@@ -1598,6 +1627,39 @@ class AgentLoop:
         )
         async for item in streamer.stream(request_messages, factory, round_number):
             yield item
+
+    def _stage_event(
+        self,
+        factory: EventFactory,
+        log: list[dict[str, Any]],
+        stage: str,
+        reasons: list[str],
+        attempt: int,
+        *,
+        retrying: bool = False,
+    ) -> CheckStageResult:
+        """Record one verification stage result and return its event."""
+        event = factory.make(
+            CheckStageResult,
+            stage=stage,
+            label=STAGE_LABELS[stage],
+            passed=not reasons,
+            attempt=attempt,
+            max_attempts=self.config.max_report_repairs,
+            retrying=retrying,
+            reasons=reasons,
+        )
+        log.append(
+            {
+                "stage": stage,
+                "passed": not reasons,
+                "attempt": attempt,
+                "max_attempts": self.config.max_report_repairs,
+                "retrying": retrying,
+                "reasons": list(reasons),
+            }
+        )
+        return event
 
     def _model_for_history(
         self, messages: list[Message], controller_route: RoutePlan | None = None

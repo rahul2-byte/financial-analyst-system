@@ -122,6 +122,7 @@ _STDOUT_EVENTS = frozenset(
 _STDERR_EVENTS = frozenset(
     {
         "stage.started",
+        "check.stage",
         "tool.started",
         "tool.completed",
         "tool.failed",

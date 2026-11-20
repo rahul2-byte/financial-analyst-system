@@ -4,6 +4,7 @@ from .ledger import TraceLedger
 from .models import (
     ApprovalRequested,
     ApprovalResolved,
+    CheckStageResult,
     ClarificationRequested,
     EventFactory,
     EventMeta,
@@ -26,6 +27,7 @@ from .models import (
 __all__ = [
     "ApprovalRequested",
     "ApprovalResolved",
+    "CheckStageResult",
     "ClarificationRequested",
     "EventFactory",
     "EventMeta",

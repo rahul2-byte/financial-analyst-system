@@ -135,6 +135,18 @@ def render_event(event: ResearchEvent, session_id: str | None = None) -> str:
         return f"\nYou\n{sanitize_terminal_text(event.query)}\n\nFIN-AI\n"
     if event.type == "stage.started":
         return f"\n◉ {sanitize_terminal_text(event.label)}\n"
+    if event.type == "check.stage":
+        label = sanitize_terminal_text(event.label)
+        if event.passed:
+            return f"  ✓ {label}\n"
+        reasons = sanitize_terminal_text("; ".join(event.reasons[:2]))
+        reasons = f" — {reasons}" if reasons else ""
+        tail = (
+            f", retrying ({event.attempt}/{event.max_attempts})"
+            if event.retrying
+            else ", using verified-evidence fallback"
+        )
+        return f"  ✗ {label}{reasons}{tail}\n"
     if event.type == "tool.started":
         detail = f" · {sanitize_terminal_text(event.detail)}" if event.detail else ""
         return f"  ◉ {sanitize_terminal_text(event.tool)}{detail}\n"

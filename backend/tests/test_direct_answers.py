@@ -74,3 +74,22 @@ def test_unrecognised_payload_uses_compact_listing() -> None:
     text = _compact_listing(data, PROV)
     assert "name: Infosys" in text and "score: 3" in text
     assert "{" not in text and "nested" not in text
+
+
+def test_technical_close_from_real_yfinance_row_shape() -> None:
+    from app.core.agent_loop.tool_runner import _technical_key_values
+
+    snapshot = {"as_of": "2026-11-20T00:00:00+05:30", "measurements": []}
+    rows = [{"Date": "2026-11-20", "Close": 1377.5, "Open": 1370.0}]
+    kv = _technical_key_values(snapshot, rows)
+    assert kv["close"] == 1377.5
+    assert _technical_key_values(snapshot, [{"close": 9.0}])["close"] == 9.0
+    data, _ = _tech()
+    text = format_direct_answer("analysis:get_technical_overview", data, PROV, kv)
+    assert text and "close ₹1,377.50" in text and "close n/a" not in text
+
+
+def test_fundamentals_units_labelled() -> None:
+    data = {"ticker": "INFY.NS", "returnOnEquity": 0.312, "debtToEquity": 0.453}
+    text = format_direct_answer("data:fetch_fundamentals", data, PROV)
+    assert text and "ROE 31.2%" in text and "Debt/Equity 0.45x" in text

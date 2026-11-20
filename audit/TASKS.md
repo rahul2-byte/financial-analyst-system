@@ -86,3 +86,14 @@ Deferred to wave 3 / Phase 3: F-20 (peer/benchmark analytics), F-41 (point-in-ti
 | Model compare | haiku-5.5 vs gpt-6.2-sol vs gpt-5.6-luna, 12 live runs | sonnet tester | done — `audit/09-model-compare.md`; sol only model with a synthesized compare report; haiku synthesis rejected → deterministic evidence dump |
 
 **Phase 1.8 complete:** ruff + format clean · mypy clean (222 files) · 802 passed · coverage ~85.8% · evals.validate valid · finai --help OK.
+
+## Phase 1.9 — staged answer checks with feedback retry; default gpt-6.2-sol
+| Agent | Scope | Status |
+|---|---|---|
+| sonnet (worktree) | Report check → Fact check stages, stage-specific repair feedback, `check.stage` events + CLI lines, fallback names failed stage; default `openai/gpt-6.2-sol`, fallback `anthropic/claude-haiku-5.5` | merged; live test found regression (safety reviewer added to structured reports, rejected good report) |
+| sonnet (main) | rework: reviewer only on pre-existing free-text path; unknown fact-ID hint | done |
+| sonnet (worktree) | technical close read `Close` (yfinance); ROE %, D/E ratio display | merged |
+
+Live (`audit/usage/stages/`): sol HDFC vs ICICI — report check failed (citation) → retried → published report, 61 s. Haiku still fails contract JSON / invents fact IDs → evidence fallback. RELIANCE direct answer shows close ₹1,377.50.
+
+**Phase 1.9 complete:** ruff + format clean · mypy clean (223 files) · 812 passed · coverage ~86% · evals.validate valid.

@@ -1081,7 +1081,10 @@ def _technical_key_values(snapshot: dict[str, Any], rows: Any) -> dict[str, Any]
             values[str(item["indicator"])] = item.get("value")
     ordered = {k: values[k] for k in _TECHNICAL_KEY_INDICATORS if k in values}
     last = rows[-1] if isinstance(rows, list) and rows else None
-    close = last.get("close") if isinstance(last, dict) else None
+    close = None
+    if isinstance(last, dict):
+        # yfinance rows keep pandas "Close"; Upstox rows use lowercase "close".
+        close = last.get("close", last.get("Close"))
     return {
         "as_of": snapshot.get("as_of"),
         "close": close,

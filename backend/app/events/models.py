@@ -77,6 +77,25 @@ class StageFailed(BaseModel):
     message: str
 
 
+class CheckStageResult(BaseModel):
+    """Outcome of one answer-verification stage for one draft.
+
+    ``attempt`` is the repair retry this result triggers when ``retrying`` is
+    true, otherwise the number of repair retries already used; ``max_attempts``
+    is the shared repair budget.
+    """
+
+    type: Literal["check.stage"] = "check.stage"
+    meta: EventMeta
+    stage: str
+    label: str
+    passed: bool
+    attempt: int = Field(ge=0)
+    max_attempts: int = Field(ge=0)
+    retrying: bool = False
+    reasons: list[str] = Field(default_factory=list)
+
+
 class ToolStarted(BaseModel):
     type: Literal["tool.started"] = "tool.started"
     meta: EventMeta
@@ -257,6 +276,7 @@ ResearchEvent = Annotated[
     | StageStarted
     | StageCompleted
     | StageFailed
+    | CheckStageResult
     | ToolStarted
     | ToolCompleted
     | ToolFailed

@@ -8,7 +8,7 @@ import json
 import re
 import time
 from collections.abc import AsyncIterator, Callable
-from typing import Any
+from typing import Any, TypeGuard
 from uuid import UUID
 
 from app.config import settings
@@ -621,6 +621,10 @@ def _num(value: Any, digits: int = 2) -> str:
     return f"{value:,.{digits}f}"
 
 
+def _is_number(value: Any) -> TypeGuard[int | float]:
+    return isinstance(value, int | float) and not isinstance(value, bool)
+
+
 def _source_line(provenance: dict[str, Any]) -> str:
     source = _SOURCE_LABELS.get(
         str(provenance.get("source")), str(provenance.get("source"))
@@ -678,7 +682,15 @@ def _fundamental_answer(data: dict[str, Any], provenance: dict[str, Any]) -> str
     if not any(data.get(key) is not None for key, _ in _FUND_FIELDS):
         return None
     ticker = str(data.get("ticker") or provenance.get("instrument") or "").strip()
-    parts = [f"{lab} {_num(data.get(key))}" for key, lab in _FUND_FIELDS]
+    parts = []
+    for key, lab in _FUND_FIELDS:
+        value = data.get(key)
+        if key == "returnOnEquity" and _is_number(value):
+            parts.append(f"{lab} {_num(value * 100, 1)}%")  # fraction -> percent
+        elif key == "debtToEquity" and _is_number(value):
+            parts.append(f"{lab} {_num(value)}x")  # provider normalises to a ratio
+        else:
+            parts.append(f"{lab} {_num(value)}")
     head = f"{ticker or 'Fundamentals'} key fundamentals: "
     return "\n".join([head + " · ".join(parts), _source_line(provenance)])
 
