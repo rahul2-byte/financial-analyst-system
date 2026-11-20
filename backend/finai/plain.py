@@ -39,6 +39,19 @@ REVIEW_UNAVAILABLE_NOTE = (
 _PYDANTIC_VALUE_ERROR = re.compile(r"Value error, (.*?)(?: \[type=|\n|$)")
 
 
+def dedupe_sources(sources: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Drop repeated sources, keyed by url and label."""
+    seen: set[tuple[str, str]] = set()
+    unique: list[dict[str, str]] = []
+    for source in sources:
+        key = (source.get("url", ""), source_label(source))
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(source)
+    return unique
+
+
 def source_label(source: dict[str, str]) -> str:
     """Readable label: explicit title, else provider · dataset · instrument."""
     title = source.get("title")
@@ -101,6 +114,7 @@ def review_unavailable(event: Any) -> bool:
 
 
 def render_sources_plain(sources: list[dict[str, str]]) -> str:
+    sources = dedupe_sources(sources)
     lines = [f"\nSources · {len(sources)}"]
     for index, source in enumerate(sources, 1):
         url = source.get("url", "")

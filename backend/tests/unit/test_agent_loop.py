@@ -284,10 +284,12 @@ def test_hidden_reasoning_timeout_returns_partial_evidence_fallback() -> None:
         _collect(loop, [Message(role="user", content="publish a report")])
     )
 
-    assert events[-1].type == "run.failed"
-    assert events[-1].category == "model_generation"
+    # A tool succeeded, so the provider stall now yields the deterministic
+    # evidence summary instead of a bare failure.
+    assert events[-1].type == "run.completed"
+    assert events[-1].completion_reason == "model_unavailable_evidence_summary"
     response = "".join(event.text for event in events if event.type == "response.delta")
-    assert response == ""
+    assert response.startswith("Model synthesis unavailable (")
     assert "hidden reasoning" not in response
 
 

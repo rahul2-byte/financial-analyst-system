@@ -6,14 +6,16 @@ import asyncio
 import json
 import logging
 import os
+import re
 import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
+import httpx
 from app.core.agent_loop.evidence import EvidenceAccounting
-from app.core.agent_loop.model_streaming import ModelStreaming
+from app.core.agent_loop.model_streaming import ModelBudgetExceeded, ModelStreaming
 from app.core.agent_loop.publication import (
     LookupAnswerV1,
     PublicationError,
@@ -30,6 +32,7 @@ from app.core.agent_loop.publication import (
 )
 from app.core.agent_loop.terminal_state import terminal_status
 from app.core.agent_loop.tool_execution import ToolExecutor
+from app.core.circuit_breaker import CircuitBreakerOpen
 from app.core.diagnostics import diagnostic_payload, diagnostics_enabled
 from app.core.guardrails import (
     assess_input_safety,
@@ -70,6 +73,8 @@ from app.models.request_models import Message
 from app.models.routing import ExecutionMode, ModelTier, NextAction, RoutePlan
 from app.observability.tracing import set_current_span_attributes, span
 from app.security.policy import redact_secrets
+from app.services.chatgpt_codex_service import ChatGPTCodexError
+from app.services.hive_service import HiveProviderError
 
 logger = logging.getLogger(__name__)
 
@@ -163,6 +168,8 @@ class AgentLoopError(RuntimeError):
 class AgentLoopConfig:
     max_rounds: int = 12
     max_run_seconds: float = 150.0
+    # Extra time allowed after the budget for the single wrap-up model call.
+    wrapup_grace_seconds: float = 12.0
     emergency_max_tool_calls: int = 128
     max_input_tokens: int = 32_000
     duplicate_reuse_limit: int = 1
@@ -327,6 +334,8 @@ class AgentLoop:
         controller_route: RoutePlan | None = None
         stop_reason: str | None = None
         budget_wrapup = False
+        run_state: dict[str, Any] = {}
+        successful_payloads: list[tuple[str, dict[str, Any]]] = []
         provider = self.config.decision_provider
         review_enabled = provider is not None and hasattr(provider, "review_output")
         if review_enabled and not getattr(provider, "review_available", True):
@@ -525,6 +534,14 @@ class AgentLoop:
                             selected_skills,
                             controller_route,
                             disable_tools=tools_disabled,
+                            deadline=started
+                            + self.config.max_run_seconds
+                            + (
+                                self.config.wrapup_grace_seconds
+                                if budget_wrapup
+                                else 0.0
+                            ),
+                            run_state=run_state,
                         ):
                             if isinstance(item, TextDelta):
                                 streamed_text.append(item.text)
@@ -546,6 +563,12 @@ class AgentLoop:
                             else:
                                 assistant = item
                         controller_route = None
+                    except ModelBudgetExceeded:
+                        if budget_wrapup:
+                            raise
+                        # The budget ran out mid-call: the loop top now starts
+                        # the existing wrap-up round (tools disabled).
+                        continue
                     except Exception as exc:
                         stream_error = exc
                         partial_text = "".join(streamed_text)
@@ -1285,6 +1308,7 @@ class AgentLoop:
                         successful_tools += 1
                         successful_tool_signatures.add(signature)
                         evidence.record_success(name, payload)
+                        successful_payloads.append((name, payload))
                         history.append(
                             Message(
                                 role="tool",
@@ -1441,6 +1465,25 @@ class AgentLoop:
             raise
         except Exception as exc:
             logger.exception("Agent loop failed")
+            summary = (
+                _evidence_summary(successful_payloads, _failure_reason(exc))
+                if successful_payloads and _is_model_unavailable(exc)
+                else None
+            )
+            if summary is not None:
+                if message_writer:
+                    message_writer(Message(role="assistant", content=summary))
+                for offset in range(0, len(summary), 64):
+                    yield factory.make(TextDelta, text=summary[offset : offset + 64])
+                yield factory.make(
+                    RunCompleted,
+                    terminal_status="completed_with_limited_evidence",
+                    duration_ms=round((time.perf_counter() - started) * 1000, 2),
+                    evidence_status="limited",
+                    evidence_availability=list(evidence.availability.values()),
+                    completion_reason="model_unavailable_evidence_summary",
+                )
+                return
             yield factory.make(
                 RunFailed,
                 message=str(exc),
@@ -1514,6 +1557,8 @@ class AgentLoop:
         skills: list[SkillPackage],
         controller_route: RoutePlan | None = None,
         disable_tools: bool = False,
+        deadline: float | None = None,
+        run_state: dict[str, Any] | None = None,
     ) -> AsyncIterator[
         TextDelta
         | Message
@@ -1543,6 +1588,8 @@ class AgentLoop:
             report_repair_timeout_seconds=self.config.report_repair_timeout_seconds,
             first_round_max_tokens=self.config.first_round_max_tokens,
             structured_output=self._answer_contract() != "freeform",
+            deadline=deadline,
+            run_state=run_state,
         )
         request_messages = _report_repair_history(messages) if is_repair else messages
         request_messages = _compact_model_history(
@@ -1833,6 +1880,128 @@ def _tool_call_identity(call: dict[str, Any]) -> tuple[str, str]:
     name = str(function.get("name") or call.get("name") or "unknown")
     call_id = str(call.get("id") or f"call-{name}")
     return name, call_id
+
+
+_SUMMARY_INDICATORS = (
+    "RSI_14",
+    "SMA_20",
+    "SMA_50",
+    "SMA_200",
+    "EMA_20",
+    "EMA_50",
+    "EMA_200",
+    "MACD_12_26_9",
+    "ADX_14",
+    "ATR_14",
+)
+_SUMMARY_FUNDAMENTALS = (
+    "peRatio",
+    "forwardPE",
+    "priceToBook",
+    "debtToEquity",
+    "profitMargins",
+    "returnOnEquity",
+    "marketCap",
+)
+
+
+def _is_model_unavailable(exc: BaseException) -> bool:
+    """Allowlist: only model-provider unavailability may degrade to a summary.
+
+    Reviewer denials, output-policy, validation, guardrail errors and bugs
+    stay fail-closed.
+    """
+    if isinstance(exc, AgentLoopError):
+        return exc.category == "model_generation"
+    return isinstance(
+        exc,
+        (
+            ModelBudgetExceeded,
+            HiveProviderError,
+            ChatGPTCodexError,
+            CircuitBreakerOpen,
+            httpx.HTTPError,
+            TimeoutError,
+            ConnectionError,
+        ),
+    )
+
+
+def _failure_reason(exc: Exception) -> str:
+    if isinstance(exc, ModelBudgetExceeded):
+        return "run time budget reached"
+    text = str(redact_secrets(str(exc))).strip()
+    match = re.search(r"HTTP \d{3}", text)
+    if match:
+        return match.group(0)
+    return (text.splitlines()[0][:80] if text else type(exc).__name__) or "error"
+
+
+def _tool_bullet(name: str, payload: dict[str, Any]) -> str:
+    """One bullet of values copied verbatim from a tool payload (no new maths)."""
+    data = payload.get("data")
+    parts: list[str] = []
+    if isinstance(data, dict):
+        if data.get("ticker"):
+            parts.append(f"ticker {data['ticker']}")
+        latest = data.get("latest")
+        if isinstance(latest, dict):
+            if latest.get("close") is not None:
+                parts.append(f"close {latest['close']}")
+            if latest.get("timestamp") is not None:
+                parts.append(f"as_of {latest['timestamp']}")
+        if data.get("period_return_pct") is not None:
+            parts.append(f"period_return_pct {data['period_return_pct']}")
+        if data.get("period"):
+            parts.append(f"period {data['period']}")
+        if data.get("as_of") is not None:
+            parts.append(f"as_of {data['as_of']}")
+        measurements = data.get("measurements")
+        if isinstance(measurements, list):
+            wanted = {
+                m["indicator"]: m
+                for m in measurements
+                if isinstance(m, dict) and m.get("indicator") in _SUMMARY_INDICATORS
+            }
+            for indicator in _SUMMARY_INDICATORS:
+                item = wanted.get(indicator)
+                if item is not None and item.get("value") is not None:
+                    parts.append(f"{indicator} {item['value']}")
+        for key in _SUMMARY_FUNDAMENTALS:
+            if data.get(key) is not None:
+                parts.append(f"{key} {data[key]}")
+    elif isinstance(data, list):
+        parts.append(f"{len(data)} news items")
+    context = payload.get("raw_data_context")
+    if isinstance(context, str) and context:
+        parts.append(context)
+    body = "; ".join(parts) if parts else "completed (no key figures in payload)"
+    provenance = payload.get("provenance")
+    meta: list[str] = []
+    if isinstance(provenance, dict):
+        for label, key in (
+            ("source", "source"),
+            ("url", "source_url"),
+            ("observed", "observed_at"),
+            ("quality", "quality_status"),
+        ):
+            if provenance.get(key):
+                meta.append(f"{label} {provenance[key]}")
+    for source in _extract_sources(payload)[:3]:
+        if source["url"] and f"url {source['url']}" not in meta:
+            meta.append(f"url {source['url']}")
+    suffix = f" [{'; '.join(meta)}]" if meta else ""
+    return f"- {name}: {body}{suffix}"
+
+
+def _evidence_summary(results: list[tuple[str, dict[str, Any]]], reason: str) -> str:
+    """Deterministic answer built only from validated tool results."""
+    bullets = [_tool_bullet(name, payload) for name, payload in results]
+    return (
+        f"Model synthesis unavailable ({reason}). Evidence collected:\n"
+        + "\n".join(bullets)
+        + "\n"
+    )
 
 
 def _summary(payload: dict[str, Any]) -> str:

@@ -537,8 +537,12 @@ class FinancialToolRunner:
                     "success": False,
                     "error": "No usable fundamental metrics provided",
                 }
+            scan = await _blocking(FundamentalScanner().scan, raw_data)
+            key_values = _fundamental_key_values(raw_data)
             return {
-                **await _blocking(FundamentalScanner().scan, raw_data),
+                "key_values": key_values,
+                "summary": _key_values_summary(key_values),
+                **scan,
                 "provenance": provenance,
             }
 
@@ -576,7 +580,7 @@ class FinancialToolRunner:
                 if not rows:
                     return {
                         "success": False,
-                        "error": "No OHLCV data returned for ticker",
+                        "error": _no_price_data_message(ticker),
                     }
                 self._ohlcv_by_request[key] = rows
                 self._ohlcv_provenance_by_request[key] = provenance
@@ -613,7 +617,14 @@ class FinancialToolRunner:
                         )
                 except UpstoxError as exc:
                     output["warnings"].append(f"derivatives context unavailable: {exc}")
-            return {"success": True, "data": output, "provenance": provenance}
+            key_values = _technical_key_values(output, rows)
+            return {
+                "success": True,
+                "key_values": key_values,
+                "summary": _key_values_summary(key_values),
+                "data": output,
+                "provenance": provenance,
+            }
 
         if name == "analysis:run_technical_scan":
             ticker = str(arguments.get("ticker", "")).strip()
@@ -645,7 +656,7 @@ class FinancialToolRunner:
                 if not rows:
                     return {
                         "success": False,
-                        "error": "No OHLCV data returned for ticker",
+                        "error": _no_price_data_message(ticker),
                     }
                 self._ohlcv_by_request[key] = rows
                 self._ohlcv_provenance_by_request[key] = provenance
@@ -658,9 +669,13 @@ class FinancialToolRunner:
                 interval=interval,
                 provenance=provenance,
             )
+            scan_output = snapshot.model_dump(mode="json")
+            key_values = _technical_key_values(scan_output, rows)
             return {
                 "success": True,
-                "data": snapshot.model_dump(mode="json"),
+                "key_values": key_values,
+                "summary": _key_values_summary(key_values),
+                "data": scan_output,
                 "provenance": provenance,
             }
 
@@ -682,10 +697,7 @@ class FinancialToolRunner:
             if not rows:
                 return {
                     "success": False,
-                    "error": (
-                        f"No price data for {ticker}; the symbol may have changed "
-                        "(e.g. after a demerger) or been delisted."
-                    ),
+                    "error": _no_price_data_message(ticker),
                     "provenance": raw_provenance,
                 }
             issues = value.get("quality_issues", []) if isinstance(value, dict) else []
@@ -1028,6 +1040,71 @@ class FinancialToolRunner:
             )
         )
         provenance["snapshot_hash"] = stored.content_hash
+
+
+def _no_price_data_message(ticker: str) -> str:
+    return (
+        f"No price data for {ticker}; the symbol may have changed "
+        "(e.g. after a demerger) or been delisted."
+    )
+
+
+_TECHNICAL_KEY_INDICATORS = (
+    "RSI_14",
+    "SMA_20",
+    "SMA_50",
+    "SMA_200",
+    "MACD_12_26_9",
+    "MACD_SIGNAL_12_26_9",
+    "BBANDS_UPPER_20_2",
+    "BBANDS_LOWER_20_2",
+)
+_FUNDAMENTAL_KEY_FIELDS = (
+    "peRatio",
+    "forwardPE",
+    "priceToBook",
+    "returnOnEquity",
+    "debtToEquity",
+    "marketCapCrore",
+    "marketCap",
+)
+
+
+def _technical_key_values(snapshot: dict[str, Any], rows: Any) -> dict[str, Any]:
+    """Select existing latest indicator values; computes nothing new."""
+    values: dict[str, Any] = {}
+    for item in snapshot.get("measurements") or []:
+        if (
+            isinstance(item, dict)
+            and item.get("indicator") in _TECHNICAL_KEY_INDICATORS
+        ):
+            values[str(item["indicator"])] = item.get("value")
+    ordered = {k: values[k] for k in _TECHNICAL_KEY_INDICATORS if k in values}
+    last = rows[-1] if isinstance(rows, list) and rows else None
+    close = last.get("close") if isinstance(last, dict) else None
+    return {
+        "as_of": snapshot.get("as_of"),
+        "close": close,
+        **ordered,
+    }
+
+
+def _fundamental_key_values(raw_data: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: raw_data[key]
+        for key in _FUNDAMENTAL_KEY_FIELDS
+        if raw_data.get(key) is not None
+    }
+
+
+def _key_values_summary(key_values: dict[str, Any]) -> str:
+    """Compact one-line form; survives model-history truncation."""
+    parts = []
+    for key, value in key_values.items():
+        if isinstance(value, float):
+            value = round(value, 4)
+        parts.append(f"{key}={'unavailable' if value is None else value}")
+    return "key values: " + ", ".join(parts)
 
 
 def _provider_provenance(

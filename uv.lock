@@ -783,7 +783,7 @@ wheels = [
 [[package]]
 name = "financial-analyst-system"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
     { name = "httpx" },
@@ -801,8 +801,12 @@ dependencies = [
     { name = "textual" },
     { name = "trafilatura" },
     { name = "uvicorn" },
-    { name = "vectorbt" },
     { name = "yfinance" },
+]
+
+[package.optional-dependencies]
+backtest = [
+    { name = "vectorbt" },
 ]
 
 [package.dev-dependencies]
@@ -836,17 +840,18 @@ requires-dist = [
     { name = "textual", specifier = ">=0.70.0" },
     { name = "trafilatura" },
     { name = "uvicorn" },
-    { name = "vectorbt", specifier = ">=1.1,<1.2" },
+    { name = "vectorbt", marker = "extra == 'backtest'", specifier = ">=1.1,<1.2" },
     { name = "yfinance" },
 ]
+provides-extras = ["backtest"]
 
 [package.metadata.requires-dev]
 dev = [
-    { name = "mypy" },
+    { name = "mypy", specifier = ">=2.3,<3" },
     { name = "pytest" },
     { name = "pytest-asyncio" },
     { name = "pytest-cov" },
-    { name = "ruff" },
+    { name = "ruff", specifier = ">=0.16,<0.17" },
 ]
 observability = [
     { name = "arize-phoenix-otel", specifier = "==0.17.1" },

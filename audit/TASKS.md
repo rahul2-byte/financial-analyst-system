@@ -64,6 +64,15 @@ Deferred to wave 3 / Phase 3: F-20 (peer/benchmark analytics), F-41 (point-in-ti
 | U1 sonnet | reviewer outage ≠ DENY, provider-fallback event fields, whole-run deadline, router reason, tracing banner | backend/app/** except guardrails.py, ticker.py, resolver | merged (diff reviewed) |
 | U2 sonnet | M&M guardrail, INFY/ambiguity resolution, human direct-route answer, fallback + review notices, source labels, delisted message | backend/finai/**, guardrails.py, ticker.py, resolver | merged after 1 rework (fallback must not auto-resolve non-exact hits) |
 | U3 sonnet | delisted/empty price message | tool_runner.py | merged |
-| Re-test | rerun the 12 queries after merge (TUI needs tmux) | — | queued |
+| Re-test | rerun the 12 queries after merge (TUI needs tmux) | sonnet | done: 5/10 (was 3/10), 4/12 usable — `audit/06-usage-retest.md` |
 
 **Phase 1.6 complete:** ruff + format clean · mypy clean (219 files) · 793 passed · coverage 85.89% · evals.validate valid · finai --help OK.
+
+## Phase 1.7 — re-test fixes (parallel worktrees, base dcdfb6b)
+| Agent | Scope | Owns | Status |
+|---|---|---|---|
+| R1 sonnet | deadline bounds model calls; sticky fallback; deterministic evidence summary when all LLMs fail | runtime.py, model_streaming.py, app/services/**, events/models.py, config/models.py, tests/test_runtime_budget.py | merged after 1 rework (summary only on provider outage; DENY stays fail-closed) |
+| R2 sonnet | indicator key values survive truncation; Adani resolver ranking/stopwords; Tata message; dedupe sources | tool_runner.py, evidence.py, tool_execution.py, instrument_resolution.py, finai/**, tests/test_answer_quality.py | merged |
+| Re-test 2 | rerun 12 queries | sonnet | queued |
+
+**Phase 1.7 complete:** ruff + format clean · mypy clean (221 files) · 808 passed · coverage 86.04% · evals.validate valid.

@@ -67,6 +67,20 @@ _STOPWORDS = frozenset(
         "HOW",
         "GIVE",
         "ME",
+        "ON",
+        "IT",
+        "ITS",
+        "ABOUT",
+        "IN",
+        "ARE",
+        "TELL",
+        "SHOULD",
+        "WORTH",
+        "RECENT",
+        "UPDATE",
+        "UPDATES",
+        "TO",
+        "ANY",
     }
 )
 MAX_CANDIDATES_SHOWN = 5
@@ -97,7 +111,7 @@ def resolve_instrument(
         )
     terms = [token for token in _BARE.findall(query.upper()) if token not in _STOPWORDS]
     search_term = " ".join(terms) if terms else query.strip()
-    candidates = _unique_candidates(search(search_term))
+    candidates = _rank_candidates(_unique_candidates(search(search_term)), search_term)
     if not candidates and len(terms) > 1:
         # Filler words can hide the real name; try adjacent pairs, then single
         # tokens. Only an exact symbol match may resolve from this path;
@@ -139,6 +153,11 @@ def resolve_instrument(
         return InstrumentResolution(
             "resolved", ticker=_ticker(exact[0]), candidates=tuple(exact)
         )
+    containing = [item for item in candidates if _name_contains_all(item, search_term)]
+    if len(containing) == 1:
+        return InstrumentResolution(
+            "resolved", ticker=_ticker(containing[0]), candidates=tuple(containing)
+        )
     symbols = {_symbol(item) for item in candidates}
     if len(symbols) == 1:
         return InstrumentResolution(
@@ -149,6 +168,25 @@ def resolve_instrument(
         candidates=tuple(candidates),
         reason=_ambiguity_message(search_term, candidates),
     )
+
+
+def _name_contains_all(item: dict[str, Any], term: str) -> bool:
+    name = str(item.get("name") or item.get("short_name") or "").upper()
+    words = term.upper().split()
+    return bool(words) and all(word in name for word in words)
+
+
+def _rank_candidates(
+    candidates: list[dict[str, Any]], term: str
+) -> list[dict[str, Any]]:
+    """Exact symbol first, then names containing every term, then the rest."""
+
+    def rank(item: dict[str, Any]) -> int:
+        if _symbol(item) == term.upper():
+            return 0
+        return 1 if _name_contains_all(item, term) else 2
+
+    return sorted(candidates, key=rank)  # stable
 
 
 def _symbol(item: dict[str, Any]) -> str:

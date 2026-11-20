@@ -371,6 +371,14 @@ class ChatGPTCodexService(LLMServiceInterface):
     async def _generate_stream_events(
         self, messages: list[Message], model: str, kwargs: dict[str, Any]
     ) -> AsyncGenerator[dict[str, Any], None]:
+        if kwargs.pop("prefer_fallback", False) and self.fallback is not None:
+            # Sticky per run: the caller saw the primary fail for quota/auth,
+            # so skip it (and its repeated failure event) for this run.
+            async for event in self.fallback.generate_stream(
+                messages, self.fallback_model, **kwargs
+            ):
+                yield event
+            return
         credentials = await self._credentials()
         if credentials is None:
             async for event in self._fallback_stream(

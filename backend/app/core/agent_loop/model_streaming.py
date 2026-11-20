@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import time
 from collections.abc import AsyncIterator, Callable
 from typing import Any
 
@@ -21,6 +23,13 @@ from app.events.models import (
 from app.models.request_models import Message
 
 
+class ModelBudgetExceeded(TimeoutError):
+    """The run time budget ran out while a model call was in flight."""
+
+
+_STICKY_FALLBACK_REASONS = {"quota", "auth"}
+
+
 class ModelStreaming:
     """Turn provider frames into typed events and one assistant message."""
 
@@ -37,7 +46,14 @@ class ModelStreaming:
         report_repair_timeout_seconds: float = 120.0,
         structured_output: bool | None = None,
         first_round_max_tokens: int = 1024,
+        deadline: float | None = None,
+        run_state: dict[str, Any] | None = None,
     ) -> None:
+        # ``deadline`` is an absolute time.perf_counter() value bounding the
+        # whole model call; ``run_state`` is the per-run (never global) dict
+        # that remembers a primary provider that is known to be unusable.
+        self._deadline = deadline
+        self._run_state = run_state if run_state is not None else {}
         self._client = client
         self._model = model
         self._max_tokens = max_tokens
@@ -63,7 +79,7 @@ class ModelStreaming:
             in {"publication.report_repair", "publication.lookup_repair"}
             for message in messages
         )
-        async for event in self._client.generate_stream(
+        source = self._client.generate_stream(
             messages,
             self._model,
             tools=self._tool_definitions(),
@@ -87,7 +103,13 @@ class ModelStreaming:
             timeout_seconds=(
                 self._report_repair_timeout_seconds if is_repair else None
             ),
-        ):
+            **(
+                {"prefer_fallback": True}
+                if self._run_state.get("prefer_fallback")
+                else {}
+            ),
+        )
+        async for event in self._bounded(source):
             event_name = event.get("event")
             if event_name == "provider_attempt_started":
                 data = event.get("data", {})
@@ -127,6 +149,13 @@ class ModelStreaming:
                 )
             elif event_name == "provider_failed":
                 data = event.get("data", {})
+                if data.get("fallback"):
+                    if data.get("reason") in _STICKY_FALLBACK_REASONS:
+                        self._run_state["prefer_fallback"] = True
+                    key = (data.get("provider"), data.get("reason"))
+                    if key in self._run_state.setdefault("fallback_notified", set()):
+                        continue
+                    self._run_state["fallback_notified"].add(key)
                 yield factory.make(
                     ProviderFailed,
                     provider=str(data.get("provider", "hive")),
@@ -170,6 +199,37 @@ class ModelStreaming:
             sanitize_tool_calls([calls[index] for index in sorted(calls)]) or None
         )
         yield Message(role="assistant", content="".join(text), tool_calls=tool_calls)
+
+    async def _bounded(self, source: AsyncIterator[Any]) -> AsyncIterator[Any]:
+        """Yield provider frames, cutting the call off at the run deadline."""
+        if self._deadline is None:
+            async for event in source:
+                yield event
+            return
+        iterator = source.__aiter__()
+        try:
+            while True:
+                remaining = self._deadline - time.perf_counter()
+                if remaining <= 0:
+                    raise ModelBudgetExceeded(
+                        "run time budget reached during model call"
+                    )
+                try:
+                    event = await asyncio.wait_for(iterator.__anext__(), remaining)
+                except StopAsyncIteration:
+                    return
+                except TimeoutError as exc:
+                    if self._deadline - time.perf_counter() > 0.001:
+                        raise  # provider's own timeout, not the budget
+                    raise ModelBudgetExceeded(
+                        "run time budget reached during model call"
+                    ) from exc
+                yield event
+        finally:
+            aclose = getattr(iterator, "aclose", None)
+            if aclose is not None:
+                with contextlib.suppress(Exception, asyncio.CancelledError):
+                    await aclose()
 
     async def _emit_text(
         self, chunk: str, factory: EventFactory, text: list[str]

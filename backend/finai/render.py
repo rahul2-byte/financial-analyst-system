@@ -9,7 +9,7 @@ from rich.style import Style
 from rich.text import Text
 from rich.theme import Theme
 
-from .plain import source_label
+from .plain import dedupe_sources, source_label
 from .safety import sanitize_terminal_text
 from .state import PresentationState
 from .theme import COLORS
@@ -142,7 +142,7 @@ def render_context(
     output.append("Session\n", style=f"bold {COLORS['muted']}")
     output.append(f"{(session_id or 'local')[:8]} · {mode}\n\n", style=COLORS["text"])
     output.append("EVIDENCE & SOURCES\n", style=f"bold {COLORS['text']}")
-    count = len(state.sources)
+    count = len(dedupe_sources(state.sources))
     output.append(
         f"{count} verified source{'s' if count != 1 else ''}\n",
         style=COLORS["success"] if count else COLORS["muted"],
@@ -173,7 +173,7 @@ def render_context(
 
 def render_sources(sources: list[dict[str, str]]) -> Text:
     output = Text("Sources\n", style="bold")
-    for index, source in enumerate(sources, 1):
+    for index, source in enumerate(dedupe_sources(sources), 1):
         title = sanitize_terminal_text(source_label(source))
         source_type = sanitize_terminal_text(source.get("source_type", "source"))
         url = source.get("url", "")
@@ -254,7 +254,7 @@ def render_status(
     if elapsed_s is not None and state.phase.value != "idle":
         label += f" · {elapsed_s:.1f}s"
     if state.phase.value == "complete" and state.sources:
-        label += f" · {len(state.sources)} sources"
+        label += f" · {len(dedupe_sources(state.sources))} sources"
     if state.terminal_status in {
         "partial",
         "insufficient_data",
