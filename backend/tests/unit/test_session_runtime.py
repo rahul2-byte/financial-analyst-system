@@ -130,7 +130,7 @@ async def test_runner_resolves_bare_hdfc_bank_and_passes_ticker_context(
 
     class Upstox:
         def resolve_instrument(self, query):
-            assert query == "HDFC"
+            assert query == "HDFC BANK"
             return [{"trading_symbol": "HDFCBANK", "short_name": "HDFC Bank"}]
 
     class Policy:

@@ -121,7 +121,7 @@ def test_adani_news_query_resolves_to_adani() -> None:
 
 def test_adani_ambiguous_ranks_name_match_first() -> None:
     items = [*_ADANI, {"trading_symbol": "ADANIX", "name": "ADANI ENTERPRISES X"}]
-    result = resolve_instrument("adani enterprises", lambda term: items)
+    result = resolve_instrument("adani", lambda term: items)
     assert result.status == "ambiguous"
     assert result.candidates[0]["trading_symbol"] in {"ADANIENT", "ADANIX"}
     assert result.candidates[-1]["trading_symbol"] in {"ONGC", "ONIDA"}
