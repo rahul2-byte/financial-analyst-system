@@ -76,4 +76,4 @@ def test_openrouter_fallback_models_parse_comma_list(monkeypatch):
     monkeypatch.setattr(settings, "OPENROUTER_FALLBACK_MODELS", " a/b, ,c/d ")
 
     assert settings.openrouter_fallback_models == ["a/b", "c/d"]
-    assert settings.OPENROUTER_MODEL == "openai/gpt-5.6-luna"
+    assert settings.OPENROUTER_MODEL == "anthropic/claude-haiku-5.5"

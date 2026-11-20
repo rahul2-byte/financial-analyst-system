@@ -5,10 +5,8 @@ from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Defaults; override with OPENROUTER_MODEL / OPENROUTER_FALLBACK_MODELS.
-DEFAULT_OPENROUTER_MODEL = "openai/gpt-5.6-luna"
-DEFAULT_OPENROUTER_FALLBACK_MODELS = (
-    "anthropic/claude-haiku-5.5,deepseek/deepseek-v4.1-flash-1017"
-)
+DEFAULT_OPENROUTER_MODEL = "anthropic/claude-haiku-5.5"
+DEFAULT_OPENROUTER_FALLBACK_MODELS = "openai/gpt-6.2-sol"
 
 _REPOSITORY_ENV = Path(__file__).resolve().parents[3] / ".env"
 
