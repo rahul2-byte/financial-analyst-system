@@ -61,13 +61,50 @@ The recorded 21 September 2026 run used Hive `zai-org/glm-5.3-flash`, three work
 | Retries | 22 |
 | Timeout-affected streams | 6 |
 
-These are reliability and latency measurements only. The local telemetry has a status-bucketing inconsistency: it records six partial outcomes where the report separates five partial and one insufficient-data outcome. The result should therefore be cited with the report’s classification and this limitation.
+These are reliability and latency measurements only. The 95.3% is terminal success: the run reached a `success` terminal status. It does not measure whether any number in the answer is correct, whether citations support claims, or whether the answer matched the archived snapshot; a run can succeed and still state a wrong price. The local telemetry has a status-bucketing inconsistency: it records six partial outcomes where the report separates five partial and one insufficient-data outcome. The result should therefore be cited with the report’s classification and this limitation.
 
 ## Dataset and provenance limitations
 
-The `real-v1` case manifest contains 150 cases derived from 26 private-evaluation-authorized Upstox snapshots. It is not 150 independent market observations. The recorded provenance inventory reports 119 total snapshots but only 26 valid snapshots, and the manifest has empty `gold_numbers` for the real-v1 result used by `evals/run.py`. Raw provider payloads and permissions remain local/private.
+The `real-v1` case manifest contains 150 cases derived from 26 private-evaluation-authorized Upstox snapshots. It is not 150 independent market observations. The recorded provenance inventory reports 119 total snapshots but only 26 valid snapshots, and, before the gold-number work below, every case had empty `gold_numbers`. Raw provider payloads and permissions remain local/private.
 
 The repository contains no reproducible full semantic score for the 150-case set, no populated human claim-support label set, no validated provider-agreement result, no validated pricing manifest, and no investment-return result. The strongest judge artifact is a small eight-case pilot and is not a full benchmark.
+
+## Gold numbers and numeric grounding
+
+### How gold numbers are made
+
+`gold_numbers` in `evals/gold/real-v1/cases.jsonl` are computed offline and deterministically from the stored provider snapshot of each case by `evals/reference_indicators.py` (no network, no model). The snapshot's content hash is verified before use. Each case also carries `gold_number_specs`, one entry per number with `value`, `tolerance_rel`, `tolerance_abs`, `snapshot_id`, `as_of` (the case `retrieved_at`), `last_bar`, `rows_used`, and `method`. `gold_numbers` stays a flat name-to-value map so existing readers (`evals/judge.py`, `evals/execute.py`) are unaffected.
+
+- Only daily bars whose whole day has elapsed at the as-of time are used, so later rows cannot change a value (covered by a test).
+- Numbers: last close/high/low/volume, previous close, 1-day change %, 52-week high/low, SMA/EMA(20), average volume(20), Wilder RSI(14), MACD(12,26,9). A number is omitted when the history is too short.
+- Category mapping: `price`, `range`, `volume` and `grounding_check` cases (87 of 150) get numbers. The 63 `fundamentals`, `indicators` and `evidence_gap` cases expect an evidence-gap answer, so they stay empty (the Upstox validator also forbids gold numbers on evidence-gap cases). Fundamentals are not in the price snapshots and are not computed.
+- Cross-check: RSI, SMA, EMA, MACD and signal agree with TA-Lib (the library behind `backend/quant/technical_engine.py`) to about 1e-12 on all 26 snapshots.
+- 26 snapshots back the 150 cases, so these are not 87 independent observations.
+
+```bash
+# Needs the local, private .finai/provider-snapshots archive
+PYTHONPATH=. uv run python -m evals.reference_indicators --archive .finai/provider-snapshots --write
+PYTHONPATH=. uv run python -m evals.reference_indicators --archive .finai/provider-snapshots   # exit 1 if stale
+```
+
+The write is idempotent.
+
+### Grounding score
+
+`evals/grounding.py` extracts numeric claims from an answer and classifies each as matched (within tolerance of a gold or evidence value), contradicted (clearly labelled as a gold quantity such as "close" or "volume" but outside tolerance), or unverifiable (no label and no matching value). Dates, years, hashes and row/day counts are ignored. The claim score is matched claims divided by all numeric claims; the report also gives contradiction counts, gold coverage, and terminal success next to it. It makes no model calls and works offline on replay or live artifacts after the fact.
+
+```bash
+PYTHONPATH=. uv run python -m evals.grounding \
+  --cases evals/gold/real-v1/cases.jsonl \
+  --results .finai/evals/artifacts/real-v1-final \
+  --output .finai/evals/grounding-real-v1-final.json
+```
+
+`evals/run.py` also adds a `grounding` section to its report whenever tasks have gold numbers and results carry a `report` or `answer` text; the synthetic v1 fixture has neither, so it reports zero cases scored.
+
+Limits: labelling is keyword proximity, so a table that places several values near one label can produce false contradictions or false matches, and unlabelled numbers that happen to equal a gold value count as matched. Treat the score as a screening signal, not ground truth. On the recorded `real-v1-final` artifacts it flags many contradicted and unverifiable claims despite 143/150 terminal success, which supports the point that terminal success is not answer quality; the exact figures include heuristic noise and should be reviewed before being quoted.
+
+LLM-judge semantic scoring is not done here. Grounding checks numbers only, not wording, reasoning, citation support, or abstention quality; the `evals/judge.py` results remain a separate, partial pilot.
 
 ## Metric definitions
 

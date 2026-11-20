@@ -111,7 +111,9 @@ class ResearchRunner:
         )
         conversation_context["conversation_id"] = str(conversation_id)
         if self.routing_policy is not None:
-            selected_skills = (self.resources.skills or SkillRegistry.bundled()).select(query)
+            selected_skills = (self.resources.skills or SkillRegistry.bundled()).select(
+                query
+            )
             route = await self.routing_policy.decide(
                 query,
                 available_tools={
@@ -206,7 +208,8 @@ class ResearchRunner:
                     update={
                         "execution_mode": ExecutionMode.DETERMINISTIC,
                         "next_action": NextAction.ASK_CLARIFICATION,
-                        "reason": resolution.reason or "Instrument identity is ambiguous.",
+                        "reason": resolution.reason
+                        or "Instrument identity is ambiguous.",
                         "required_tools": [],
                         "allowed_tools": set(),
                     }
@@ -358,7 +361,9 @@ class ResearchRunner:
             return resolved, "provider_search"
         cached = self._resolved_tickers.get(conversation_id) or _history_ticker(history)
         if cached:
-            return InstrumentResolution("resolved", ticker=cached), "conversation_context"
+            return InstrumentResolution(
+                "resolved", ticker=cached
+            ), "conversation_context"
         return InstrumentResolution("not_requested"), "not_requested"
 
 
@@ -379,7 +384,19 @@ _INSTRUMENT_MARKERS = re.compile(
     r"fundamental|technical|valuation|news|bank)\b",
     re.IGNORECASE,
 )
-_BARE_EXTRA_STOPWORDS = {"NSE", "BSE", "WHATS", "GIVE", "TELL", "FETCH", "ME", "LIVE", "SHOW", "GET", "TO"}
+_BARE_EXTRA_STOPWORDS = {
+    "NSE",
+    "BSE",
+    "WHATS",
+    "GIVE",
+    "TELL",
+    "FETCH",
+    "ME",
+    "LIVE",
+    "SHOW",
+    "GET",
+    "TO",
+}
 _INSTRUMENT_STOPWORDS = {
     "ANALYSE",
     "ANALYZE",
@@ -472,7 +489,9 @@ def _direct_tool_arguments(
     }:
         return None
     if route.required_tools[0] == "data:fetch_market_status":
-        exchange = next((token.upper() for token in _EXCHANGE_TOKEN.findall(query)), "NSE")
+        exchange = next(
+            (token.upper() for token in _EXCHANGE_TOKEN.findall(query)), "NSE"
+        )
         return {"exchange": exchange}
     if route.required_tools[0] == "data:fetch_market_holidays":
         match = re.search(r"\b\d{4}-\d{2}-\d{2}\b", query)
@@ -641,10 +660,7 @@ def _number_is_bound(token: str, facts: dict[str, EvidenceFact]) -> bool:
     suffix = match.group(2).lower()
     if not suffix and number == int(number) and number <= 10:
         return True  # counts such as "three risks" are not financial claims
-    if suffix == "%":
-        scales = (1.0, 0.01)
-    else:
-        scales = (_NUMBER_SCALES.get(suffix, 1.0), 1.0)
+    scales = (1.0, 0.01) if suffix == "%" else (_NUMBER_SCALES.get(suffix, 1.0), 1.0)
     for fact in facts.values():
         if isinstance(fact.value, str):
             continue

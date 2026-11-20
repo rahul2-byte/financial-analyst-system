@@ -325,19 +325,22 @@ def score_artifacts(
         issues: list[str] = []
         if artifact is None:
             rows.append(
-                {"case_id": case_id, "status": "missing_artifact", "issues": ["artifact_missing"]}
+                {
+                    "case_id": case_id,
+                    "status": "missing_artifact",
+                    "issues": ["artifact_missing"],
+                }
             )
             continue
         expected = case.get("expected_outcome")
         claims = artifact.get("claims")
         claims = claims if isinstance(claims, list) else []
         if expected == "evidence_gap":
-            correct = (
-                artifact.get("terminal_status") == "completed_with_limited_evidence"
-                and not any(
-                    isinstance(claim, dict) and claim.get("importance") == "major"
-                    for claim in claims
-                )
+            correct = artifact.get(
+                "terminal_status"
+            ) == "completed_with_limited_evidence" and not any(
+                isinstance(claim, dict) and claim.get("importance") == "major"
+                for claim in claims
             )
             if not correct:
                 issues.append("expected_evidence_gap_not_abstained")
@@ -377,7 +380,10 @@ def score_artifacts(
             for citation in artifact.get("citations", [])
             if isinstance(citation, dict) and citation.get("citation_id")
         }
-        bound_rows = {"first": {"close": False, "timestamp": False}, "latest": {"close": False, "timestamp": False}}
+        bound_rows = {
+            "first": {"close": False, "timestamp": False},
+            "latest": {"close": False, "timestamp": False},
+        }
         for claim in claims:
             if not isinstance(claim, dict) or claim.get("importance") != "major":
                 continue
@@ -386,7 +392,8 @@ def score_artifacts(
             evidence_refs = set(claim.get("evidence_refs") or [])
             source_is_cited = any(
                 citation_id in citations
-                and citations[citation_id].get("source_id") == "upstox_historical_candle"
+                and citations[citation_id].get("source_id")
+                == "upstox_historical_candle"
                 for citation_id in evidence_refs
             )
             if not source_is_cited:
@@ -400,7 +407,10 @@ def score_artifacts(
             for row_name in ("first", "latest"):
                 close_id = f"{scope}:data.{row_name}.close"
                 timestamp_id = f"{scope}:data.{row_name}.timestamp"
-                for fact_name, fact_id in (("close", close_id), ("timestamp", timestamp_id)):
+                for fact_name, fact_id in (
+                    ("close", close_id),
+                    ("timestamp", timestamp_id),
+                ):
                     if fact_id in refs and f"[[fact:{fact_id}]]" in text:
                         bound_rows[row_name][fact_name] = True
         bound = any(all(facts.values()) for facts in bound_rows.values())

@@ -101,4 +101,9 @@ def test_bundled_prompts_keep_runtime_contracts() -> None:
     clarification = registry.get("agent_loop.clarification.ticker")
     assert "AAPL" not in clarification
     assert "HDFCBANK.NS" in clarification
-    assert registry.render("session.research_plan", focal_ticker="NSE:TCS", peer_universe="NSE:INFY", default_timeframe="1y")
+    assert registry.render(
+        "session.research_plan",
+        focal_ticker="NSE:TCS",
+        peer_universe="NSE:INFY",
+        default_timeframe="1y",
+    )

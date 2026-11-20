@@ -8,20 +8,28 @@ on:
 jobs:
   backend:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - name: Setup uv
+        uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.11"
+          enable-cache: true
+          python-version: ${{ matrix.python-version }}
 
       - name: Install project dependencies
-        run: pip install uv && uv sync --frozen --dev
+        run: uv sync --frozen --dev
 
       - name: Ruff lint
         run: uv run ruff check backend/ evals/
+
+      - name: Ruff format
+        run: uv run ruff format --check backend/ evals/
 
       - name: Mypy
         run: uv run mypy backend/
@@ -32,26 +40,30 @@ jobs:
       - name: Adversarial manifest integrity
         run: PYTHONPATH=backend:. uv run python -m evals.adversarial
 
-      - name: Evaluation support checks
-        run: >-
-          PYTHONPATH=backend:. uv run pytest
-          backend/tests/unit/test_eval_numeric.py
-          backend/tests/unit/test_eval_support.py
-          backend/tests/unit/test_eval_stage_metrics.py
-          backend/tests/unit/test_adversarial_assertions.py
-          --no-cov
-
-      - name: CLI smoke
-        run: PYTHONPATH=backend uv run python -m finai --help
+      - name: CLI smoke (installed entry point)
+        run: uv run finai --help
 
       - name: Offline experiment CLI smoke
-        run: PYTHONPATH=backend uv run python -m experiments --help
+        run: uv run python -m experiments --help
 
-      - name: Pytest backend
-        run: uv run pytest backend/tests --no-cov
-
-      - name: Coverage threshold
+      - name: Pytest with coverage (production code only)
         run: uv run pytest backend/tests --cov=backend --cov-report=term-missing --cov-fail-under=70
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Export locked requirements
+        run: uv export --frozen --no-dev --no-emit-project -o requirements-audit.txt
+
+      - name: pip-audit
+        run: uvx pip-audit --disable-pip --no-deps -r requirements-audit.txt
 
   docs-sanity:
     runs-on: ubuntu-latest

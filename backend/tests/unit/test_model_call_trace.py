@@ -98,7 +98,9 @@ def test_trace_prunes_files_older_than_seven_days(tmp_path, monkeypatch) -> None
     assert not stale_dir.exists()
 
 
-def test_trace_pruning_preserves_unowned_stale_directories(tmp_path, monkeypatch) -> None:
+def test_trace_pruning_preserves_unowned_stale_directories(
+    tmp_path, monkeypatch
+) -> None:
     import time
 
     monkeypatch.setenv("FINAI_MODEL_TRACE", "full")
@@ -119,7 +121,9 @@ def test_trace_pruning_preserves_unowned_stale_directories(tmp_path, monkeypatch
     assert unrelated.read_text() == "unrelated user data"
 
 
-def test_trace_does_not_change_permissions_on_existing_root(tmp_path, monkeypatch) -> None:
+def test_trace_does_not_change_permissions_on_existing_root(
+    tmp_path, monkeypatch
+) -> None:
     monkeypatch.setenv("FINAI_MODEL_TRACE", "full")
     monkeypatch.setenv("FINAI_MODEL_TRACE_DIR", str(tmp_path))
     tmp_path.chmod(0o755)

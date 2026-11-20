@@ -71,3 +71,17 @@ storage/vector/data/
 .env
 
 .worktrees/
+
+# Local tooling / agent artifacts
+.lavish/
+.pi/
+.playwright-mcp/
+.claude/worktrees/
+backend/mempalace.yaml
+/*.html
+
+# Secrets
+.env.*
+!.env.example
+*.pem
+*.key

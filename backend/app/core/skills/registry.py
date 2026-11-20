@@ -56,7 +56,9 @@ class SkillPackage:
 
 
 class SkillRegistry:
-    def __init__(self, skills: dict[str, SkillPackage], prompts: PromptRegistry | None = None) -> None:
+    def __init__(
+        self, skills: dict[str, SkillPackage], prompts: PromptRegistry | None = None
+    ) -> None:
         self._skills = dict(sorted(skills.items()))
         self.prompts = prompts or PromptRegistry.bundled()
 

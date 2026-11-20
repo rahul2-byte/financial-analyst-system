@@ -37,14 +37,21 @@ Merge: apply each worktree diff onto `phase0-fixes`, then run ruff + mypy + full
 | P1-C quant/experiments | F-19, F-37, F-38, F-39, F-40, F-42, F-44, F-45, F-47 (engine) | backend/quant/** except fundamentals.py, backend/experiments/** | merged (DQ-10 skipped) |
 
 ### Wave 2 (after wave 1 merges)
-| Agent | Findings | Owns |
-|---|---|---|
-| P1-D packaging/eng | F-21, F-71, F-72, F-73, F-76, QP-12..16 | pyproject.toml, .github/, .gitignore, README/docs install |
+| Agent | Findings | Owns | Status |
+|---|---|---|---|
+| P1-D packaging/eng | F-21, F-71, F-72, F-73, F-76, QP-12..16 | pyproject.toml, .github/, .gitignore, README/docs install | merged after 1 rework (tracing test leak); uv.lock needs `uv lock` (network) |
 | P1-E CLI/TUI streaming | F-11, F-16, F-17 | backend/finai/** except session_runtime.py | merged (733 passed) |
-| P1-F evals | F-23 gold numbers + grounding score in CI | evals/** |
+| P1-F evals | F-23 gold numbers + grounding score in CI | evals/** | merged (87/150 cases with gold numbers; grounding score offline) |
 
 Deferred to wave 3 / Phase 3: F-20 (peer/benchmark analytics), F-41 (point-in-time universe).
 
 **Wave 1 checkpoint (A1+A2+C):** ruff clean · mypy clean (211 files) · 685 passed. `ruff format --check` has 36 pre-existing unformatted files (handled by P1-D).
 
 **Wave 1 complete (+B):** ruff clean · mypy clean (213 files) · 716 passed · evals.validate valid · experiments --help OK.
+
+**Phase 1 complete:** ruff + format clean · mypy clean (217 files) · 750 passed · coverage 85.65% (production only) · evals.validate valid. Follow-up: ProviderUnavailable → non-retryable `provider_unavailable` tool failure.
+
+## Phase 1.5 — hands-on usage test
+| Agent | Scope | Status | Output |
+|---|---|---|---|
+| sonnet usage tester | 12 one-shot + 3 TUI live queries, numbers cross-checked vs yfinance | running | `audit/05-usage-test.md`, `audit/usage/runs/` |

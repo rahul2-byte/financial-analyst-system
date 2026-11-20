@@ -52,9 +52,7 @@ class ModelCallTrace:
         day_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
         if created_day_dir:
             marker = day_dir / _TRACE_DIR_MARKER
-            descriptor = os.open(
-                marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600
-            )
+            descriptor = os.open(marker, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
             os.close(descriptor)
         trace_id = call_id or str(uuid4())
         group_id = run_id or conversation_id or trace_id

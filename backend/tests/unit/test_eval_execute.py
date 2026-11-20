@@ -294,7 +294,7 @@ def test_live_executor_persists_validated_structured_report_before_rendering(
 
     class Model:
         def __init__(self):
-            self.responses = [
+            self.responses: list[list[dict]] = [
                 [
                     {
                         "event": "chunk",
@@ -303,7 +303,7 @@ def test_live_executor_persists_validated_structured_report_before_rendering(
                 ],
                 [{"event": "token", "data": report}],
             ]
-            self.requests = []
+            self.requests: list = []
 
         def generate_stream(self, messages, model, **kwargs):
             self.requests.append(messages)

@@ -80,9 +80,18 @@ Set the provider keys needed for the workflow:
 
 Configuration is loaded from the repository `.env` and then `.env`; unknown variables are ignored. See [`docs/configuration.md`](docs/configuration.md) for the complete variable inventory and operational defaults.
 
+## Install as a command
+
+```bash
+uv tool install .      # installs the `finai` command (hatchling build backend)
+finai --help
+```
+
+For development, `uv sync` installs the project editable, so `uv run finai --help` works without `PYTHONPATH`. vectorbt is not part of the runtime; install it only for ad-hoc backtesting with `uv sync --extra backtest`. TA-Lib needs a native wheel or library; see [`docs/development.md`](docs/development.md#troubleshooting-ta-lib).
+
 ## Run the CLI
 
-From the repository root:
+From the repository root (the `PYTHONPATH=backend` prefix is only needed when running from a checkout without installing the project):
 
 ```bash
 PYTHONPATH=backend uv run python -m finai --help
@@ -112,6 +121,7 @@ Available application routes are:
 
 ```bash
 uv run ruff check backend evals
+uv run ruff format --check backend evals
 uv run mypy backend
 uv run python -m compileall -q backend evals
 PYTHONPATH=. uv run python -m evals.validate

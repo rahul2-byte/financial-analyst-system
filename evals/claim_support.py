@@ -16,15 +16,23 @@ def main() -> int:
     parser.add_argument("--labels", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args()
-    labels = [json.loads(line) for line in args.labels.read_text(encoding="utf-8").splitlines() if line.strip()]
+    labels = [
+        json.loads(line)
+        for line in args.labels.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
     payload: dict[str, Any] = {
         "validation_errors": validate_claim_support_labels(labels),
         "agreement": agreement_summary(labels),
         "label_count": len(labels),
-        "status": "measured" if labels and not validate_claim_support_labels(labels) else "insufficient_evidence",
+        "status": "measured"
+        if labels and not validate_claim_support_labels(labels)
+        else "insufficient_evidence",
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     print(json.dumps(payload, sort_keys=True))
     return 0 if not payload["validation_errors"] else 1
 

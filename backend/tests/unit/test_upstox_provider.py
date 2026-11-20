@@ -100,7 +100,7 @@ def test_upstox_quota_exhaustion_is_a_handled_provider_error(monkeypatch) -> Non
 
 
 def test_upstox_fundamentals_expose_verified_scanner_fields(monkeypatch) -> None:
-    payloads = {
+    payloads: dict[str, dict] = {
         "/v2/fundamentals/INE/key-ratios": {
             "data": [
                 {"name": "P/E", "company_value": "20.15"},

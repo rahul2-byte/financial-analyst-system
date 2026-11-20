@@ -16,7 +16,9 @@ def _is_hash(value: Any) -> bool:
     return isinstance(value, str) and len(value) == 64 and set(value) <= _HASH
 
 
-def validate_pilot_cases(cases: list[dict[str, Any]], archive_root: Path | None = None) -> list[str]:
+def validate_pilot_cases(
+    cases: list[dict[str, Any]], archive_root: Path | None = None
+) -> list[str]:
     errors: list[str] = []
     ids = [str(case.get("id", "")) for case in cases]
     if not cases:
@@ -34,7 +36,11 @@ def validate_pilot_cases(cases: list[dict[str, Any]], archive_root: Path | None 
         if isinstance(snapshots, dict):
             for value in snapshots.values():
                 snapshot_values.extend(value if isinstance(value, list) else [value])
-        if not isinstance(snapshots, dict) or not snapshot_values or any(not _is_hash(value) for value in snapshot_values):
+        if (
+            not isinstance(snapshots, dict)
+            or not snapshot_values
+            or any(not _is_hash(value) for value in snapshot_values)
+        ):
             errors.append(f"{case_id}: replay_snapshots requires a SHA-256 hash")
         elif archive_root is not None:
             from app.observability.provider_archive import (
@@ -51,7 +57,9 @@ def validate_pilot_cases(cases: list[dict[str, Any]], archive_root: Path | None 
                     except ProviderArchiveError as exc:
                         errors.append(f"{case_id}: {exc}")
         source_hashes = case.get("source_hashes")
-        if not isinstance(source_hashes, list) or any(not _is_hash(value) for value in source_hashes):
+        if not isinstance(source_hashes, list) or any(
+            not _is_hash(value) for value in source_hashes
+        ):
             errors.append(f"{case_id}: source_hashes must contain SHA-256 hashes")
     return errors
 
@@ -62,14 +70,18 @@ def _fact_score(case: dict[str, Any], result: dict[str, Any]) -> bool:
         if not isinstance(fact, dict) or fact.get("field") not in outputs:
             return False
         try:
-            if abs(float(outputs[fact["field"]]) - float(fact["value"])) > float(fact.get("tolerance", 0)):
+            if abs(float(outputs[fact["field"]]) - float(fact["value"])) > float(
+                fact.get("tolerance", 0)
+            ):
                 return False
         except (TypeError, ValueError):
             return False
     return True
 
 
-def score_results(cases: list[dict[str, Any]], results: list[dict[str, Any]]) -> dict[str, Any]:
+def score_results(
+    cases: list[dict[str, Any]], results: list[dict[str, Any]]
+) -> dict[str, Any]:
     by_id = {str(item.get("case_id")): item for item in results}
     rows: list[dict[str, Any]] = []
     for case in cases:
@@ -78,7 +90,14 @@ def score_results(cases: list[dict[str, Any]], results: list[dict[str, Any]]) ->
         status_ok = actual_status == case.get("expected_terminal_status")
         facts_ok = _fact_score(case, result or {})
         outcome_ok = status_ok and facts_ok
-        rows.append({"case_id": case.get("id"), "passed": outcome_ok, "status_ok": status_ok, "facts_ok": facts_ok})
+        rows.append(
+            {
+                "case_id": case.get("id"),
+                "passed": outcome_ok,
+                "status_ok": status_ok,
+                "facts_ok": facts_ok,
+            }
+        )
     passed = sum(bool(row["passed"]) for row in rows)
     denominator = len(rows)
     interval = None
@@ -87,17 +106,32 @@ def score_results(cases: list[dict[str, Any]], results: list[dict[str, Any]]) ->
         proportion = passed / denominator
         scale = 1 + z * z / denominator
         centre = (proportion + z * z / (2 * denominator)) / scale
-        half = z * math.sqrt(proportion * (1 - proportion) / denominator + z * z / (4 * denominator**2)) / scale
+        half = (
+            z
+            * math.sqrt(
+                proportion * (1 - proportion) / denominator
+                + z * z / (4 * denominator**2)
+            )
+            / scale
+        )
         interval = [max(0.0, centre - half), min(1.0, centre + half)]
     return {
         "case_count": denominator,
-        "task_success": {"count": passed, "denominator": denominator, "wilson_95": interval},
+        "task_success": {
+            "count": passed,
+            "denominator": denominator,
+            "wilson_95": interval,
+        },
         "cases": rows,
     }
 
 
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
-    return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    return [
+        json.loads(line)
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
 
 
 def main() -> int:
@@ -119,11 +153,15 @@ def main() -> int:
         return int(bool(errors))
     if bool(args.results) == bool(args.results_dir):
         parser.error("score requires exactly one of --results or --results-dir")
-    result_paths = [args.results] if args.results else sorted(args.results_dir.glob("*.json"))
+    result_paths = (
+        [args.results] if args.results else sorted(args.results_dir.glob("*.json"))
+    )
     results = [json.loads(path.read_text(encoding="utf-8")) for path in result_paths]
     result = score_results(_load_jsonl(args.cases), results)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     print(json.dumps(result, sort_keys=True))
     return 0
 

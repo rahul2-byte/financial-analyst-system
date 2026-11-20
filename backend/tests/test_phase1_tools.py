@@ -374,3 +374,93 @@ async def test_end_to_end_invented_number_is_replaced_by_fallback() -> None:
     text = await _run_freeform(_GOOD + " with a P/E of 31")
     assert "P/E of 31" not in text
     assert "could not verify" in text
+
+
+async def test_provider_unavailable_is_retryable_without_traceback(caplog) -> None:
+    import logging
+
+    from data.retry import ProviderUnavailable
+
+    class Down:
+        async def execute(self, name, arguments):
+            raise ProviderUnavailable("yfinance", "connection refused", attempts=3)
+
+    with caplog.at_level(logging.DEBUG):
+        result = await ToolExecutor(Down()).execute(
+            "data:fetch_stock_data", {"ticker": "ABC.NS"}
+        )
+    assert result["success"] is False
+    assert result["retryable"] is False
+    assert result["error_type"] == "provider_unavailable"
+    assert "unavailable" in result["error"]
+    assert not [r for r in caplog.records if r.levelno >= logging.ERROR]
+    assert not [r for r in caplog.records if r.exc_info]
+
+
+async def test_agent_loop_reports_provider_outage_as_evidence_failure() -> None:
+    from app.core.agent_loop import AgentLoop, AgentLoopConfig
+    from app.core.prompts import PromptRegistry
+    from app.models.request_models import Message
+    from data.retry import ProviderUnavailable
+
+    prompts = PromptRegistry.bundled()
+    seen: list[list[Message]] = []
+
+    def call(index: int) -> dict[str, Any]:
+        return {
+            "index": 0,
+            "id": f"c{index}",
+            "type": "function",
+            "function": {
+                "name": "data:fetch_stock_data",
+                "arguments": '{"ticker":"ABC.NS"}',
+            },
+        }
+
+    class Model:
+        calls = 0
+
+        def generate_stream(self, messages, model, **kwargs):
+            Model.calls += 1
+            seen.append(list(messages))
+            n = Model.calls
+
+            async def stream():
+                delta = (
+                    {"tool_calls": [call(n)]}
+                    if n <= 2
+                    else {"content": "The data provider was unavailable."}
+                )
+                yield {"event": "chunk", "data": {"choices": [{"delta": delta}]}}
+
+            return stream()
+
+    class Tools:
+        def definitions(self):
+            return [{"type": "function", "function": {"name": "data:fetch_stock_data"}}]
+
+        async def execute(self, name, arguments):
+            raise ProviderUnavailable("yfinance", "connection refused", attempts=3)
+
+    loop = AgentLoop(
+        Model(),
+        Tools(),
+        config=AgentLoopConfig(model="m", answer_contract="freeform"),
+    )
+    written: list[Message] = []
+    events = [
+        e
+        async for e in loop.run(
+            [Message(role="user", content="price of ABC")],
+            conversation_id=uuid4(),
+            message_writer=written.append,
+        )
+    ]
+    final = events[-1]
+    assert final.type == "run.completed"
+    assert final.terminal_status == "insufficient_data"
+    assert not any(e.type == "run.failed" for e in events)  # no repeated-call error
+    assert len(seen) == 1  # not retried by the loop
+    contents = [m.content for m in written]
+    assert prompts.get("agent_loop.tool.evidence_failure") in contents
+    assert prompts.get("agent_loop.tool.invalid_arguments") not in contents

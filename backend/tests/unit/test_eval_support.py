@@ -11,9 +11,11 @@ def test_reference_indicators_are_deterministic():
 
 def test_kappa_and_provider_checks():
     assert cohens_kappa(["supports", "unsupported"], ["supports", "unsupported"]) == 1.0
-    result = compare_values([
-        {"primary_value": 10, "independent_value": 10.01, "tolerance": 0.02},
-        {"primary_value": 10, "independent_value": 12, "tolerance": 0.02},
-    ])
+    result = compare_values(
+        [
+            {"primary_value": 10, "independent_value": 10.01, "tolerance": 0.02},
+            {"primary_value": 10, "independent_value": 12, "tolerance": 0.02},
+        ]
+    )
     assert result["agree"] == 1
     assert result["disagree"] == 1

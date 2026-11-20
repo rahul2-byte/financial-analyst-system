@@ -14,7 +14,10 @@ class NormalizedNumber(TypedDict):
     original: str
 
 
-_VALUE = re.compile(r"(?P<currency>₹|INR|USD|\$)?\s*(?P<number>[+-]?(?:\d[\d,]*|\d+\.\d+)(?:\.\d+)?)\s*(?P<suffix>lakh\s+crore|lakh|crore|million|billion|thousand)?\s*(?P<pct>%)?", re.IGNORECASE)
+_VALUE = re.compile(
+    r"(?P<currency>₹|INR|USD|\$)?\s*(?P<number>[+-]?(?:\d[\d,]*|\d+\.\d+)(?:\.\d+)?)\s*(?P<suffix>lakh\s+crore|lakh|crore|million|billion|thousand)?\s*(?P<pct>%)?",
+    re.IGNORECASE,
+)
 _MULTIPLIERS = {
     "thousand": Decimal(1000),
     "million": Decimal(1_000_000),
@@ -35,7 +38,11 @@ def parse_number(text: str) -> NormalizedNumber | None:
         value = Decimal(raw)
     except InvalidOperation:
         return None
-    if value == value.to_integral() and 1900 <= value <= 2200 and not match.group("suffix"):
+    if (
+        value == value.to_integral()
+        and 1900 <= value <= 2200
+        and not match.group("suffix")
+    ):
         return None
     suffix = (match.group("suffix") or "").lower()
     unit = "%" if match.group("pct") else suffix or "absolute"
@@ -60,4 +67,7 @@ def within_tolerance(
     difference = abs(actual["value"] - expected["value"])
     if difference <= absolute_tolerance:
         return True
-    return relative_tolerance is not None and difference <= abs(expected["value"]) * relative_tolerance
+    return (
+        relative_tolerance is not None
+        and difference <= abs(expected["value"]) * relative_tolerance
+    )

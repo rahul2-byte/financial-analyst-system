@@ -81,7 +81,9 @@ def summarize(rows: list[JudgeEvaluation]) -> dict[str, Any]:
     measured = [row for row in rows if row.judge_status == "measured"]
     quality_gate = (
         "passed"
-        if rows and len(measured) == len(rows) and all(row.verdict == "pass" for row in rows)
+        if rows
+        and len(measured) == len(rows)
+        and all(row.verdict == "pass" for row in rows)
         else "failed"
         if any(row.judge_status == "measured" and row.verdict != "pass" for row in rows)
         else "incomplete"

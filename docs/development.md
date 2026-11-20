@@ -64,6 +64,7 @@ The closest local reproduction of CI is:
 
 ```bash
 uv run ruff check backend/ evals/
+uv run ruff format --check backend/ evals/
 uv run mypy backend/
 PYTHONPATH=. uv run python -m evals.validate
 PYTHONPATH=backend:. uv run python -m evals.adversarial
@@ -76,6 +77,20 @@ PYTHONPATH=backend:. uv run pytest \
 uv run pytest backend/tests --no-cov
 uv run pytest backend/tests --cov=backend --cov-report=term-missing --cov-fail-under=70
 ```
+
+## Troubleshooting TA-Lib
+
+`TA-Lib>=0.6.5` publishes prebuilt wheels for common CPython/OS/arch combinations (Linux x86_64/aarch64, macOS, Windows), so `uv sync` normally needs no native library. If uv falls back to a source build (new Python version, unusual platform), install the C library first:
+
+- Arch: `yay -S ta-lib` (AUR) or build from source
+- Debian/Ubuntu: `libta-lib-dev` is only in newer releases; otherwise build `ta-lib` from source (`./configure --prefix=/usr/local && make && sudo make install`) and install `build-essential`
+- macOS: `brew install ta-lib`
+
+Then rerun `uv sync`. An `ImportError` or `ta-lib/ta_defs.h: No such file` during install means the native library is missing.
+
+## Optional dependencies
+
+vectorbt is no longer a default dependency (nothing in the runtime imports it). Use `uv sync --extra backtest` when you need it. The repository ships the `finai` console script; `uv tool install .` installs it globally.
 
 ## Known repository inconsistencies
 

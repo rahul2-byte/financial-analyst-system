@@ -167,7 +167,10 @@ class RoutingPolicy:
                 reason_codes=["deterministic_operation", "market_holiday_tool"],
                 confidence=1.0,
             )
-        if _MARKET_STATUS_LOOKUP.search(query) and "data:fetch_market_status" in available_tools:
+        if (
+            _MARKET_STATUS_LOOKUP.search(query)
+            and "data:fetch_market_status" in available_tools
+        ):
             return RoutePlan(
                 intent="market_status",
                 execution_mode=ExecutionMode.TOOL_ONLY,

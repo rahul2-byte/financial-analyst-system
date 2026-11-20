@@ -29,7 +29,8 @@ def agreement_summary(labels: list[dict[str, Any]]) -> dict[str, Any]:
     second = [pair[1] for pair in pairs]
     return {
         "labeled_items": len(pairs),
-        "raw_agreement": sum(a == b for a, b in zip(first, second, strict=True)) / len(pairs)
+        "raw_agreement": sum(a == b for a, b in zip(first, second, strict=True))
+        / len(pairs)
         if pairs
         else None,
         "cohens_kappa": cohens_kappa(first, second) if pairs else None,

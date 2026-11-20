@@ -71,9 +71,7 @@ def test_report_repair_instruction_includes_verified_fact_values() -> None:
 
 
 def test_report_repair_instruction_names_unreferenced_fact_ids() -> None:
-    draft = _draft(
-        detailed_analysis="The source time is [[fact:source.observed_at]]."
-    )
+    draft = _draft(detailed_analysis="The source time is [[fact:source.observed_at]].")
     missing = unreferenced_fact_markers(draft)
     prompt = report_repair_instruction(
         _evidence(),

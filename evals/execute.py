@@ -646,8 +646,7 @@ async def execute(args: argparse.Namespace) -> int:
     }
     quality = None
     if all(
-        case.get("expected_outcome") in {"answer", "evidence_gap"}
-        for case in cases
+        case.get("expected_outcome") in {"answer", "evidence_gap"} for case in cases
     ):
         quality = score_artifacts(cases, list(completed.values()))
         metrics["deterministic_answer_quality"] = quality

@@ -17,6 +17,7 @@ from app.security.policy import redact_secrets
 
 logger = logging.getLogger(__name__)
 
+
 def redact_trace_value(value: Any) -> Any:
     """Recursively remove credentials while preserving safe diagnostic values."""
     return redact_secrets(value)

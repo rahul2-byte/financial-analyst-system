@@ -22,7 +22,11 @@ def test_score_results_reports_outcome_and_numeric_success():
         "expected_terminal_status": "success",
         "required_facts": [{"field": "price", "value": 10, "tolerance": 0.1}],
     }
-    result = {"case_id": "case-1", "terminal_status": "success", "numeric_outputs": {"price": 10.05}}
+    result = {
+        "case_id": "case-1",
+        "terminal_status": "success",
+        "numeric_outputs": {"price": 10.05},
+    }
     scored = score_results([case], [result])
 
     assert scored["case_count"] == 1

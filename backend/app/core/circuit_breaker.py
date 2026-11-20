@@ -9,7 +9,7 @@ from functools import wraps
 logger = logging.getLogger(__name__)
 
 
-class CircuitState(str, Enum):
+class CircuitState(str, Enum):  # noqa: UP042 - str() output is relied on
     CLOSED = "closed"  # Normal operation
     OPEN = "open"  # Failing, reject calls
     HALF_OPEN = "half_open"  # Testing if service recovered

@@ -23,6 +23,9 @@ ndcg_at_k = _metrics.ndcg_at_k
 recall_at_k = _metrics.recall_at_k
 hit_rate_at_k = _metrics.hit_rate_at_k
 reciprocal_rank = _metrics.reciprocal_rank
+grounding_report = importlib.import_module(
+    "evals.grounding" if __package__ else "grounding"
+).grounding_report
 validate_claim_support_labels = importlib.import_module(
     "evals.labels" if __package__ else "labels"
 ).validate_claim_support_labels
@@ -135,6 +138,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "expected_gold_cases": args.expected_cases,
         },
         "metrics": aggregate_metrics(case_metrics, claim_support_metrics),
+        "grounding": grounding_report(tasks, results),
         "missing_results": missing_results,
         "label_validation_errors": label_validation_errors,
         "notes": [

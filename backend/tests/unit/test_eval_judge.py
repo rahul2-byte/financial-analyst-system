@@ -48,7 +48,10 @@ def test_upstox_judge_rejects_false_abstention_on_matching_candle_date() -> None
     )
 
     assert "date match cannot be verified is incorrect" in prompt
-    assert "Terminal completion and publication validation are not answer-quality evidence" in prompt
+    assert (
+        "Terminal completion and publication validation are not answer-quality evidence"
+        in prompt
+    )
 
 
 def test_semantic_judge_gate_requires_every_case_to_pass() -> None:
@@ -67,4 +70,7 @@ def test_semantic_judge_gate_requires_every_case_to_pass() -> None:
 
     assert summarize([result("pass")])["quality_gate"] == "passed"
     assert summarize([result("fail")])["quality_gate"] == "failed"
-    assert summarize([result("insufficient_evidence", "unavailable")])["quality_gate"] == "incomplete"
+    assert (
+        summarize([result("insufficient_evidence", "unavailable")])["quality_gate"]
+        == "incomplete"
+    )

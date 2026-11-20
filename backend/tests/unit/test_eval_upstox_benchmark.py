@@ -233,7 +233,10 @@ def test_score_artifacts_requires_published_close_and_matching_timestamp_facts()
     failed = score_artifacts([case], [bad])
     assert failed["deterministic_checks_passed"] is False
     assert failed["status"] == "deterministic_checks_failed"
-    assert "expected_close_and_timestamp_not_bound_in_major_claim" in failed["cases"][0]["issues"]
+    assert (
+        "expected_close_and_timestamp_not_bound_in_major_claim"
+        in failed["cases"][0]["issues"]
+    )
 
 
 def test_score_artifacts_accepts_close_and_timestamp_across_cited_major_claims():
@@ -277,7 +280,7 @@ def test_score_artifacts_accepts_close_and_timestamp_across_cited_major_claims()
 
 
 def test_score_artifacts_accepts_expected_no_candle_abstention():
-    case = {
+    case: dict = {
         "case_id": "gap-1",
         "trading_date": "2026-09-22",
         "expected_outcome": "evidence_gap",

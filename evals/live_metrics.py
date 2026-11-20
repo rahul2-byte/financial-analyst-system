@@ -232,7 +232,11 @@ def aggregate_stage_timings(events: list[dict[str, Any]]) -> dict[str, Any]:
     values: dict[str, list[float]] = defaultdict(list)
     missing: dict[str, int] = defaultdict(int)
     for run_events in by_run.values():
-        starts = {(str(event.get("stage")), str(event.get("label"))): event for event in run_events if event.get("event_type") == "stage.started"}
+        starts = {
+            (str(event.get("stage")), str(event.get("label"))): event
+            for event in run_events
+            if event.get("event_type") == "stage.started"
+        }
         for event in run_events:
             if event.get("event_type") != "stage.completed":
                 continue
@@ -242,7 +246,10 @@ def aggregate_stage_timings(events: list[dict[str, Any]]) -> dict[str, Any]:
                 missing[key[1]] += 1
                 continue
             try:
-                elapsed = (_parse_time(event["occurred_at"]) - _parse_time(start["occurred_at"])).total_seconds() * 1000
+                elapsed = (
+                    _parse_time(event["occurred_at"])
+                    - _parse_time(start["occurred_at"])
+                ).total_seconds() * 1000
             except (KeyError, TypeError, ValueError):
                 missing[key[1]] += 1
             else:
@@ -252,7 +259,9 @@ def aggregate_stage_timings(events: list[dict[str, Any]]) -> dict[str, Any]:
         if not samples:
             return None
         ordered = sorted(samples)
-        return round(ordered[min(len(ordered) - 1, max(0, int(len(ordered) * q) - 1))], 2)
+        return round(
+            ordered[min(len(ordered) - 1, max(0, int(len(ordered) * q) - 1))], 2
+        )
 
     return {
         label: {

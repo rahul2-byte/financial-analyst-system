@@ -64,9 +64,7 @@ def _record(path: Path, root: Path) -> dict[str, Any]:
     )
     if provider == "upstox" and not usage_permission and not permission_basis:
         usage_permission = "approved"
-        permission_basis = (
-            "Upstox API access under the project owner's account; local FIN-AI evaluation only"
-        )
+        permission_basis = "Upstox API access under the project owner's account; local FIN-AI evaluation only"
     return {
         "snapshot_id": path.stem,
         "path": path.relative_to(root).as_posix(),
@@ -86,9 +84,15 @@ def validate_record(record: dict[str, Any]) -> list[str]:
     return [field for field in REQUIRED if record.get(field) in (None, "", "unknown")]
 
 
-def _case(record: dict[str, Any], index: int, category: str, prompt: str) -> dict[str, Any]:
+def _case(
+    record: dict[str, Any], index: int, category: str, prompt: str
+) -> dict[str, Any]:
     operation = record["data_type"]
-    outcome = "answer" if category in {"price", "range", "volume", "grounding_check"} else "evidence_gap"
+    outcome = (
+        "answer"
+        if category in {"price", "range", "volume", "grounding_check"}
+        else "evidence_gap"
+    )
     return {
         "id": f"real-v1-{index:03d}",
         "case_id": f"real-v1-{index:03d}",
@@ -144,17 +148,23 @@ def build(
         ]
     else:
         case_errors = []
-    case_errors.extend([
-        {"case_id": case["case_id"], "missing": [field for field in CASE_REQUIRED if case.get(field) in (None, "", "unknown")]}
-        for case in cases
-        if any(case.get(field) in (None, "", "unknown") for field in CASE_REQUIRED)
-    ])
+    case_errors.extend(
+        [
+            {
+                "case_id": case["case_id"],
+                "missing": [
+                    field
+                    for field in CASE_REQUIRED
+                    if case.get(field) in (None, "", "unknown")
+                ],
+            }
+            for case in cases
+            if any(case.get(field) in (None, "", "unknown") for field in CASE_REQUIRED)
+        ]
+    )
     if case_errors:
         cases = []
-    if len(cases) != 150:
-        manifest_status = "provenance_incomplete"
-    else:
-        manifest_status = "complete"
+    manifest_status = "provenance_incomplete" if len(cases) != 150 else "complete"
     manifest = {
         "version": "real-v1-provenance",
         "status": manifest_status,
@@ -195,13 +205,20 @@ def build(
 
 def main() -> None:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--snapshot-root", type=Path, default=Path(".finai/provider-snapshots"))
+    parser.add_argument(
+        "--snapshot-root", type=Path, default=Path(".finai/provider-snapshots")
+    )
     parser.add_argument("--output-root", type=Path, default=Path(".finai/evals"))
     args = parser.parse_args()
     records, manifest, gaps, cases = build(args.snapshot_root)
     args.output_root.mkdir(parents=True, exist_ok=True)
     (args.output_root / "provenance-inventory.json").write_text(
-        json.dumps({"version": "real-v1-provenance", "snapshots": records}, indent=2, sort_keys=True) + "\n",
+        json.dumps(
+            {"version": "real-v1-provenance", "snapshots": records},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
     (args.output_root / "source-manifest.json").write_text(
@@ -215,15 +232,22 @@ def main() -> None:
             "".join(json.dumps(case, sort_keys=True) + "\n" for case in cases),
             encoding="utf-8",
         )
-    print(json.dumps({
-        "total_snapshots": manifest["total_snapshots"],
-        "snapshots_with_urls": manifest["snapshots_with_urls"],
-        "snapshots_with_hashes": manifest["snapshots_with_hashes"],
-        "snapshots_with_permission_metadata": manifest["snapshots_with_permission_metadata"],
-        "valid_approved_cases": len(cases),
-        "rejected_cases": len(manifest["rejected"]),
-        "final_status": manifest["status"],
-    }, indent=2))
+    print(
+        json.dumps(
+            {
+                "total_snapshots": manifest["total_snapshots"],
+                "snapshots_with_urls": manifest["snapshots_with_urls"],
+                "snapshots_with_hashes": manifest["snapshots_with_hashes"],
+                "snapshots_with_permission_metadata": manifest[
+                    "snapshots_with_permission_metadata"
+                ],
+                "valid_approved_cases": len(cases),
+                "rejected_cases": len(manifest["rejected"]),
+                "final_status": manifest["status"],
+            },
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

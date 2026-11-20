@@ -54,21 +54,39 @@ def resolve_instrument(
     """Resolve an explicit symbol or a provider-backed name without guessing."""
     explicit = _EXPLICIT.search(query.upper())
     if explicit:
-        return InstrumentResolution("resolved", ticker=parse_ticker(explicit.group()).provider_symbol)
+        return InstrumentResolution(
+            "resolved", ticker=parse_ticker(explicit.group()).provider_symbol
+        )
     if search is None:
-        return InstrumentResolution("unresolved", reason="provider instrument search unavailable")
+        return InstrumentResolution(
+            "unresolved", reason="provider instrument search unavailable"
+        )
     terms = [token for token in _BARE.findall(query.upper()) if token not in _STOPWORDS]
     search_term = " ".join(terms) if terms else query.strip()
     raw = search(search_term)
     candidates = _unique_candidates(raw)
     if not candidates:
-        return InstrumentResolution("unresolved", reason="no NSE/BSE instrument matched")
-    exact = [item for item in candidates if str(item.get("trading_symbol", "")).upper() == search_term]
+        return InstrumentResolution(
+            "unresolved", reason="no NSE/BSE instrument matched"
+        )
+    exact = [
+        item
+        for item in candidates
+        if str(item.get("trading_symbol", "")).upper() == search_term
+    ]
     if len(exact) == 1:
-        return InstrumentResolution("resolved", ticker=_ticker(exact[0]), candidates=tuple(exact))
-    symbols = {str(item.get("trading_symbol", "")).upper() for item in candidates if item.get("trading_symbol")}
+        return InstrumentResolution(
+            "resolved", ticker=_ticker(exact[0]), candidates=tuple(exact)
+        )
+    symbols = {
+        str(item.get("trading_symbol", "")).upper()
+        for item in candidates
+        if item.get("trading_symbol")
+    }
     if len(symbols) == 1:
-        return InstrumentResolution("resolved", ticker=next(iter(symbols)) + ".NS", candidates=tuple(candidates))
+        return InstrumentResolution(
+            "resolved", ticker=next(iter(symbols)) + ".NS", candidates=tuple(candidates)
+        )
     return InstrumentResolution(
         "ambiguous",
         candidates=tuple(candidates),
@@ -80,7 +98,9 @@ def _unique_candidates(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     seen: set[str] = set()
     for item in items:
-        symbol = str(item.get("trading_symbol") or item.get("symbol") or "").upper().strip()
+        symbol = (
+            str(item.get("trading_symbol") or item.get("symbol") or "").upper().strip()
+        )
         if not symbol or symbol in seen:
             continue
         seen.add(symbol)

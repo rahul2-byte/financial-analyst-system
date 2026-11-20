@@ -13,6 +13,7 @@ from app.core.guardrails import validate_tool_arguments
 from app.core.observability import observe
 from app.observability.tracing import set_current_span_attributes
 from app.security.policy import redact_secrets
+from data.retry import ProviderUnavailable
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +93,11 @@ class ToolExecutor:
                     raise
                 logger.warning("tool %s timed out after %ss", name, timeout)
                 set_current_span_attributes(
-                    {"tool.name": name, "tool.status": "failed", "error.type": "timeout"}
+                    {
+                        "tool.name": name,
+                        "tool.status": "failed",
+                        "error.type": "timeout",
+                    }
                 )
                 return {
                     "success": False,
@@ -125,6 +130,23 @@ class ToolExecutor:
                 }
             )
             return {"success": False, "error": str(redact_secrets(str(exc)))}
+        except ProviderUnavailable as exc:
+            logger.warning(
+                "tool %s: provider unavailable: %s", name, type(exc).__name__
+            )
+            set_current_span_attributes(
+                {
+                    "tool.name": name,
+                    "tool.status": "failed",
+                    "error.type": "ProviderUnavailable",
+                }
+            )
+            return {
+                "success": False,
+                "retryable": False,
+                "error_type": "provider_unavailable",
+                "error": str(redact_secrets(str(exc))),
+            }
         except Exception as exc:
             logger.exception("tool %s raised an unexpected error", name)
             set_current_span_attributes(

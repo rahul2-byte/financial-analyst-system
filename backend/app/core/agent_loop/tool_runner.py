@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import time
 from collections.abc import Callable
@@ -355,10 +356,9 @@ class FinancialToolRunner:
         if name in _EVIDENCE_TOOL_NAMES:
             self.turn_evidence_tools += 1
             if isinstance(result, dict) and result.get("success", True) is not False:
-                try:
+                # colliding facts are rejected by EvidenceAccounting
+                with contextlib.suppress(ValueError):
                     self.turn_facts.update(extract_evidence_facts(result))
-                except ValueError:
-                    pass  # colliding facts are rejected by EvidenceAccounting
         return result
 
     async def _execute(self, name: str, arguments: dict[str, Any]) -> Any:
@@ -607,11 +607,9 @@ class FinancialToolRunner:
                         for item in matches
                     )
                     if underlying and has_derivatives:
-                        output["metadata"]["derivatives_context"] = (
-                            await _blocking(
-                                self.resources.upstox_fetcher.fetch_derivatives,
-                                str(underlying),
-                            )
+                        output["metadata"]["derivatives_context"] = await _blocking(
+                            self.resources.upstox_fetcher.fetch_derivatives,
+                            str(underlying),
                         )
                 except UpstoxError as exc:
                     output["warnings"].append(f"derivatives context unavailable: {exc}")
@@ -771,8 +769,8 @@ class FinancialToolRunner:
                     )
             else:
                 value = await _blocking(
-                        self.resources.yf_fetcher.fetch_company_fundamentals, ticker
-                    )
+                    self.resources.yf_fetcher.fetch_company_fundamentals, ticker
+                )
             if isinstance(value, dict) and "error" not in value:
                 self._fundamentals_by_ticker[str(value.get("ticker") or ticker)] = value
         elif name == "news:fetch_news":
@@ -965,7 +963,11 @@ class FinancialToolRunner:
             raise UpstoxError("Upstox is not configured")
         matches = await _blocking(fetcher.resolve_instrument, ticker)
         instrument_key = next(
-            (item.get("instrument_key") for item in matches if item.get("instrument_key")),
+            (
+                item.get("instrument_key")
+                for item in matches
+                if item.get("instrument_key")
+            ),
             None,
         )
         if not instrument_key:

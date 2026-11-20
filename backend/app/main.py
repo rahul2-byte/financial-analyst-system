@@ -19,7 +19,11 @@ tracing = initialize_tracing()
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     prompts = PromptRegistry.bundled()
-    logger.info("prompt configuration loaded source=%s count=%d", prompts.source, len(prompts.keys()))
+    logger.info(
+        "prompt configuration loaded source=%s count=%d",
+        prompts.source,
+        len(prompts.keys()),
+    )
     app.state.prompt_registry = prompts
     try:
         yield

@@ -25,7 +25,9 @@ class _UniqueLoader(yaml.SafeLoader):
     pass
 
 
-def _construct_mapping(loader: _UniqueLoader, node: yaml.MappingNode, deep: bool = False) -> dict[Any, Any]:
+def _construct_mapping(
+    loader: _UniqueLoader, node: yaml.MappingNode, deep: bool = False
+) -> dict[Any, Any]:
     mapping: dict[Any, Any] = {}
     for key_node, value_node in node.value:
         key = loader.construct_object(key_node, deep=deep)
@@ -56,11 +58,17 @@ class PromptRegistry:
             with path.open("r", encoding="utf-8") as handle:
                 raw = yaml.load(handle, Loader=_UniqueLoader)
         except FileNotFoundError as exc:
-            raise PromptConfigurationError(f"prompt file does not exist: {path}") from exc
+            raise PromptConfigurationError(
+                f"prompt file does not exist: {path}"
+            ) from exc
         except (OSError, UnicodeError, yaml.YAMLError, PromptConfigurationError) as exc:
-            raise PromptConfigurationError(f"invalid prompt file {path}: {exc}") from exc
+            raise PromptConfigurationError(
+                f"invalid prompt file {path}: {exc}"
+            ) from exc
         if not isinstance(raw, dict) or set(raw) != {"prompts"}:
-            raise PromptConfigurationError("prompt YAML must contain only a prompts mapping")
+            raise PromptConfigurationError(
+                "prompt YAML must contain only a prompts mapping"
+            )
         flattened: dict[str, str] = {}
         _flatten(raw["prompts"], (), flattened)
         if not flattened:
@@ -92,7 +100,9 @@ class PromptRegistry:
         try:
             return template.format_map(variables)
         except (KeyError, ValueError, IndexError) as exc:
-            raise PromptRenderError(f"prompt '{key}' could not be rendered: {exc}") from exc
+            raise PromptRenderError(
+                f"prompt '{key}' could not be rendered: {exc}"
+            ) from exc
 
     def keys(self) -> tuple[str, ...]:
         return tuple(sorted(self._prompts))
@@ -105,18 +115,24 @@ def _flatten(value: Any, path: tuple[str, ...], output: dict[str, str]) -> None:
         )
     for name, child in value.items():
         if not isinstance(name, str) or not name or "." in name:
-            raise PromptConfigurationError("prompt namespace names must be non-empty and dot-free")
+            raise PromptConfigurationError(
+                "prompt namespace names must be non-empty and dot-free"
+            )
         current = (*path, name)
         if isinstance(child, dict) and set(child) == {"template"}:
             template = child["template"]
             if not isinstance(template, str) or not template.strip():
-                raise PromptConfigurationError(f"prompt '{'.'.join(current)}' must have a non-empty template")
+                raise PromptConfigurationError(
+                    f"prompt '{'.'.join(current)}' must have a non-empty template"
+                )
             _placeholders(template, ".".join(current))
             output[".".join(current)] = template
         elif isinstance(child, dict):
             _flatten(child, current, output)
         else:
-            raise PromptConfigurationError(f"prompt namespace '{'.'.join(current)}' is invalid")
+            raise PromptConfigurationError(
+                f"prompt namespace '{'.'.join(current)}' is invalid"
+            )
 
 
 def _placeholders(template: str, key: str) -> set[str]:
@@ -132,5 +148,7 @@ def _placeholders(template: str, key: str) -> set[str]:
                 )
             names.add(field_name)
     except (ValueError, TypeError) as exc:
-        raise PromptConfigurationError(f"prompt '{key}' has malformed placeholders: {exc}") from exc
+        raise PromptConfigurationError(
+            f"prompt '{key}' has malformed placeholders: {exc}"
+        ) from exc
     return names

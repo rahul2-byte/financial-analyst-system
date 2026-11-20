@@ -26,7 +26,9 @@ class ValidationResult:
     reasons: tuple[str, ...] = ()
 
 
-def publish_validator(draft: ReportDraft, evidence: dict[str, EvidenceFact]) -> ValidationResult:
+def publish_validator(
+    draft: ReportDraft, evidence: dict[str, EvidenceFact]
+) -> ValidationResult:
     """Validate a structured draft using the production publication boundary."""
     try:
         publish_report(draft, evidence)
@@ -35,7 +37,9 @@ def publish_validator(draft: ReportDraft, evidence: dict[str, EvidenceFact]) -> 
     return ValidationResult(True)
 
 
-def evaluate_publish_mutations(records: list[dict[str, Any]], seed: int = 0) -> dict[str, Any]:
+def evaluate_publish_mutations(
+    records: list[dict[str, Any]], seed: int = 0
+) -> dict[str, Any]:
     """Evaluate structured JSON fixtures through the production publisher."""
     clean: list[tuple[ReportDraft, dict[str, EvidenceFact]]] = []
     for record in records:
@@ -50,7 +54,10 @@ def evaluate_publish_mutations(records: list[dict[str, Any]], seed: int = 0) -> 
         "clean": {
             "n": len(clean_results),
             "accepted": sum(result.passed for result in clean_results),
-            "false_block_rate": sum(not result.passed for result in clean_results) / len(clean_results) if clean_results else 0.0,
+            "false_block_rate": sum(not result.passed for result in clean_results)
+            / len(clean_results)
+            if clean_results
+            else 0.0,
         },
         "status": "evaluated",
         "seed": seed,
@@ -59,7 +66,9 @@ def evaluate_publish_mutations(records: list[dict[str, Any]], seed: int = 0) -> 
 
 def load_clean_reports(path: Path) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
-    for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
+    for line_number, line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), 1
+    ):
         if not line.strip():
             continue
         value = json.loads(line)
@@ -79,10 +88,18 @@ def _mutations(report: str, rng: random.Random) -> dict[str, str | None]:
     del rng
     marker_start = report.find("[[fact:")
     marker_end = report.find("]]", marker_start)
-    marker = report[marker_start : marker_end + 2] if marker_start >= 0 and marker_end >= 0 else None
+    marker = (
+        report[marker_start : marker_end + 2]
+        if marker_start >= 0 and marker_end >= 0
+        else None
+    )
     return {
-        "delete_numeric_marker": _replace_first(report, marker, "10") if marker else None,
-        "wrong_numeric_literal": _replace_first(report, "10", "999999") if "10" in report else None,
+        "delete_numeric_marker": _replace_first(report, marker, "10")
+        if marker
+        else None,
+        "wrong_numeric_literal": _replace_first(report, "10", "999999")
+        if "10" in report
+        else None,
         "delete_citation": _replace_first(report, "citation-1", "missing-citation"),
         "unsupported_forward_claim": f"{report}\nThis guarantees future returns.",
     }
@@ -98,13 +115,20 @@ def evaluate_mutations(
     clean_blocked = 0
     if validator is not None:
         for record in records:
-            clean_blocked += int(not validator(str(record["report"]), dict(record.get("evidence") or {})))
+            clean_blocked += int(
+                not validator(str(record["report"]), dict(record.get("evidence") or {}))
+            )
     output: dict[str, Any] = {
         "clean": {"false_block_count": clean_blocked, "n": len(records)},
         "mutations": {},
         "seed": seed,
     }
-    names = ("delete_numeric_marker", "wrong_numeric_literal", "delete_citation", "unsupported_forward_claim")
+    names = (
+        "delete_numeric_marker",
+        "wrong_numeric_literal",
+        "delete_citation",
+        "unsupported_forward_claim",
+    )
     for name in names:
         applied = caught = crashed = 0
         for record in records:
@@ -115,7 +139,9 @@ def evaluate_mutations(
             if validator is None:
                 continue
             try:
-                caught += int(not validator(mutated, dict(record.get("evidence") or {})))
+                caught += int(
+                    not validator(mutated, dict(record.get("evidence") or {}))
+                )
             except (KeyError, TypeError, ValueError, RuntimeError):
                 crashed += 1
         output["mutations"][name] = {
@@ -137,12 +163,18 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=0)
     args = parser.parse_args()
     if args.structured:
-        records = [json.loads(line) for line in args.clean.read_text(encoding="utf-8").splitlines() if line.strip()]
+        records = [
+            json.loads(line)
+            for line in args.clean.read_text(encoding="utf-8").splitlines()
+            if line.strip()
+        ]
         result = evaluate_publish_mutations(records, seed=args.seed)
     else:
         result = evaluate_mutations(load_clean_reports(args.clean), seed=args.seed)
     args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    args.output.write_text(
+        json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
     print(json.dumps(result, sort_keys=True))
     return 0
 

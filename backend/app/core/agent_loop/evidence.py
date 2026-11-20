@@ -179,16 +179,19 @@ def extract_evidence_facts(payload: dict[str, Any]) -> dict[str, EvidenceFact]:
             if isinstance(value, float) and not math.isfinite(value):
                 return
             fact_id = f"{scope}:{safe_path(path)}"
-            add(fact_id, EvidenceFact(
-                fact_id=fact_id,
-                value=value,
-                unit=_fundamental_unit(source_id, path),
-                source_id=source_id,
-                instrument=instrument,
-                observed_at=observed,
-                quality_status="verified",
-                source_url=str(provenance.get("source_url") or "") or None,
-            ))
+            add(
+                fact_id,
+                EvidenceFact(
+                    fact_id=fact_id,
+                    value=value,
+                    unit=_fundamental_unit(source_id, path),
+                    source_id=source_id,
+                    instrument=instrument,
+                    observed_at=observed,
+                    quality_status="verified",
+                    source_url=str(provenance.get("source_url") or "") or None,
+                ),
+            )
         elif isinstance(value, str):
             try:
                 if re.fullmatch(r"\d{4}-\d{2}-\d{2}", value):
@@ -202,16 +205,19 @@ def extract_evidence_facts(payload: dict[str, Any]) -> dict[str, EvidenceFact]:
             except ValueError:
                 return
             fact_id = f"{scope}:{safe_path(path)}"
-            add(fact_id, EvidenceFact(
-                fact_id=fact_id,
-                value=value,
-                unit=unit,
-                source_id=source_id,
-                instrument=instrument,
-                observed_at=observed,
-                quality_status="verified",
-                source_url=str(provenance.get("source_url") or "") or None,
-            ))
+            add(
+                fact_id,
+                EvidenceFact(
+                    fact_id=fact_id,
+                    value=value,
+                    unit=unit,
+                    source_id=source_id,
+                    instrument=instrument,
+                    observed_at=observed,
+                    quality_status="verified",
+                    source_url=str(provenance.get("source_url") or "") or None,
+                ),
+            )
         elif isinstance(value, dict):
             for key, item in value.items():
                 visit(item, f"{path}.{key}" if path else str(key))
@@ -248,7 +254,10 @@ def _fundamental_unit(dataset: str, path: str) -> str:
 
 
 def fact_scope(
-    dataset: str, instrument: str, period: str | None = None, interval: str | None = None
+    dataset: str,
+    instrument: str,
+    period: str | None = None,
+    interval: str | None = None,
 ) -> str:
     """Return the ``dataset:INSTRUMENT[:period:interval]`` prefix of a fact ID."""
     parts = [dataset, _safe_part(instrument)]
