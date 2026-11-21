@@ -71,7 +71,7 @@ def _draft(
 
 
 GOOD = _draft()
-WRONG_NUMBER = _draft("The close was 123.4 and 99 last week.")
+WRONG_NUMBER = _draft("The price was 123.4 and 99 last week.")
 BAD_CONTRACT = "not json at all"
 
 

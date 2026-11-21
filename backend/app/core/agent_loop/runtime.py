@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import os
 import re
 import time
 from collections.abc import AsyncIterator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal, Protocol
 from uuid import UUID
 
 import httpx
+from app.config import settings
 from app.core.agent_loop.evidence import EvidenceAccounting
 from app.core.agent_loop.model_streaming import ModelBudgetExceeded, ModelStreaming
 from app.core.agent_loop.publication import (
@@ -34,6 +36,7 @@ from app.core.agent_loop.publication import (
     unreferenced_fact_markers,
 )
 from app.core.agent_loop.terminal_state import terminal_status
+from app.core.agent_loop.tool_batch import ToolBatch
 from app.core.agent_loop.tool_execution import ToolExecutor
 from app.core.circuit_breaker import CircuitBreakerOpen
 from app.core.diagnostics import diagnostic_payload, diagnostics_enabled
@@ -45,6 +48,7 @@ from app.core.guardrails import (
 )
 from app.core.observability import observe
 from app.core.prompts import PromptRegistry
+from app.core.report_normalize import normalize_report
 from app.core.skills import SkillPackage, SkillRegistry
 from app.core.ticker import parse_ticker
 from app.events.models import (
@@ -90,6 +94,16 @@ _EVIDENCE_TOOLS = {
     "analysis:get_technical_overview",
 }
 _PARTIAL_RESPONSE_MIN_CHARS = 200
+# Standard report evidence, in the order the model normally requests it
+# (a4 measured: stock data, technical overview, fundamentals, fundamental scan).
+_FAST_PATH_TOOLS = (
+    "data:fetch_stock_data",
+    "analysis:get_technical_overview",
+    "analysis:run_technical_scan",
+    "data:fetch_fundamentals",
+    "analysis:run_fundamental_scan",
+)
+_FAST_PATH_NEWS_TOOL = "news:fetch_news"
 _EVIDENCE_REQUIRED_SKILLS = {
     "fundamental-analysis",
     "technical-analysis",
@@ -185,6 +199,9 @@ class AgentLoopConfig:
     report_max_tokens: int = 32768
     report_repair_max_tokens: int = 8192
     max_report_repairs: int = 2
+    # A repair regenerates the whole report; below this much remaining run
+    # budget it cannot finish, so publish the evidence fallback instead.
+    min_repair_seconds: float = 30.0
     report_repair_timeout_seconds: float = 120.0
     first_round_max_tokens: int = 1024
     publish_reports: bool = False
@@ -192,6 +209,18 @@ class AgentLoopConfig:
     allowed_tools: frozenset[str] | None = None
     route_plan: RoutePlan | None = None
     resolved_ticker: str | None = None
+    # Run independent tool calls of one assistant turn concurrently.
+    concurrent_tools: bool = field(
+        default_factory=lambda: settings.FINAI_AGENT_CONCURRENT_TOOLS
+    )
+    # Report fast path: prefetch the standard evidence set instead of asking
+    # the model which tools to call (resolved ticker + REPORT_SYNTHESIS only).
+    report_fast_path: bool = field(
+        default_factory=lambda: settings.FINAI_REPORT_FAST_PATH
+    )
+    report_prefetch_news: bool = field(
+        default_factory=lambda: settings.FINAI_REPORT_PREFETCH_NEWS
+    )
 
 
 class AgentLoop:
@@ -364,7 +393,16 @@ class AgentLoop:
             for message in history
             if message.role == "tool" and message.tool_call_id
         }
-        for message in history:
+        # Only the current turn (messages after the last user message) counts for
+        # the fast-path guard and for duplicate-call dedupe: earlier turns may be
+        # about another ticker and must not satisfy or block this run's calls.
+        turn_history = _current_turn(history)
+        turn_completed_ids = {
+            message.tool_call_id
+            for message in turn_history
+            if message.role == "tool" and message.tool_call_id
+        }
+        for message in turn_history:
             if message.role != "assistant" or not message.tool_calls:
                 continue
             for call in message.tool_calls:
@@ -452,6 +490,21 @@ class AgentLoop:
                 )
                 return
 
+        current_stage: tuple[str, str] | None = None
+        prefetch_round = False
+        if self._fast_path_applies(
+            turn_history, turn_completed_ids, resumed_assistant, approved
+        ):
+            prefetched = self._prefetch_assistant(
+                self._allowed_tool_names(selected_skills), str(factory.run_id)
+            )
+            if prefetched is not None:
+                history.append(prefetched)
+                if message_writer:
+                    message_writer(prefetched)
+                resumed_assistant = prefetched
+                prefetch_round = True
+        batch: ToolBatch | None = None
         try:
             for round_number in range(1, self.config.max_rounds + 1):
                 if time.perf_counter() - started >= self.config.max_run_seconds:
@@ -522,6 +575,18 @@ class AgentLoop:
                                 prompt_key="agent_loop.report.availability",
                             )
                         )
+                    if tool_calls_seen and structured_output:
+                        stage_key = (
+                            "generation",
+                            "Writing report"
+                            if answer_contract == "report"
+                            else "Writing answer",
+                        )
+                        if current_stage != stage_key:
+                            current_stage = stage_key
+                            yield factory.make(
+                                StageStarted, stage=stage_key[0], label=stage_key[1]
+                            )
                     yield factory.make(
                         ModelRequestStarted,
                         model=self._model_for_history(history, controller_route),
@@ -639,6 +704,12 @@ class AgentLoop:
                         assistant, ticker_resolved = _hydrate_tool_call_tickers(
                             assistant, self.config.resolved_ticker
                         )
+                        if ticker_resolved and not tools_disabled:
+                            assistant = self._with_required_news(
+                                assistant,
+                                history,
+                                self._allowed_tool_names(selected_skills),
+                            )
                         if not ticker_resolved:
                             question = self.prompt_registry.get(
                                 "agent_loop.clarification.ticker"
@@ -668,6 +739,13 @@ class AgentLoop:
                         )
                         review_context["run_id"] = str(factory.run_id)
                         review_context["conversation_id"] = str(factory.conversation_id)
+                        if current_stage != ("validation", "Reviewing answer"):
+                            current_stage = ("validation", "Reviewing answer")
+                            yield factory.make(
+                                StageStarted,
+                                stage="validation",
+                                label="Reviewing answer",
+                            )
                         try:
                             assert provider is not None
                             review = await provider.review_output(review_context)
@@ -803,6 +881,12 @@ class AgentLoop:
                             }
                             if lookup_repair_attempts < self.config.max_report_repairs:
                                 lookup_repair_attempts += 1
+                                current_stage = ("generation", "Repairing answer")
+                                yield factory.make(
+                                    StageStarted,
+                                    stage="generation",
+                                    label="Repairing answer",
+                                )
                                 history.append(
                                     Message(
                                         role="system",
@@ -862,13 +946,29 @@ class AgentLoop:
                                 "model generation returned empty report",
                                 category="model_generation",
                             )
+                        if current_stage != ("validation", "Checking report"):
+                            current_stage = ("validation", "Checking report")
+                            yield factory.make(
+                                StageStarted,
+                                stage="validation",
+                                label="Checking report",
+                            )
                         draft = None
                         failures: list[CheckFailure] = []
                         fail_reasons: tuple[str, ...] = ()
                         parse_failure = False
                         published = ""
                         try:
-                            draft = parse_report_draft(assistant.content)
+                            normalized, norm_changes = normalize_report(
+                                assistant.content, evidence.facts, evidence.sources
+                            )
+                            if norm_changes:
+                                logger.info(
+                                    "report normalised run_id=%s changes=%s",
+                                    factory.run_id,
+                                    norm_changes,
+                                )
+                            draft = parse_report_draft(normalized)
                             self.last_report_result = {
                                 "status": "structured",
                                 "draft": draft.model_dump(mode="json"),
@@ -958,8 +1058,9 @@ class AgentLoop:
                             summaries = tuple(f.summary for f in failures)
                             can_retry = (
                                 repairs_used < self.config.max_report_repairs
-                                and time.perf_counter() - started
-                                < self.config.max_run_seconds
+                                and self.config.max_run_seconds
+                                - (time.perf_counter() - started)
+                                >= self.config.min_repair_seconds
                             )
                             if parse_failure:
                                 shown: tuple[str, ...] = ("report_check",)
@@ -979,6 +1080,12 @@ class AgentLoop:
                                     report_parse_repair_attempts += 1
                                 else:
                                     report_validation_repair_attempts += 1
+                                current_stage = ("generation", "Repairing report")
+                                yield factory.make(
+                                    StageStarted,
+                                    stage="generation",
+                                    label="Repairing report",
+                                )
                                 with span(
                                     "report.repair",
                                     {
@@ -1078,6 +1185,35 @@ class AgentLoop:
                     )
                     return
 
+                if batch is not None:
+                    await batch.aclose()
+                batch = ToolBatch(
+                    tool_executor,
+                    lambda: (
+                        self.config.max_run_seconds - (time.perf_counter() - started)
+                    ),
+                )
+                if self.config.concurrent_tools and (
+                    budget_wrapup
+                    or time.perf_counter() - started < self.config.max_run_seconds
+                ):
+                    batch.launch(
+                        _concurrent_calls(
+                            assistant.tool_calls,
+                            completed_tool_ids=completed_tool_ids,
+                            successful_signatures=successful_tool_signatures,
+                            signature_attempts=tool_signature_attempts,
+                            calls_seen=tool_calls_seen,
+                            ceiling=self.config.emergency_max_tool_calls,
+                        )
+                    )
+                tools_in_turn = len(assistant.tool_calls)
+                tools_done = 0
+                if tools_in_turn and (current_stage or ("", ""))[0] != "research":
+                    current_stage = ("research", "Gathering evidence")
+                    yield factory.make(
+                        StageStarted, stage="research", label="Gathering evidence"
+                    )
                 for call in assistant.tool_calls:
                     if (
                         time.perf_counter() - started >= self.config.max_run_seconds
@@ -1228,15 +1364,23 @@ class AgentLoop:
                             else "omitted",
                         )
                     try:
-                        payload = await tool_executor.execute(
-                            name,
-                            arguments,
-                            max_seconds=max(
-                                1.0,
-                                self.config.max_run_seconds
-                                - (time.perf_counter() - started),
-                            ),
-                        )
+                        if call_id in batch:
+                            outcome = await batch.result(call_id)
+                            payload = outcome.payload
+                            tool_duration_ms = outcome.duration_ms
+                        else:
+                            payload = await tool_executor.execute(
+                                name,
+                                arguments,
+                                max_seconds=max(
+                                    1.0,
+                                    self.config.max_run_seconds
+                                    - (time.perf_counter() - started),
+                                ),
+                            )
+                            tool_duration_ms = round(
+                                (time.perf_counter() - tool_started) * 1000, 2
+                            )
                     except asyncio.CancelledError:
                         yield factory.make(RunCancelled, reason="cancelled by user")
                         raise
@@ -1356,14 +1500,22 @@ class AgentLoop:
                             tool=name,
                             tool_id=call_id,
                             detail=_summary(payload),
-                            duration_ms=round(
-                                (time.perf_counter() - tool_started) * 1000, 2
-                            ),
+                            duration_ms=tool_duration_ms,
                         )
                         sources = _extract_sources(payload)
                         if sources:
                             yield factory.make(SourcesUpdated, sources=sources)
+                    tools_done += 1
+                    if tools_in_turn > 1:
+                        current_stage = (
+                            "research",
+                            f"Gathering evidence ({tools_done} of {tools_in_turn})",
+                        )
+                        yield factory.make(
+                            StageStarted, stage="research", label=current_stage[1]
+                        )
                     self._drain_input_queue(history, input_queue)
+                await batch.aclose()
                 if stop_reason:
                     for event in _limited_completion(
                         factory, started, stop_reason, evidence
@@ -1396,10 +1548,17 @@ class AgentLoop:
                         evidence_availability=list(evidence.availability.values()),
                     )
                     return
+                skip_checkpoint = prefetch_round
+                if prefetch_round and evidence.facts:
+                    # All standard evidence is in: the next round writes the
+                    # report directly instead of offering tools again.
+                    tools_disabled = True
+                prefetch_round = False
                 if (
                     self.config.decision_provider
                     and tool_calls_seen
                     and not tools_disabled
+                    and not skip_checkpoint
                 ):
                     try:
                         controller_context = _controller_context(
@@ -1522,6 +1681,117 @@ class AgentLoop:
                 message=str(exc),
                 category=getattr(exc, "category", "runtime"),
             )
+        finally:
+            if batch is not None:
+                await batch.aclose()
+
+    def _fast_path_applies(
+        self,
+        history: list[Message],
+        completed_tool_ids: set[str | None],
+        resumed_assistant: Message | None,
+        approved: set[str],
+    ) -> bool:
+        """True for a fresh report run with a resolved ticker and no prior tools."""
+        config = self.config
+        route = config.route_plan
+        return bool(
+            config.report_fast_path
+            and config.publish_reports
+            and config.resolved_ticker
+            and route is not None
+            and route.execution_mode is ExecutionMode.REPORT_SYNTHESIS
+            and route.next_action is NextAction.GENERATE_TEXT
+            and not approved
+            and resumed_assistant is None
+            and not completed_tool_ids
+            and not any(
+                message.role == "assistant" and message.tool_calls
+                for message in history
+            )
+        )
+
+    def _prefetch_assistant(
+        self, allowed_tools: set[str], run_id: str = ""
+    ) -> Message | None:
+        """Synthetic assistant turn requesting the standard report evidence."""
+        try:
+            ticker = parse_ticker(self.config.resolved_ticker or "").provider_symbol
+        except ValueError:
+            return None
+        names = [name for name in _FAST_PATH_TOOLS if name in allowed_tools]
+        if len(names) < 2:
+            return None
+        if self.config.report_prefetch_news and _FAST_PATH_NEWS_TOOL in allowed_tools:
+            names.append(_FAST_PATH_NEWS_TOOL)
+        calls: list[dict[str, Any]] = []
+        for index, name in enumerate(names, start=1):
+            arguments: dict[str, Any] = {"ticker": ticker}
+            if name in {"data:fetch_stock_data", "analysis:get_technical_overview"}:
+                arguments.update(period="1y", interval="1d")
+            elif name == _FAST_PATH_NEWS_TOOL:
+                arguments["limit"] = 10
+            calls.append(
+                {
+                    "id": f"prefetch-{run_id}-{index}"
+                    if run_id
+                    else f"prefetch-{index}",
+                    "type": "function",
+                    "function": {"name": name, "arguments": json.dumps(arguments)},
+                }
+            )
+        return Message(role="assistant", content="", tool_calls=calls)
+
+    def _with_required_news(
+        self, assistant: Message, history: list[Message], allowed_tools: set[str]
+    ) -> Message:
+        """Report runs always gather news: add it to this turn if never requested.
+
+        The extra call joins the model's own calls, so it runs concurrently with
+        them in its own lane; if news fails the existing availability accounting
+        marks it unavailable and the report says so.
+        """
+        config = self.config
+        if (
+            not (config.publish_reports and config.report_prefetch_news)
+            or _FAST_PATH_NEWS_TOOL not in allowed_tools
+        ):
+            return assistant
+        requested_before = any(
+            str((call.get("function") or {}).get("name") or call.get("name") or "")
+            == _FAST_PATH_NEWS_TOOL
+            for message in [*history, assistant]
+            for call in message.tool_calls or []
+        )
+        if requested_before:
+            return assistant
+        ticker = ""
+        if config.resolved_ticker:
+            with contextlib.suppress(ValueError):
+                ticker = parse_ticker(config.resolved_ticker).provider_symbol
+        if not ticker:
+            for call in assistant.tool_calls or []:
+                try:
+                    _, _, arguments = _tool_call_parts(call)
+                except AgentLoopError:
+                    continue
+                if isinstance(arguments.get("ticker"), str) and arguments["ticker"]:
+                    ticker = arguments["ticker"]
+                    break
+        if not ticker:
+            return assistant
+        calls = list(assistant.tool_calls or [])
+        calls.append(
+            {
+                "id": "required-news",
+                "type": "function",
+                "function": {
+                    "name": _FAST_PATH_NEWS_TOOL,
+                    "arguments": json.dumps({"ticker": ticker, "limit": 10}),
+                },
+            }
+        )
+        return assistant.model_copy(update={"tool_calls": calls})
 
     def _select_skills(self, messages: list[Message]) -> list[SkillPackage]:
         if self.skill_registry is None:
@@ -1940,6 +2210,59 @@ def _hydrate_tool_call_tickers(
     return assistant.model_copy(update={"tool_calls": hydrated_calls}), True
 
 
+def _current_turn(history: list[Message]) -> list[Message]:
+    """Messages after the last user message (the whole history if none)."""
+    for index in range(len(history) - 1, -1, -1):
+        if history[index].role == "user":
+            return history[index + 1 :]
+    return history
+
+
+def _concurrent_calls(
+    calls: list[dict[str, Any]],
+    *,
+    completed_tool_ids: set[str | None],
+    successful_signatures: set[str],
+    signature_attempts: dict[str, int],
+    calls_seen: int,
+    ceiling: int,
+) -> list[tuple[str, str, dict[str, Any]]]:
+    """Calls the serial loop would execute, found without running anything.
+
+    Mirrors the loop's pre-execution checks so only calls it would actually run
+    are started early. The emergency ceiling is counted before launching.
+    Repeats of a signature (within the turn or earlier) are left to the loop,
+    which reuses the cached result or stops exactly as it always did.
+    """
+    launch: list[tuple[str, str, dict[str, Any]]] = []
+    seen: set[str] = set()
+    count = calls_seen
+    for call in calls:
+        count += 1
+        if count > ceiling:
+            break
+        try:
+            name, call_id, arguments = _tool_call_parts(call)
+        except AgentLoopError:
+            if _tool_call_identity(call)[0] == "interaction:ask_user":
+                break
+            continue
+        if name == "interaction:ask_user":
+            break
+        if call_id in completed_tool_ids:
+            continue
+        signature = _tool_call_signature(name, arguments)
+        if (
+            signature in successful_signatures
+            or signature_attempts.get(signature, 0) >= 1
+            or signature in seen
+        ):
+            continue
+        seen.add(signature)
+        launch.append((call_id, name, arguments))
+    return launch
+
+
 def _tool_call_identity(call: dict[str, Any]) -> tuple[str, str]:
     """Return safe display metadata when a streamed call has invalid arguments."""
     function = call.get("function", {})
@@ -2077,11 +2400,54 @@ def _summary(payload: dict[str, Any]) -> str:
     return "completed"
 
 
+# Model history later cuts any tool message at 6,000 chars; stay below it.
+_MODEL_TOOL_CHAR_BUDGET = 5_800
+
+
+def _fit_record_list(payload: dict[str, Any], budget: int) -> str | None:
+    """Shrink a list-of-records result (news) to fit instead of dropping it.
+
+    Summaries are shortened first, then trailing records are removed; headline,
+    URL, date and source of kept records are never altered, and the payload says
+    how many records were left out.
+    """
+    data = payload.get("data")
+    if not isinstance(data, list) or not data:
+        return None
+    if not all(isinstance(item, dict) for item in data):
+        return None
+    for summary_chars in (400, 240, 120, 0):
+        records = [
+            {**item, "summary": str(item.get("summary") or "")[:summary_chars]}
+            if "summary" in item
+            else dict(item)
+            for item in data
+        ]
+        while records:
+            candidate = {
+                **{k: v for k, v in payload.items() if k not in {"data", "sources"}},
+                "data": records,
+                "truncated": True,
+                "records_total": len(data),
+                "records_omitted": len(data) - len(records),
+            }
+            encoded = json.dumps(candidate, default=str)
+            if len(encoded) <= budget:
+                return encoded
+            if summary_chars:
+                break
+            records = records[:-1]
+    return None
+
+
 def _tool_message_content(payload: dict[str, Any], *, max_chars: int = 7_500) -> str:
     """Bound provider results before inserting them into model history."""
     encoded = json.dumps(payload, default=str)
     if len(encoded) <= max_chars:
         return encoded
+    fitted = _fit_record_list(payload, min(max_chars, _MODEL_TOOL_CHAR_BUDGET))
+    if fitted is not None:
+        return fitted
     compact = {
         "success": payload.get("success", True),
         "truncated": True,

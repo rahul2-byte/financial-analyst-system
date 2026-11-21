@@ -3,6 +3,7 @@
  * run hints while a run is active, otherwise a context hint, on the right.
  */
 import { Box, Text } from 'ink';
+import { memo } from 'react';
 
 import { color, glyphs } from '../render/theme.js';
 
@@ -16,7 +17,7 @@ export interface StatusLineProps {
   readonly hint?: string;
 }
 
-export function StatusLine({ title, mode, running, hint = '' }: StatusLineProps) {
+export const StatusLine = memo(function StatusLine({ title, mode, running, hint = '' }: StatusLineProps) {
   const right = running ? RUNNING_HINT : hint;
   return (
     <Box justifyContent="space-between" width="100%">
@@ -28,4 +29,4 @@ export function StatusLine({ title, mode, running, hint = '' }: StatusLineProps)
       </Text>
     </Box>
   );
-}
+});

@@ -23,6 +23,7 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import quote
 
+import httpx
 import numpy as np
 import pandas as pd
 import yfinance as yf
@@ -41,8 +42,10 @@ from data.quality import (
     validate_market_records,
 )
 from data.retry import (
+    ProviderUnavailable,
     call_with_retry,
     call_with_timeout,
+    is_retryable,
     provider_retry_kwargs,
 )
 from data.schemas.market import OHLCVData
@@ -85,6 +88,15 @@ def _finite(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     return converted if math.isfinite(converted) else None
+
+
+YFINANCE_DOWNLOAD_TIMEOUT_SECONDS = 10
+
+
+def _retryable_except_timeout(exc: BaseException) -> bool:
+    return not isinstance(exc, (TimeoutError, httpx.TimeoutException)) and (
+        is_retryable(exc)
+    )
 
 
 class ReplayYFinanceFetcher:
@@ -267,6 +279,7 @@ class YFinanceFetcher(IDataFetcher):
                 end=end_str,
                 progress=False,
                 auto_adjust=False,
+                timeout=YFINANCE_DOWNLOAD_TIMEOUT_SECONDS,
             )
         )
 
@@ -376,6 +389,7 @@ class YFinanceFetcher(IDataFetcher):
                 interval=interval,
                 progress=False,
                 auto_adjust=False,
+                timeout=YFINANCE_DOWNLOAD_TIMEOUT_SECONDS,
             )
         )
 
@@ -501,7 +515,18 @@ class YFinanceFetcher(IDataFetcher):
         formatted_ticker = self._format_ticker(ticker)
         ticker_obj = yf.Ticker(formatted_ticker)
         timeout = float(settings.YFINANCE_INFO_TIMEOUT_SECONDS)
-        info = self._call(lambda: call_with_timeout(lambda: ticker_obj.info, timeout))
+        try:
+            info = call_with_retry(
+                lambda: call_with_timeout(lambda: ticker_obj.info, timeout),
+                provider="yfinance",
+                retryable=_retryable_except_timeout,
+                **provider_retry_kwargs(),
+            )
+        except TimeoutError as exc:
+            # A hung ``info`` is not retried (each attempt costs the full timeout).
+            raise ProviderUnavailable(
+                "yfinance", "TimeoutError after 1 attempts", attempts=1
+            ) from exc
 
         if not info:
             return {"error": "No fundamental info found", "ticker": formatted_ticker}

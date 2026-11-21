@@ -57,3 +57,5 @@ def _dummy_openrouter_key(monkeypatch: pytest.MonkeyPatch) -> None:
 
     monkeypatch.setenv("OPENROUTER_API_KEY", _TEST_OPENROUTER_KEY)
     monkeypatch.setattr(settings, "OPENROUTER_API_KEY", _TEST_OPENROUTER_KEY)
+    # Keep per-call metrics out of the developer's .finai directory.
+    monkeypatch.setattr(settings, "FINAI_CALL_METRICS", False)

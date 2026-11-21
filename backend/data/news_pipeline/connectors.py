@@ -287,6 +287,15 @@ class TinyFishSearchConnector:
     async def fetch(
         self, company: CompanyContext, *, time_window_days: int
     ) -> list[RawSearchResult]:
+        if isinstance(self.client, TinyFishSearchClient) and self.client.api_key:
+            # One shared HTTP client for all queries of this run.
+            async with self.client.session():
+                return await self._fetch(company, time_window_days=time_window_days)
+        return await self._fetch(company, time_window_days=time_window_days)
+
+    async def _fetch(
+        self, company: CompanyContext, *, time_window_days: int
+    ) -> list[RawSearchResult]:
         if isinstance(self.client, TinyFishSearchClient) and not self.client.api_key:
             self.last_run_stats = {
                 "status": "unavailable",
@@ -325,22 +334,16 @@ class TinyFishSearchConnector:
         query_failures = 0
         failure_reasons: list[str] = []
 
-        for query_spec in queries:
-            remaining = deadline - monotonic()
-            if remaining <= 0:
-                query_failures += 1
-                failure_reasons.append("timeout")
-                break
+        async def run_query(
+            query_spec: dict[str, Any],
+        ) -> tuple[list[Any] | None, int, list[str]]:
+            """Run one query with retries; returns (results, failures, reasons)."""
             search_results: list[Any] | None = None
-            timed_out = False
             query_attempt = 0
             while search_results is None:
                 remaining = deadline - monotonic()
                 if remaining <= 0:
-                    query_failures += 1
-                    failure_reasons.append("timeout")
-                    timed_out = True
-                    break
+                    return None, 1, ["timeout"]
                 try:
 
                     async def provider_search(
@@ -361,10 +364,7 @@ class TinyFishSearchConnector:
                         timeout=min(remaining, float(settings.TINYFISH_QUERY_TIMEOUT)),
                     )
                 except TimeoutError:
-                    query_failures += 1
-                    failure_reasons.append("timeout")
-                    timed_out = True
-                    break
+                    return None, 1, ["timeout"]
                 except (
                     _ProviderSearchError,
                     ProviderUnavailable,
@@ -380,8 +380,6 @@ class TinyFishSearchConnector:
                             float(settings.TINYFISH_BACKOFF_SECONDS) * query_attempt
                         )
                         continue
-                    query_failures += 1
-                    failure_reasons.append(_provider_error_reason(exc))
                     logger.warning(
                         "TinyFish query failed; continuing",
                         extra={
@@ -391,10 +389,20 @@ class TinyFishSearchConnector:
                             "attempt": query_attempt + 1,
                         },
                     )
-                    break
+                    return None, 1, [_provider_error_reason(exc)]
+            return search_results, 0, []
+
+        # Queries run concurrently (the client's rate limiter paces the actual
+        # requests); outcomes are merged below in query order, so dedupe and
+        # result order are identical to running them one after another.
+        outcomes = await asyncio.gather(*(run_query(spec) for spec in queries))
+
+        for query_spec, (search_results, failures, reasons) in zip(
+            queries, outcomes, strict=True
+        ):
+            query_failures += failures
+            failure_reasons.extend(reasons)
             if search_results is None:
-                if timed_out:
-                    break
                 continue
             for item in search_results:
                 raw_items_seen += 1

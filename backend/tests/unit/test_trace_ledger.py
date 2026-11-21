@@ -81,3 +81,22 @@ def test_ledger_can_batch_noncritical_stream_events(
     ledger.append(_event(), durable=False)
 
     assert syncs == []
+
+
+def test_session_store_fsyncs_only_at_run_boundaries(
+    tmp_path: Path, monkeypatch
+) -> None:
+    from app.events.models import RunCancelled, RunCompleted
+    from finai.session_store import SessionStore
+
+    store = SessionStore(tmp_path, "s1")
+    syncs: list[int] = []
+    monkeypatch.setattr("app.events.ledger.os.fsync", lambda fd: syncs.append(fd))
+    factory = EventFactory(uuid4())
+
+    store.append_trace_event(factory.make(RunStarted, query="q"))
+    assert syncs == []
+    store.append_trace_event(factory.make(RunCompleted, terminal_status="ok"))
+    store.append_trace_event(factory.make(RunCancelled))
+    assert len(syncs) == 2
+    assert len(store.trace.read()) == 3

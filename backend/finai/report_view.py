@@ -14,14 +14,16 @@ import math
 import re
 from collections.abc import Iterable, Mapping
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from urllib.parse import urlparse
 
-from app.core.agent_loop.publication import EvidenceFact, _format_fact_value
 from app.core.ticker import parse_ticker
 
 from .bridge import protocol as p
 from .display import _raw_id_free, clean_text, friendly_error, source_label
+
+if TYPE_CHECKING:
+    from app.core.agent_loop.publication import EvidenceFact
 
 DISCLAIMER = (
     "Research aid based on provider data, not investment advice. "
@@ -233,6 +235,8 @@ def _format_fact(fact: EvidenceFact) -> str:
         return _compact(float(fact.value))
     if _field(fact.fact_id) == "close" and isinstance(fact.value, (int, float)):
         return f"{float(fact.value):,.2f}"
+    from app.core.agent_loop.publication import _format_fact_value
+
     return _format_fact_value(fact)
 
 

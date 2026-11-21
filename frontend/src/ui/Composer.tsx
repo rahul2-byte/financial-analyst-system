@@ -4,7 +4,7 @@
  * a terminal. The component applies keypresses through `useKeybindings`.
  */
 import { Box, Text } from 'ink';
-import { useRef, useState } from 'react';
+import { memo, useRef, useState } from 'react';
 
 import { completionFor, type CommandSpec } from '../commands/registry.js';
 import { color, glyphs } from '../render/theme.js';
@@ -255,7 +255,7 @@ export interface ComposerProps {
   readonly isActive?: boolean;
 }
 
-export function Composer(props: ComposerProps) {
+export const Composer = memo(function Composer(props: ComposerProps) {
   const [state, setState] = useState<ComposerState>(() => initialComposerState(props.history ?? []));
   // Keypresses can arrive faster than React re-renders, so the handler reads
   // and writes this ref instead of the rendered state.
@@ -355,4 +355,4 @@ export function Composer(props: ComposerProps) {
       <Completion items={items} selected={selected} />
     </Box>
   );
-}
+});

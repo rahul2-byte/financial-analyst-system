@@ -66,10 +66,10 @@ def test_engine_handles_fewer_than_keltner_lookback_bars() -> None:
 def test_engine_marks_optional_pandas_ta_indicator_unavailable_on_library_error(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from quant import technical_engine
+    import pandas_ta_classic
 
     monkeypatch.setattr(
-        technical_engine.pta,
+        pandas_ta_classic,
         "kc",
         lambda *_args, **_kwargs: (_ for _ in ()).throw(IndexError("short series")),
     )

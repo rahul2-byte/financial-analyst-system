@@ -7,7 +7,7 @@
  * presentation store and turns the store's state into transcript items.
  */
 import { Box, Static, Text, useApp, useInput, useStdout } from 'ink';
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 
 import type {
   Display,
@@ -26,7 +26,7 @@ import type { Bridge, MethodName, RequestOptions } from '../protocol/methods.js'
 import { PROTOCOL_VERSION } from '../protocol/version.js';
 import { runCommand, type AppSnapshot, type CommandContext, type LastRun } from '../commands/handlers.js';
 import { isMode, parseCommand, type Mode } from '../commands/registry.js';
-import { humanLabel, isRawToolId, SPINNER_FRAMES } from '../render/format.js';
+import { humanLabel, isRawToolId } from '../render/format.js';
 import { color } from '../render/theme.js';
 import {
   createPresentationStore,
@@ -51,9 +51,8 @@ import { ClippedTail } from './ClippedTail.js';
 import { parseReport } from './report/parse.js';
 import { Composer } from './Composer.js';
 import { HelpPanel } from './HelpPanel.js';
-import { LiveActivity } from './LiveActivity.js';
+import { TickingActivity } from './LiveActivity.js';
 import { type Action } from './hooks/useKeybindings.js';
-import { useElapsed } from './hooks/useElapsed.js';
 import { useBridge, type BridgeHandle, type BridgeLaunch, type CrashReport } from './hooks/useBridge.js';
 import { SessionPicker } from './SessionPicker.js';
 import { StatusLine } from './StatusLine.js';
@@ -345,8 +344,6 @@ export function App({ launch, injected }: AppProps) {
   const [mode, setModeState] = useState<Mode>(launch.mode && isMode(launch.mode) ? launch.mode : 'guided');
   const [sessionTitle, setSessionTitle] = useState('');
   const [modelId, setModelId] = useState('');
-
-  const elapsed = useElapsed(running, runStartedAt);
 
   const modeRef = useRef<Mode>(mode);
   const runningRef = useRef(false);
@@ -650,9 +647,21 @@ export function App({ launch, injected }: AppProps) {
   const collector = collectorRef.current;
   const liveText = running && collector ? collector.liveText(state.responseText) : '';
   const liveRows = Math.max(4, (stdout?.rows ?? 30) - 12);
-  const live = running && collector
-    ? collector.liveActivities(state)
-    : { operation: state.currentOperation, activities: state.activities };
+  const live = useMemo(
+    () =>
+      running && collector
+        ? collector.liveActivities(state)
+        : { operation: state.currentOperation, activities: state.activities },
+    [running, collector, state],
+  );
+  // Composer is memoized, so it gets handlers whose identity never changes and which
+  // always call the latest closure.
+  const submitRef = useRef(submit);
+  submitRef.current = submit;
+  const onActionRef = useRef(onAction);
+  onActionRef.current = onAction;
+  const stableSubmit = useCallback((text: string) => submitRef.current(text), []);
+  const stableOnAction = useCallback((action: Action) => onActionRef.current(action), []);
 
   return (
     <Box flexDirection="column" width={width}>
@@ -665,10 +674,9 @@ export function App({ launch, injected }: AppProps) {
       </Static>
 
       {running ? (
-        <LiveActivity
-          frame={elapsed.frame % SPINNER_FRAMES.length}
+        <TickingActivity
+          startedAt={runStartedAt}
           operation={live.operation}
-          elapsedSeconds={elapsed.seconds}
           activeTools={state.activeTools}
           activities={live.activities}
           width={width}
@@ -698,8 +706,8 @@ export function App({ launch, injected }: AppProps) {
       <Composer
         mode={running ? 'running' : 'idle'}
         history={[]}
-        onSubmit={(text) => submit(text)}
-        onAction={onAction}
+        onSubmit={stableSubmit}
+        onAction={stableOnAction}
         isActive={picker === null && !helpOpen}
       />
       <StatusLine title={sessionTitle} mode={mode} running={running} hint={modelId} />

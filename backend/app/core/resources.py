@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+import asyncio
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,35 @@ class RuntimeResources:
     routing_policy: RoutingPolicy | None = None
     prompts: PromptRegistry | None = None
     skills: SkillRegistry | None = None
+    _prewarm_task: asyncio.Task[None] | None = field(default=None, repr=False)
+
+    def start_prewarm(self) -> None:
+        """Warm LLM/Jev HTTP connections in the background (free requests only).
+
+        Never blocks or fails the caller; a no-op when disabled, when no loop
+        is running, or when a pre-warm is already in flight.
+        """
+        if not settings.FINAI_HTTP_PREWARM:
+            return
+        if self._prewarm_task is not None and not self._prewarm_task.done():
+            return
+        targets = [
+            getattr(self.llm_service, "prewarm", None),
+            getattr(getattr(self.routing_policy, "jev", None), "prewarm", None),
+        ]
+        callables = [target for target in targets if callable(target)]
+        if not callables:
+            return
+        try:
+            self._prewarm_task = asyncio.get_running_loop().create_task(
+                _run_prewarm(callables)
+            )
+        except RuntimeError:
+            return
+
+
+async def _run_prewarm(callables: list[Any]) -> None:
+    await asyncio.gather(*(call() for call in callables), return_exceptions=True)
 
 
 def build_runtime_resources(

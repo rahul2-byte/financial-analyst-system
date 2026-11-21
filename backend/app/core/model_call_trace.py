@@ -18,6 +18,9 @@ from app.config import settings
 _TRACE_DIR_MARKER = ".finai-model-call-traces"
 
 
+_DURABLE_EVENTS = frozenset({"call.completed", "call.failed"})
+
+
 @dataclass(frozen=True)
 class ModelCallTrace:
     path: Path
@@ -61,7 +64,10 @@ class ModelCallTrace:
         return cls(path, trace_id, provider, model, run_id, conversation_id)
 
     def write(self, event: str, payload: dict[str, Any]) -> None:
-        """Append and fsync one JSONL record without recording HTTP headers."""
+        """Append one JSONL record without recording HTTP headers.
+
+        Records are written immediately; fsync is limited to call-terminal events.
+        """
         record = {
             "schema_version": 1,
             "event": event,
@@ -81,7 +87,8 @@ class ModelCallTrace:
             while view:
                 written = os.write(descriptor, view)
                 view = view[written:]
-            os.fsync(descriptor)
+            if event in _DURABLE_EVENTS:
+                os.fsync(descriptor)
         finally:
             os.close(descriptor)
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import contextlib
 import datetime
 import json
@@ -42,35 +43,15 @@ from app.events.models import (
 )
 from app.models.request_models import Message
 from app.models.routing import ExecutionMode, ModelTier, NextAction, RoutePlan
+from app.services.report_intent import wants_report
 from finai.context_budget import build_router_context
 
 
 def _wants_report(query: str) -> bool:
-    lowered = query.casefold().strip()
-    for prefix in (
-        "i want you to ",
-        "i'd like you to ",
-        "i would like you to ",
-        "please ",
-        "can you ",
-        "could you ",
-        "would you ",
-        "help me ",
-    ):
-        if lowered.startswith(prefix):
-            lowered = lowered[len(prefix) :].lstrip()
-            break
-    return lowered.startswith(
-        ("analyze ", "analyse ", "analsye ", "research ", "compare ")
-    ) or any(
-        marker in lowered
-        for marker in (
-            "report",
-            "investment thesis",
-            "full analysis",
-            "detailed analysis",
-        )
-    )
+    return wants_report(query)
+
+
+INSTRUMENT_SEARCH_TIMEOUT_SECONDS = 8.0
 
 
 class ResearchRunner:
@@ -99,9 +80,10 @@ class ResearchRunner:
     ) -> AsyncIterator[ResearchEvent]:
         """Yield events for ``query`` while keeping construction out of the session."""
         self.tool_runner.set_mocked_tools(mocked_tools or [])
+        self.resources.start_prewarm()
         self.last_loop = None
         route = None
-        resolution, resolution_source = self._resolve_instrument_context(
+        resolution, resolution_source = await self._resolve_instrument_context(
             history, query, conversation_id
         )
         if resolution.status == "resolved" and resolution.ticker:
@@ -324,7 +306,7 @@ class ResearchRunner:
         async for event in stream:
             yield event
 
-    def _resolve_instrument_context(
+    async def _resolve_instrument_context(
         self,
         history: list[Message],
         query: str,
@@ -347,7 +329,14 @@ class ResearchRunner:
                     "provider_unavailable",
                 )
             try:
-                resolved = resolve_instrument(query, fetcher.resolve_instrument)
+                # Sync HTTP search runs in a worker thread so the event loop
+                # (spinner, bridge, cancellation) stays responsive.
+                resolved = await asyncio.wait_for(
+                    asyncio.to_thread(
+                        resolve_instrument, query, fetcher.resolve_instrument
+                    ),
+                    timeout=INSTRUMENT_SEARCH_TIMEOUT_SECONDS,
+                )
             except Exception:  # noqa: BLE001 - provider failure becomes unresolved evidence
                 resolved = InstrumentResolution(
                     "unresolved", reason="instrument search provider unavailable"

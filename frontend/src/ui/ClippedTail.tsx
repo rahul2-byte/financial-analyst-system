@@ -20,7 +20,8 @@ export function ClippedTail({ maxRows, children }: ClippedTailProps) {
     if (ref.current === null) return;
     const { height } = measureElement(ref.current);
     if (height !== measured) setMeasured(height);
-  });
+    // Re-measure only when the content or the limit changes, not after every render.
+  }, [children, maxRows, measured]);
   const clipped = measured > maxRows;
   return (
     <Box

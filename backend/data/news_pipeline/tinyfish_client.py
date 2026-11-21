@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,8 @@ class TinyFishSearchClient:
         self.client_factory = client_factory or self._default_client_factory
         self.archive = archive
         self.last_snapshot_hash: str | None = None
+        self._shared_client: Any | None = None
+        self._shared_users = 0
         self.quota = RequestQuota(
             Path(settings.FINAI_QUOTA_DB),
             per_second=settings.FINAI_PROVIDER_REQUESTS_PER_SECOND,
@@ -36,6 +39,29 @@ class TinyFishSearchClient:
         import httpx
 
         return httpx.AsyncClient(timeout=timeout)
+
+    @asynccontextmanager
+    async def session(self) -> AsyncIterator[None]:
+        """Reuse one HTTP client (one TCP/TLS handshake) for searches inside.
+
+        Re-entrant: nested or concurrent sessions share the outermost client.
+        Outside a session, each search opens its own client as before.
+        """
+        if self._shared_client is not None:
+            self._shared_users += 1
+            try:
+                yield
+            finally:
+                self._shared_users -= 1
+            return
+        async with self.client_factory(self.timeout) as client:
+            self._shared_client = client
+            self._shared_users = 1
+            try:
+                yield
+            finally:
+                self._shared_users -= 1
+                self._shared_client = None
 
     async def search(
         self,
@@ -54,16 +80,22 @@ class TinyFishSearchClient:
             "after_date": start_published_date.date().isoformat(),
         }
 
+        async def send(client: Any) -> Any:
+            # Waits for a free slot so concurrent queries never trip the limit.
+            await self.quota.acquire("tinyfish")
+            response = await client.get(
+                self.base_url,
+                headers={"X-API-Key": self.api_key},
+                params=params,
+            )
+            response.raise_for_status()
+            return response.json()
+
         async def request() -> Any:
+            if self._shared_client is not None:
+                return await send(self._shared_client)
             async with self.client_factory(self.timeout) as client:
-                self.quota.reserve("tinyfish")
-                response = await client.get(
-                    self.base_url,
-                    headers={"X-API-Key": self.api_key},
-                    params=params,
-                )
-                response.raise_for_status()
-                return response.json()
+                return await send(client)
 
         payload = await acall_with_retry(
             request, provider="tinyfish", **provider_retry_kwargs()

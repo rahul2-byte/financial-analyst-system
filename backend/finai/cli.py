@@ -12,14 +12,12 @@ import shutil
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
-from typing import NoReturn, TypeVar
+from typing import TYPE_CHECKING, NoReturn, TypeVar
 
-from app.core.resources import MissingOpenRouterKeyError
-from app.events.models import ResearchEvent
-from app.observability.tracing import initialize_tracing
+if TYPE_CHECKING:
+    from app.events.models import ResearchEvent
 
-from .plain import render_event
-from .session import FinAIRepl
+    from .session import FinAIRepl
 
 _T = TypeVar("_T")
 
@@ -210,6 +208,8 @@ async def run_one_shot(repl: FinAIRepl, query: str, *, as_json: bool) -> int:
     Plain mode writes response text to stdout and progress to stderr; JSON mode
     writes one JSON object per event (JSONL) to stdout. See EXIT_CODE_HELP.
     """
+    from .plain import render_event
+
     events: list[ResearchEvent] = []
     wrote_text = False
     try:
@@ -252,6 +252,11 @@ def main() -> None:
     args = parse_arguments()
     if not args.query and sys.stdin.isatty() and sys.stdout.isatty():
         exec_ts_ui(interactive_argv(args))
+    from app.core.resources import MissingOpenRouterKeyError
+    from app.observability.tracing import initialize_tracing
+
+    from .session import FinAIRepl
+
     try:
         # Keep stdout clean for --json/--plain: tracing diagnostics go to stderr.
         tracing = quiet_stdout(initialize_tracing)

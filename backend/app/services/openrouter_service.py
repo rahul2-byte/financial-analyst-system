@@ -14,6 +14,7 @@ from uuid import uuid4
 
 import httpx
 from app.config import settings
+from app.config.reasoning import parse_reasoning
 from app.core.circuit_breaker import CircuitBreaker
 from app.core.model_call_trace import (
     ModelCallTrace,
@@ -24,6 +25,7 @@ from app.core.model_call_trace import (
 from app.core.model_stream import get_public_token_sink
 from app.core.observability import observe
 from app.models.request_models import Message
+from app.observability.call_metrics import build_call_record, write_call_record
 from app.observability.provider_archive import ProviderArchive, ProviderSnapshot
 from app.observability.provider_metrics import ProviderMetrics
 from app.observability.tracing import (
@@ -244,6 +246,7 @@ class OpenRouterService(LLMServiceInterface):
             limits=httpx.Limits(
                 max_connections=settings.HTTP_POOL_MAX_CONNECTIONS,
                 max_keepalive_connections=settings.HTTP_POOL_MAX_KEEPALIVE_CONNECTIONS,
+                keepalive_expiry=settings.HTTP_KEEPALIVE_EXPIRY_SECONDS,
             ),
         )
         self._circuit = circuit_breaker or CircuitBreaker(
@@ -251,6 +254,14 @@ class OpenRouterService(LLMServiceInterface):
             failure_threshold=settings.OPENROUTER_CIRCUIT_FAILURE_THRESHOLD,
             recovery_timeout=settings.OPENROUTER_CIRCUIT_RECOVERY_TIMEOUT,
         )
+
+    async def prewarm(self, timeout_seconds: float = 3.0) -> bool:
+        """Open (and pool) a connection to the API host without a model call.
+
+        Sends an unauthenticated HEAD to the base URL; any HTTP status counts,
+        since only the TCP/TLS handshake matters. Never raises.
+        """
+        return await prewarm_client(self._client, self.base_url, timeout_seconds)
 
     async def aclose(self) -> None:
         if not self._client.is_closed:
@@ -322,6 +333,10 @@ class OpenRouterService(LLMServiceInterface):
             ),
             "temperature": kwargs.get("temperature", 0.7),
         }
+        purpose = str(kwargs.get("purpose") or "unspecified")
+        reasoning_setting = reasoning_for_purpose(purpose)
+        if reasoning_setting is not None:
+            payload["reasoning"] = reasoning_setting
         # OpenRouter performs model failover natively from the ``models`` array.
         if self.fallback_models:
             payload["models"] = [
@@ -622,6 +637,13 @@ class OpenRouterService(LLMServiceInterface):
                     "reasoning_chars": reasoning_chars,
                     "usage": usage,
                 }
+                self._persist_call_metrics(
+                    kwargs,
+                    purpose=purpose,
+                    reasoning=reasoning_setting,
+                    retries=retries,
+                    status="completed",
+                )
                 if finish_reason:
                     set_current_span_attributes({"llm.finish_reason": finish_reason})
                 output_content, output_truncated, output_size = trace_content(
@@ -678,6 +700,13 @@ class OpenRouterService(LLMServiceInterface):
                     latency_ms=latency_ms,
                     timeout=self.last_telemetry["timeout"],
                     partial=self.last_telemetry["partial_output"],
+                )
+                self._persist_call_metrics(
+                    kwargs,
+                    purpose=purpose,
+                    reasoning=reasoning_setting,
+                    retries=retries,
+                    status="failed",
                 )
                 partial_output = (
                     stream_started or streamed_token_count > 0 or emitted_tool_call
@@ -778,8 +807,47 @@ class OpenRouterService(LLMServiceInterface):
                     timeout=self.last_telemetry["timeout"],
                     partial=self.last_telemetry["partial_output"],
                 )
+                self._persist_call_metrics(
+                    kwargs,
+                    purpose=purpose,
+                    reasoning=reasoning_setting,
+                    retries=retries,
+                    status="failed",
+                )
                 self._circuit.record_failure()
                 raise
+
+    def _persist_call_metrics(
+        self,
+        kwargs: dict[str, Any],
+        *,
+        purpose: str,
+        reasoning: dict[str, Any] | None,
+        retries: int,
+        status: str,
+    ) -> None:
+        """Write one per-call record (and mirror it into the model trace)."""
+        telemetry = self.last_telemetry
+        trace = kwargs.get("_model_call_trace")
+        try:
+            record = build_call_record(
+                purpose=purpose,
+                model=str(telemetry.get("model_id", "")),
+                status=status,
+                ttft_ms=telemetry.get("first_token_latency_ms"),
+                total_ms=float(telemetry.get("request_latency_ms") or 0.0),
+                usage=telemetry.get("usage"),
+                retries=retries,
+                reasoning=reasoning,
+                reasoning_chars=int(telemetry.get("reasoning_chars") or 0),
+                run_id=str(telemetry["run_id"]) if telemetry.get("run_id") else None,
+                call_id=trace.call_id if isinstance(trace, ModelCallTrace) else None,
+            )
+            write_call_record(record)
+            if isinstance(trace, ModelCallTrace):
+                trace.write("call.metrics", record)
+        except Exception:  # telemetry must never break a model call
+            logger.debug("call metrics failed", exc_info=True)
 
     def generate_stream(
         self, messages: list[Message], model: str, **kwargs: Any
@@ -805,7 +873,12 @@ class OpenRouterService(LLMServiceInterface):
                     tools=kwargs.get("tools"),
                     parameters={
                         key: kwargs.get(key)
-                        for key in ("max_tokens", "temperature", "timeout_seconds")
+                        for key in (
+                            "max_tokens",
+                            "temperature",
+                            "timeout_seconds",
+                            "purpose",
+                        )
                         if kwargs.get(key) is not None
                     },
                 )
@@ -856,6 +929,32 @@ class OpenRouterService(LLMServiceInterface):
         # OpenRouter documents chat completions, not a health endpoint. Avoid spending a
         # paid completion just to answer a health probe.
         return bool(self.api_key)
+
+
+def reasoning_for_purpose(purpose: str) -> dict[str, Any] | None:
+    """Configured ``reasoning`` request object for a call purpose, else None."""
+    setting = {
+        "tool_selection": settings.FINAI_REASONING_TOOL_ROUNDS,
+        "repair": settings.FINAI_REASONING_REPAIR,
+        "synthesis": settings.FINAI_REASONING_SYNTHESIS,
+    }.get(purpose)
+    return parse_reasoning(setting)
+
+
+async def prewarm_client(
+    client: httpx.AsyncClient, url: str, timeout_seconds: float = 3.0
+) -> bool:
+    """Best-effort connection warm-up with a free HEAD request; never raises."""
+    try:
+        if client.is_closed:
+            return False
+        await client.head(
+            url, timeout=httpx.Timeout(timeout_seconds), follow_redirects=False
+        )
+        return True
+    except Exception:
+        logger.debug("connection pre-warm failed", exc_info=True)
+        return False
 
 
 def _retry_delay(

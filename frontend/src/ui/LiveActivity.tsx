@@ -1,4 +1,6 @@
 import { Box, Text } from 'ink';
+import { memo } from 'react';
+import { useElapsed } from './hooks/useElapsed.js';
 import type { ActivityState } from '../state/types.js';
 import { color } from '../render/theme.js';
 import { SPINNER_FRAMES, formatElapsed, humanLabel, truncate } from '../render/format.js';
@@ -47,3 +49,16 @@ export function LiveActivity({ frame, operation, elapsedSeconds, activeTools = [
     </Box>
   );
 }
+
+export interface TickingActivityProps extends Omit<LiveActivityProps, 'frame' | 'elapsedSeconds'> {
+  startedAt: number | null;
+}
+
+/**
+ * `LiveActivity` with its own 100 ms clock. The ticking state lives here so only this
+ * subtree re-renders while a run is active, not the whole app.
+ */
+export const TickingActivity = memo(function TickingActivity({ startedAt, ...rest }: TickingActivityProps) {
+  const elapsed = useElapsed(true, startedAt);
+  return <LiveActivity {...rest} frame={elapsed.frame} elapsedSeconds={elapsed.seconds} />;
+});

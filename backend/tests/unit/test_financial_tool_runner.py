@@ -524,3 +524,112 @@ async def test_stock_data_blocks_material_vendor_disagreement() -> None:
 
     assert result["success"] is False
     assert result["quality_issues"][0]["code"] == "VENDOR_DISAGREEMENT"
+
+
+@pytest.mark.asyncio
+async def test_slow_upstox_falls_back_to_yfinance_inside_the_tool_budget(
+    monkeypatch,
+) -> None:
+    import time
+
+    from app.config import settings
+    from app.core.agent_loop.tool_execution import default_tool_timeout
+
+    monkeypatch.setattr(settings, "UPSTOX_PRIMARY_BUDGET_SECONDS", 0.2)
+
+    class Hung:
+        def resolve_instrument(self, ticker: str) -> list[dict]:
+            time.sleep(1.0)
+            return []
+
+    tool_runner = FinancialToolRunner(
+        RuntimeResources(
+            llm_service=object(), yf_fetcher=FakeFetcher(), upstox_fetcher=Hung()
+        )
+    )
+    began = time.perf_counter()
+    prices = await tool_runner.execute("data:fetch_stock_data", {"ticker": "ABC"})
+    funds = await tool_runner.execute("data:fetch_fundamentals", {"ticker": "ABC"})
+    assert time.perf_counter() - began < 0.9
+    assert prices["success"] is True and funds["success"] is True
+    assert prices["provenance"]["source"] == "yfinance"
+    # Configured defaults: Upstox budget + yfinance fallback fit the tool timeout.
+    defaults = type(settings).model_fields
+    assert (
+        defaults["UPSTOX_PRIMARY_BUDGET_SECONDS"].default
+        + defaults["YFINANCE_INFO_TIMEOUT_SECONDS"].default
+        < default_tool_timeout()
+    )
+    assert (
+        defaults["UPSTOX_TIMEOUT"].default
+        <= defaults["UPSTOX_PRIMARY_BUDGET_SECONDS"].default
+    )
+
+
+@pytest.mark.asyncio
+async def test_news_wakes_on_fundamentals_event_not_by_polling(monkeypatch) -> None:
+    import time
+
+    from app.config import settings
+
+    monkeypatch.setattr(settings, "NEWS_COMPANY_NAME_WAIT_SECONDS", 5.0)
+
+    class SlowNamed(FakeFetcher):
+        def fetch_company_fundamentals(self, ticker: str) -> dict:
+            time.sleep(0.2)
+            return {"ticker": ticker, "name": "ABC Limited", "peRatio": 12}
+
+    seen: list[str] = []
+
+    class Pipeline:
+        async def run(self, *, company, time_window_days):
+            seen.append(company.company_name)
+            return []
+
+    tool_runner = FinancialToolRunner(
+        RuntimeResources(
+            llm_service=object(),
+            yf_fetcher=SlowNamed(),
+            news_pipeline_runner=Pipeline(),
+        )
+    )
+    fundamentals = asyncio.create_task(
+        tool_runner.execute("data:fetch_fundamentals", {"ticker": "ABC"})
+    )
+    await asyncio.sleep(0.02)
+    began = time.perf_counter()
+    await tool_runner.execute("news:fetch_news", {"ticker": "ABC"})
+    await fundamentals
+    assert seen == ["ABC Limited"]
+    assert time.perf_counter() - began < 1.0
+    assert not tool_runner._fundamentals_done  # events are cleaned up
+
+
+@pytest.mark.asyncio
+async def test_news_proceeds_when_fundamentals_fail() -> None:
+    class Failing(FakeFetcher):
+        def fetch_company_fundamentals(self, ticker: str) -> dict:
+            raise RuntimeError("provider down")
+
+    seen: list[str] = []
+
+    class Pipeline:
+        async def run(self, *, company, time_window_days):
+            seen.append(company.company_name)
+            return []
+
+    tool_runner = FinancialToolRunner(
+        RuntimeResources(
+            llm_service=object(),
+            yf_fetcher=Failing(),
+            news_pipeline_runner=Pipeline(),
+        )
+    )
+    fundamentals = asyncio.create_task(
+        tool_runner.execute("data:fetch_fundamentals", {"ticker": "ABC"})
+    )
+    await asyncio.sleep(0.01)
+    await tool_runner.execute("news:fetch_news", {"ticker": "ABC"})
+    with pytest.raises(RuntimeError):
+        await fundamentals
+    assert seen == ["ABC"]

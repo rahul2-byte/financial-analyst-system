@@ -147,8 +147,9 @@ async def test_tinyfish_search_connector_enforces_total_timeout(monkeypatch):
     connector = TinyFishSearchConnector(client=_Client(), max_queries_per_run=2)
 
     assert await connector.fetch(company, time_window_days=30) == []
-    assert connector.last_run_stats["query_failures"] == 1
-    assert connector.last_run_stats["failure_reasons"] == ["timeout"]
+    # Queries run concurrently, so each one reports its own timeout.
+    assert connector.last_run_stats["query_failures"] == 2
+    assert connector.last_run_stats["failure_reasons"] == ["timeout", "timeout"]
 
 
 @pytest.mark.asyncio

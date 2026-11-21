@@ -8,7 +8,6 @@ from uuid import uuid4
 
 import numpy as np
 import pandas as pd
-import pandas_ta_classic as pta
 import talib
 from quant.technical_models import (
     EvidenceProvenance,
@@ -336,6 +335,8 @@ class TechnicalEngine:
         kc = None
         cmf = None
         if n >= 20:
+            import pandas_ta_classic as pta  # heavy (numba); load on first use
+
             try:
                 kc = pta.kc(data["high"], data["low"], data["close"], length=20)
                 cmf = pta.cmf(

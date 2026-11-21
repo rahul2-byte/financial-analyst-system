@@ -6,7 +6,7 @@ import asyncio
 import contextlib
 import json
 import time
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
 from copy import deepcopy
 from datetime import UTC, date, datetime, timedelta
 from typing import Any, TypeVar, cast
@@ -259,6 +259,22 @@ def _ohlcv_ttl(key: Any) -> float:
     )
 
 
+def _ohlcv_key(ticker: str, period: str, interval: str) -> tuple[str, str, str]:
+    """Cache key that merges spellings of one instrument ("RELIANCE" = "RELIANCE.NS").
+
+    Uses the same symbol the yfinance adapter requests (default ``.NS`` suffix
+    applied exactly as the fetch would), so ``.BO`` and other listings stay
+    distinct. Unparseable input keeps its raw text.
+    """
+    try:
+        symbol = parse_ticker(ticker).provider_format_yfinance(
+            default_exchange_suffix=".NS"
+        )
+    except ValueError:
+        symbol = ticker
+    return (symbol, period, interval)
+
+
 class _TtlCache:
     """Small dict-like cache whose entries expire after a per-key TTL."""
 
@@ -294,6 +310,20 @@ async def _blocking(func: Callable[..., _T], *args: Any, **kwargs: Any) -> _T:
     return await asyncio.to_thread(func, *args, **kwargs)
 
 
+async def _within_upstox_budget(awaitable: Awaitable[_T]) -> _T:
+    """Bound the whole Upstox attempt so the fallback fits the tool timeout.
+
+    A hung Upstox call surfaces as ``UpstoxError`` after the configured primary
+    budget, so callers' existing fallback (yfinance) still has time to run.
+    """
+    try:
+        return await asyncio.wait_for(
+            awaitable, timeout=float(settings.UPSTOX_PRIMARY_BUDGET_SECONDS)
+        )
+    except TimeoutError as exc:
+        raise UpstoxError("Upstox primary budget exceeded") from exc
+
+
 class FinancialToolRunner:
     """Execute the finite set of tools supported by the current runtime."""
 
@@ -316,6 +346,12 @@ class FinancialToolRunner:
             lambda _key: FUNDAMENTALS_CACHE_TTL_SECONDS
         )
         self._technical_engine = TechnicalEngine()
+        # Tickers whose fundamentals fetch is running now (news waits briefly
+        # for the company name instead of searching by bare ticker).
+        self._fundamentals_inflight: dict[str, int] = {}
+        # Set when the last in-flight fundamentals call for a ticker finishes
+        # (success or failure); news awaits it instead of polling.
+        self._fundamentals_done: dict[str, asyncio.Event] = {}
         self.turn_evidence_tools = 0
         self.turn_facts: dict[str, EvidenceFact] = {}
         # Read-only presentation handle: the latest deterministic snapshot.
@@ -364,7 +400,28 @@ class FinancialToolRunner:
         self.turn_facts = {}
 
     async def execute(self, name: str, arguments: dict[str, Any]) -> Any:
-        result = await self._execute(name, arguments)
+        inflight_key = (
+            str(arguments.get("ticker", "")).strip()
+            if name in {"data:fetch_fundamentals", "analysis:run_fundamental_scan"}
+            else None
+        )
+        if inflight_key:
+            self._fundamentals_inflight[inflight_key] = (
+                self._fundamentals_inflight.get(inflight_key, 0) + 1
+            )
+            self._fundamentals_done.setdefault(inflight_key, asyncio.Event())
+        try:
+            result = await self._execute(name, arguments)
+        finally:
+            if inflight_key:
+                remaining = self._fundamentals_inflight.get(inflight_key, 1) - 1
+                if remaining > 0:
+                    self._fundamentals_inflight[inflight_key] = remaining
+                else:
+                    self._fundamentals_inflight.pop(inflight_key, None)
+                    done = self._fundamentals_done.pop(inflight_key, None)
+                    if done is not None:
+                        done.set()
         if name in _EVIDENCE_TOOL_NAMES:
             self.turn_evidence_tools += 1
             if isinstance(result, dict) and result.get("success", True) is not False:
@@ -409,11 +466,13 @@ class FinancialToolRunner:
             rows = value["data"]
             period = str(value.get("period", "1d"))
             interval = str(value.get("interval", "1d"))
-            self._ohlcv_by_request[(ticker, period, interval)] = rows
+            self._ohlcv_by_request[_ohlcv_key(ticker, period, interval)] = rows
             provenance = dict(
                 value.get("provenance") or evidence.get("provenance") or {}
             )
-            self._ohlcv_provenance_by_request[(ticker, period, interval)] = provenance
+            self._ohlcv_provenance_by_request[_ohlcv_key(ticker, period, interval)] = (
+                provenance
+            )
             result = {
                 "ticker": ticker,
                 "period": period,
@@ -495,26 +554,19 @@ class FinancialToolRunner:
             data = self._fundamentals_by_ticker.get(ticker)
             provenance = dict(self._fundamental_provenance_by_ticker.get(ticker) or {})
             if data is None:
-                fetched_fundamentals = await _blocking(
-                    self.resources.yf_fetcher.fetch_company_fundamentals, ticker
-                )
+                fetched_fundamentals: Any = None
                 if self.resources.upstox_fetcher is not None:
                     try:
-                        matches = await _blocking(
-                            self.resources.upstox_fetcher.resolve_instrument, ticker
+                        fetched_fundamentals = await _within_upstox_budget(
+                            self._upstox_scan_fundamentals(ticker)
                         )
-                        isin = next(
-                            (item.get("isin") for item in matches if item.get("isin")),
-                            None,
-                        )
-                        if isin:
-                            fetched_fundamentals = await _blocking(
-                                self.resources.upstox_fetcher.fetch_fundamentals,
-                                str(isin),
-                            )
-                            fetched_fundamentals["ticker"] = ticker
                     except UpstoxError:
-                        pass
+                        fetched_fundamentals = None
+                if fetched_fundamentals is None:
+                    # Upstox absent, unmatched or failed: yfinance is the fallback.
+                    fetched_fundamentals = await _blocking(
+                        self.resources.yf_fetcher.fetch_company_fundamentals, ticker
+                    )
                 if (
                     isinstance(fetched_fundamentals, dict)
                     and "error" not in fetched_fundamentals
@@ -569,7 +621,7 @@ class FinancialToolRunner:
                 str(arguments.get("period", "1y")),
                 str(arguments.get("interval", "1d")),
             )
-            key = (ticker, period, interval)
+            key = _ohlcv_key(ticker, period, interval)
             rows = self._ohlcv_by_request.get(key)
             provenance = dict(self._ohlcv_provenance_by_request.get(key) or {})
             if rows is None:
@@ -651,7 +703,7 @@ class FinancialToolRunner:
                 str(arguments.get("period", "1y")),
                 str(arguments.get("interval", "1d")),
             )
-            key = (ticker, period, interval)
+            key = _ohlcv_key(ticker, period, interval)
             rows = self._ohlcv_by_request.get(key)
             if rows is None:
                 fetched = await _blocking(
@@ -743,9 +795,11 @@ class FinancialToolRunner:
                 str(value.get("period", arguments.get("period", "1y"))),
                 str(value.get("interval", arguments.get("interval", "1d"))),
             )
-            self._ohlcv_by_request[(ticker, period, interval)] = rows
+            self._ohlcv_by_request[_ohlcv_key(ticker, period, interval)] = rows
             provenance = dict(value.get("provenance") or raw_provenance)
-            self._ohlcv_provenance_by_request[(ticker, period, interval)] = provenance
+            self._ohlcv_provenance_by_request[_ohlcv_key(ticker, period, interval)] = (
+                provenance
+            )
             result = {
                 "ticker": ticker,
                 "period": period,
@@ -765,33 +819,9 @@ class FinancialToolRunner:
             source = "yfinance"
             if self.resources.upstox_fetcher is not None:
                 try:
-                    matches = await _blocking(
-                        self.resources.upstox_fetcher.resolve_instrument, ticker
+                    value = await _within_upstox_budget(
+                        self._upstox_fundamentals(ticker)
                     )
-                    isin = next(
-                        (item.get("isin") for item in matches if item.get("isin")),
-                        None,
-                    )
-                    if not isin:
-                        raise UpstoxError("No Upstox ISIN matched the ticker")
-                    value = await _blocking(
-                        self.resources.upstox_fetcher.fetch_fundamentals, str(isin)
-                    )
-                    if not isinstance(value, dict) or not any(
-                        value.get(key) is not None
-                        for key in (
-                            "peRatio",
-                            "priceToBook",
-                            "returnOnEquity",
-                            "returnOnAssets",
-                            "returnOnCapitalEmployed",
-                            "evToEbitda",
-                        )
-                    ):
-                        raise UpstoxError(
-                            "Upstox returned no usable fundamental metrics"
-                        )
-                    value["ticker"] = ticker
                     source = "upstox"
                 except UpstoxError:
                     value = await _blocking(
@@ -806,6 +836,19 @@ class FinancialToolRunner:
         elif name == "news:fetch_news":
             ticker = str(arguments.get("ticker", "")).strip()
             limit = int(arguments.get("limit", 10))
+            # News runs concurrently with fundamentals; if that fetch is in
+            # flight, wait (bounded) for the company name it will cache.
+            fundamentals_done = self._fundamentals_done.get(ticker)
+            if (
+                self._fundamentals_by_ticker.get(ticker) is None
+                and self._fundamentals_inflight.get(ticker)
+                and fundamentals_done is not None
+            ):
+                with contextlib.suppress(TimeoutError):
+                    await asyncio.wait_for(
+                        fundamentals_done.wait(),
+                        timeout=float(settings.NEWS_COMPANY_NAME_WAIT_SECONDS),
+                    )
             fundamentals = self._fundamentals_by_ticker.get(ticker) or {}
             company_name = str(fundamentals.get("name") or ticker).strip()
             if company_name == ticker and self.resources.upstox_fetcher is not None:
@@ -970,13 +1013,59 @@ class FinancialToolRunner:
             )
         return result
 
+    async def _upstox_fundamentals(self, ticker: str) -> dict[str, Any]:
+        """Upstox fundamentals bundle; raises UpstoxError when unusable."""
+        fetcher = self.resources.upstox_fetcher
+        if fetcher is None:
+            raise UpstoxError("Upstox is not configured")
+        matches = await _blocking(fetcher.resolve_instrument, ticker)
+        isin = next(
+            (item.get("isin") for item in matches if item.get("isin")),
+            None,
+        )
+        if not isin:
+            raise UpstoxError("No Upstox ISIN matched the ticker")
+        value = await _blocking(fetcher.fetch_fundamentals, str(isin))
+        if not isinstance(value, dict) or not any(
+            value.get(key) is not None
+            for key in (
+                "peRatio",
+                "priceToBook",
+                "returnOnEquity",
+                "returnOnAssets",
+                "returnOnCapitalEmployed",
+                "evToEbitda",
+            )
+        ):
+            raise UpstoxError("Upstox returned no usable fundamental metrics")
+        value["ticker"] = ticker
+        return value
+
+    async def _upstox_scan_fundamentals(self, ticker: str) -> dict[str, Any] | None:
+        """Upstox bundle for the scan fallback; None when no ISIN matches."""
+        fetcher = self.resources.upstox_fetcher
+        if fetcher is None:
+            return None
+        matches = await _blocking(fetcher.resolve_instrument, ticker)
+        isin = next(
+            (item.get("isin") for item in matches if item.get("isin")),
+            None,
+        )
+        if not isin:
+            return None
+        bundle = await _blocking(fetcher.fetch_fundamentals, str(isin))
+        bundle["ticker"] = ticker
+        return bundle
+
     async def _fetch_ohlcv(
         self, ticker: str, period: str, interval: str
     ) -> dict[str, Any]:
         """Fetch OHLCV honouring ``period``; Upstox first for daily bars."""
         if self.resources.upstox_fetcher is not None and interval == "1d":
             try:
-                return await self._fetch_upstox_ohlcv(ticker, period)
+                return await _within_upstox_budget(
+                    self._fetch_upstox_ohlcv(ticker, period)
+                )
             except UpstoxError:
                 pass
         return cast(

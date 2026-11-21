@@ -76,10 +76,24 @@ class ModelStreaming:
             in {"publication.report_repair", "publication.lookup_repair"}
             for message in messages
         )
+        tools = self._tool_definitions()
+        has_tool_results = any(message.role == "tool" for message in messages)
+        # tool_selection = a report/lookup run where the model is choosing tools
+        # before any evidence is in the history (freeform answers may be
+        # answered directly in this round, so they stay synthesis); once tool results exist the call is the answer
+        # (synthesis), even when it may still ask for another tool.
+        purpose = (
+            "repair"
+            if is_repair
+            else "tool_selection"
+            if tools and not has_tool_results and self._structured_output
+            else "synthesis"
+        )
         source = self._client.generate_stream(
             messages,
             self._model,
-            tools=self._tool_definitions(),
+            tools=tools,
+            purpose=purpose,
             max_tokens=(
                 self._report_repair_max_tokens
                 if is_repair

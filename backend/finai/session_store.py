@@ -16,6 +16,9 @@ from app.observability.feedback import summarize_run
 
 logger = logging.getLogger(__name__)
 
+# fsync only at run boundaries; other events are flushed to the OS immediately.
+_RUN_BOUNDARY_EVENTS = frozenset({"run.completed", "run.failed", "run.cancelled"})
+
 
 class SessionStore:
     def __init__(self, root: Path, session_id: str) -> None:
@@ -64,7 +67,7 @@ class SessionStore:
 
     def append_trace_event(self, event: Any) -> dict[str, Any]:
         """Append one typed execution event before the next operation starts."""
-        record = self.trace.append(event, durable=event.type != "response.delta")
+        record = self.trace.append(event, durable=event.type in _RUN_BOUNDARY_EVENTS)
         logger.debug(
             "trace persisted event_type=%s sequence=%s run_id=%s",
             record["event_type"],

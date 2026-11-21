@@ -6,6 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 import httpx
+from app.config import settings
 from app.core.logging import get_logger
 from app.core.model_call_trace import ModelCallTrace, safe_endpoint
 from app.core.prompts import PromptRegistry
@@ -102,8 +103,32 @@ class JevService:
         self.model = model
         self.timeout_seconds = timeout_seconds
         self.max_retries = max_retries
-        self._client = client or httpx.AsyncClient()
+        self._client = client or httpx.AsyncClient(
+            timeout=httpx.Timeout(
+                connect=settings.OPENROUTER_CONNECT_TIMEOUT,
+                pool=settings.OPENROUTER_POOL_TIMEOUT,
+                write=settings.OPENROUTER_WRITE_TIMEOUT,
+                read=timeout_seconds,
+            ),
+            limits=httpx.Limits(
+                max_connections=settings.HTTP_POOL_MAX_CONNECTIONS,
+                max_keepalive_connections=settings.HTTP_POOL_MAX_KEEPALIVE_CONNECTIONS,
+                keepalive_expiry=settings.HTTP_KEEPALIVE_EXPIRY_SECONDS,
+            ),
+        )
         self.prompts = prompts or PromptRegistry.bundled()
+
+    def _request_timeout(self) -> httpx.Timeout:
+        return httpx.Timeout(
+            self.timeout_seconds,
+            connect=min(settings.OPENROUTER_CONNECT_TIMEOUT, self.timeout_seconds),
+        )
+
+    async def prewarm(self, timeout_seconds: float = 3.0) -> bool:
+        """Best-effort free connection warm-up; never raises."""
+        from app.services.openrouter_service import prewarm_client
+
+        return await prewarm_client(self._client, self.base_url, timeout_seconds)
 
     async def decide(self, context: dict[str, Any]) -> RoutePlan:
         if not self.api_key:
@@ -163,7 +188,7 @@ class JevService:
                         "Content-Type": "application/json",
                     },
                     json=payload,
-                    timeout=self.timeout_seconds,
+                    timeout=self._request_timeout(),
                 )
                 if response.status_code in {429, 529} and attempt < self.max_retries:
                     if trace is not None:
@@ -336,7 +361,7 @@ class JevService:
                     "Content-Type": "application/json",
                 },
                 json=payload,
-                timeout=self.timeout_seconds,
+                timeout=self._request_timeout(),
             )
             response.raise_for_status()
             response_payload = response.json()

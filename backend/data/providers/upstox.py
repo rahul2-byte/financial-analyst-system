@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import threading
+from concurrent.futures import Future, ThreadPoolExecutor
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -45,8 +47,18 @@ class UpstoxFetcher:
             per_30_minutes=settings.UPSTOX_REQUESTS_PER_30_MINUTES,
         )
         self._instrument_cache: dict[str, list[dict[str, Any]]] = {}
+        # One search per symbol even when parallel lanes ask at once: the first
+        # caller runs it, the rest wait on the same future (and share a failure).
+        self._instrument_lock = threading.Lock()
+        self._instrument_inflight: dict[str, Future[list[dict[str, Any]]]] = {}
 
-    def _get(self, path: str, params: dict[str, Any] | None = None) -> dict[str, Any]:
+    def _get(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        *,
+        client: httpx.Client | None = None,
+    ) -> dict[str, Any]:
         if not self.access_token:
             raise UpstoxError("UPSTOX_ACCESS_TOKEN is not configured")
         headers = {
@@ -57,7 +69,8 @@ class UpstoxFetcher:
         def request() -> Any:
             # Each attempt consumes local quota; QuotaExceeded is not retried.
             self.quota.reserve("upstox")
-            response = httpx.get(
+            send = client.get if client is not None else httpx.get
+            response = send(
                 f"{self.base_url}{path}",
                 headers=headers,
                 params=params,
@@ -94,8 +107,30 @@ class UpstoxFetcher:
 
     def resolve_instrument(self, query: str) -> list[dict[str, Any]]:
         symbol = query.split(".", 1)[0].upper()
-        if symbol in self._instrument_cache:
-            return list(self._instrument_cache[symbol])
+        with self._instrument_lock:
+            if symbol in self._instrument_cache:
+                return list(self._instrument_cache[symbol])
+            pending = self._instrument_inflight.get(symbol)
+            owner = pending is None
+            if pending is None:
+                pending = Future()
+                self._instrument_inflight[symbol] = pending
+        if not owner:
+            return list(pending.result())
+        try:
+            resolved = self._search_instrument(symbol)
+        except BaseException as exc:
+            with self._instrument_lock:
+                self._instrument_inflight.pop(symbol, None)
+            pending.set_exception(exc)
+            raise
+        with self._instrument_lock:
+            self._instrument_cache[symbol] = resolved
+            self._instrument_inflight.pop(symbol, None)
+        pending.set_result(resolved)
+        return list(resolved)
+
+    def _search_instrument(self, symbol: str) -> list[dict[str, Any]]:
         payload = self._get(
             "/v2/instruments/search",
             {
@@ -108,15 +143,13 @@ class UpstoxFetcher:
         )
         data = payload.get("data", [])
         candidates = [item for item in data if isinstance(item, dict)]
-        resolved = sorted(
+        return sorted(
             candidates,
             key=lambda item: (
                 item.get("trading_symbol", "").upper() != symbol,
                 item.get("segment") != "NSE_EQ",
             ),
         )
-        self._instrument_cache[symbol] = resolved
-        return list(resolved)
 
     def fetch_candles(
         self,
@@ -164,13 +197,28 @@ class UpstoxFetcher:
             "competitors": "competitors",
         }
         result: dict[str, Any] = {"isin": isin, "source": "upstox"}
-        for name, suffix in endpoints.items():
-            try:
-                result[name] = self._get(f"/v2/fundamentals/{isin}/{suffix}").get(
-                    "data"
-                )
-            except UpstoxError as exc:
-                result.setdefault("warnings", []).append(f"{name}: {exc}")
+        with httpx.Client(timeout=self.timeout) as client:
+
+            def fetch(suffix: str) -> tuple[Any, UpstoxError | None]:
+                try:
+                    payload = self._get(
+                        f"/v2/fundamentals/{isin}/{suffix}", client=client
+                    )
+                    return payload.get("data"), None
+                except UpstoxError as exc:
+                    return None, exc
+
+            # Endpoints are independent; pool.map preserves endpoint order so the
+            # merged dict and warnings list match the sequential result.
+            with ThreadPoolExecutor(
+                max_workers=len(endpoints), thread_name_prefix="upstox-fundamentals"
+            ) as pool:
+                outcomes = list(pool.map(fetch, endpoints.values()))
+        for name, (value, error) in zip(endpoints, outcomes, strict=True):
+            if error is None:
+                result[name] = value
+            else:
+                result.setdefault("warnings", []).append(f"{name}: {error}")
         profile = result.get("profile")
         if isinstance(profile, dict):
             result["sector"] = profile.get("sector")

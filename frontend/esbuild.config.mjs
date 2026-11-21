@@ -26,6 +26,10 @@ await build({
     // that is a dynamic require, so provide a real one via createRequire.
     js: [
       '#!/usr/bin/env node',
+      // Node >=22.1 only; older Node has no such function. Placed first so it runs before
+      // any other module code.
+      "import module from 'node:module';",
+      'module.enableCompileCache?.();',
       "import { createRequire } from 'node:module';",
       'const require = createRequire(import.meta.url);',
     ].join('\n'),
@@ -35,7 +39,7 @@ await build({
   // ~5x the CPU while streaming (P7 §11 measurement).
   define: { 'process.env.NODE_ENV': '"production"' },
   sourcemap: false,
-  minify: false,
+  minify: true,
   legalComments: 'none',
   logLevel: 'info',
 });

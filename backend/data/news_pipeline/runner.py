@@ -138,7 +138,8 @@ class NewsPipelineRunner:
                 ):
                     raise item
 
-        semaphore = asyncio.Semaphore(5)
+        # Bounded concurrent extraction; results keep raw_results order.
+        semaphore = asyncio.Semaphore(max(1, int(settings.NEWS_EXTRACTION_CONCURRENCY)))
         extraction_started = 0
         drop_reasons: dict[str, int] = {}
 

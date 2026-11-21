@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # Defaults; override with OPENROUTER_MODEL / OPENROUTER_FALLBACK_MODELS.
@@ -31,7 +32,19 @@ class EnvSettings(BaseSettings):
     # Comma-separated; sent via OpenRouter's native ``models`` failover array.
     OPENROUTER_FALLBACK_MODELS: str = DEFAULT_OPENROUTER_FALLBACK_MODELS
     OPENROUTER_TIMEOUT: float = 600.0
-    OPENROUTER_CONNECT_TIMEOUT: float = 5.0
+    OPENROUTER_CONNECT_TIMEOUT: float = 3.0
+    # Idle keep-alive so the TLS connection survives gaps between model calls.
+    HTTP_KEEPALIVE_EXPIRY_SECONDS: float = 60.0
+    # Best-effort connection pre-warm at run start (never a model call).
+    FINAI_HTTP_PREWARM: bool = True
+    # Per-purpose reasoning control. Values: unset (send nothing), off, minimal,
+    # low, medium, high, or tokens:N. Synthesis is unset to keep today's payload.
+    FINAI_REASONING_TOOL_ROUNDS: str = "off"
+    FINAI_REASONING_REPAIR: str = "low"
+    FINAI_REASONING_SYNTHESIS: str = "unset"
+    # Per-call latency/token records (no prompt or response text).
+    FINAI_CALL_METRICS: bool = True
+    FINAI_CALL_METRICS_DIR: str = ".finai/perf"
     OPENROUTER_POOL_TIMEOUT: float = 2.0
     OPENROUTER_WRITE_TIMEOUT: float = 10.0
     OPENROUTER_READ_TIMEOUT: float = 60.0
@@ -49,6 +62,16 @@ class EnvSettings(BaseSettings):
     FINAI_AGENT_EMERGENCY_MAX_TOOL_CALLS: int = 128
     FINAI_AGENT_MAX_INPUT_TOKENS: int = 32_000
     FINAI_AGENT_DUPLICATE_REUSE_LIMIT: int = 1
+    # Run independent tool calls from one assistant turn concurrently.
+    FINAI_AGENT_CONCURRENT_TOOLS: bool = True
+    # Report fast path: with a resolved ticker, skip the tool-selection model
+    # round and prefetch the standard evidence set concurrently; also skips the
+    # router LLM call when the report route is already deterministic.
+    FINAI_REPORT_FAST_PATH: bool = True
+    # Every report fetches and analyses news. On the fast path news is its own
+    # concurrent lane; otherwise it is added to the first tool turn if the model
+    # did not ask for it. Disable only for offline/diagnostic runs.
+    FINAI_REPORT_PREFETCH_NEWS: bool = True
     FINAI_CONTEXT_MAX_TOKENS: int = 250_000
     FINAI_CONTEXT_COMPACTION_RATIO: float = 0.9
     MIN_QUALITY_SCORE: float = 40.0
@@ -73,11 +96,22 @@ class EnvSettings(BaseSettings):
     NEWS_PIPELINE_TOTAL_TIMEOUT: float = 60.0
     NEWS_EXTRACTION_TIMEOUT: float = 8.0
     NEWS_MAX_EXTRACTIONS: int = 12
+    # Concurrent article extractions (bounded; <= NEWS_MAX_EXTRACTIONS is useful).
+    NEWS_EXTRACTION_CONCURRENCY: int = 8
+    # Slack the news tool gets beyond the pipeline deadline before the tool layer
+    # gives up; also the longest news waits for an in-flight fundamentals fetch
+    # to learn the company name.
+    NEWS_TOOL_GRACE_SECONDS: float = 10.0
+    NEWS_COMPANY_NAME_WAIT_SECONDS: float = 5.0
     HTTP_POOL_MAX_CONNECTIONS: int = 10
     HTTP_POOL_MAX_KEEPALIVE_CONNECTIONS: int = 10
     UPSTOX_ACCESS_TOKEN: str | None = None
     UPSTOX_BASE_URL: str = "https://api.upstox.com"
-    UPSTOX_TIMEOUT: float = 20.0
+    # Per-request read timeout; the whole Upstox attempt is bounded by
+    # UPSTOX_PRIMARY_BUDGET_SECONDS so Upstox + the yfinance fallback
+    # (YFINANCE_INFO_TIMEOUT_SECONDS) fit inside the 30 s tool timeout.
+    UPSTOX_TIMEOUT: float = 8.0
+    UPSTOX_PRIMARY_BUDGET_SECONDS: float = 10.0
     UPSTOX_REQUESTS_PER_SECOND: int = 50
     UPSTOX_REQUESTS_PER_MINUTE: int = 500
     UPSTOX_REQUESTS_PER_30_MINUTES: int = 2000
@@ -98,6 +132,18 @@ class EnvSettings(BaseSettings):
         case_sensitive=True,
         extra="ignore",
     )
+
+    @field_validator(
+        "FINAI_REASONING_TOOL_ROUNDS",
+        "FINAI_REASONING_REPAIR",
+        "FINAI_REASONING_SYNTHESIS",
+    )
+    @classmethod
+    def _validate_reasoning(cls, value: str) -> str:
+        from app.config.reasoning import parse_reasoning
+
+        parse_reasoning(value)  # raises ValueError on a typo
+        return value.strip().casefold()
 
     @property
     def openrouter_fallback_models(self) -> list[str]:

@@ -180,7 +180,9 @@ async def test_run_deadline_stops_tools_and_answers_from_evidence() -> None:
     loop = AgentLoop(
         model,
         tools,
-        config=AgentLoopConfig(max_run_seconds=0.2, answer_contract="freeform"),
+        config=AgentLoopConfig(
+            max_run_seconds=0.2, answer_contract="freeform", concurrent_tools=False
+        ),
     )
     events = [
         e

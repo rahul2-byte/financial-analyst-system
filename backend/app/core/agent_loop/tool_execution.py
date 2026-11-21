@@ -20,9 +20,17 @@ logger = logging.getLogger(__name__)
 DEFAULT_TOOL_TIMEOUT_SECONDS = 30.0
 # Tools with their own longer internal budgets, or that wait on a human.
 _TOOL_TIMEOUT_OVERRIDES: dict[str, float | None] = {
-    "news:fetch_news": 120.0,
     "interaction:ask_user": None,
 }
+
+
+def news_tool_timeout() -> float:
+    """News budget: the pipeline deadline plus a small grace, never more."""
+    from app.config import settings
+
+    return float(settings.NEWS_PIPELINE_TOTAL_TIMEOUT) + float(
+        settings.NEWS_TOOL_GRACE_SECONDS
+    )
 
 
 def default_tool_timeout() -> float:
@@ -53,6 +61,8 @@ class ToolExecutor:
         self._timeout_seconds = timeout_seconds
 
     def _timeout_for(self, name: str) -> float | None:
+        if name == "news:fetch_news" and self._timeout_seconds is None:
+            return news_tool_timeout()
         if name in _TOOL_TIMEOUT_OVERRIDES and self._timeout_seconds is None:
             return _TOOL_TIMEOUT_OVERRIDES[name]
         if self._timeout_seconds is not None:

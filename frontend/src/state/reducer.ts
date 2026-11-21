@@ -70,11 +70,14 @@ export function reduceEvent(
 ): PresentationState {
   const sequence = event.meta.sequence;
   if (state.seenSequences.has(sequence)) return state;
+  // The set is shared by every state of one run and grown in place: copying it per event
+  // made a run of n events cost O(n^2). A state returned earlier therefore also reports
+  // sequences applied after it, which is fine because states only ever move forward.
+  (state.seenSequences as Set<number>).add(sequence);
   const next: PresentationState = {
     ...state,
     latestSequence: Math.max(sequence, state.latestSequence),
     lastEventType: event.type,
-    seenSequences: new Set([...state.seenSequences, sequence]),
   };
   return apply(next, event, display);
 }

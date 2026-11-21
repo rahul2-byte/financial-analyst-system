@@ -96,7 +96,7 @@ async function main(): Promise<void> {
   };
 
   let signalCode = 0;
-  const instance = render(<App launch={launch} />, { exitOnCtrlC: false });
+  const instance = render(<App launch={launch} />, { exitOnCtrlC: false, incrementalRendering: true });
   const onSignal = (code: number) => {
     signalCode = code;
     instance.unmount();

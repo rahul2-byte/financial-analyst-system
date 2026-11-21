@@ -20,7 +20,6 @@ from finai.bridge import protocol as p
 from finai.bridge.framing import NdjsonReader, NdjsonWriter
 from finai.context_budget import ContextBudget
 from finai.display import build_display, friendly_error
-from finai.report_view import build_report_view, evidence_availability
 from finai.state import PresentationState, reduce_event
 from pydantic import ValidationError
 
@@ -325,6 +324,8 @@ class BridgeServer:
             outcome = "error"
             message = friendly_error(str(exc))
         finally:
+            from finai.report_view import evidence_availability
+
             report = self._report_for(repl) if outcome == "completed" else None
             finished = p.RunFinishedParams(
                 client_run_id=client_run_id,
@@ -346,6 +347,8 @@ class BridgeServer:
         except Exception:  # noqa: BLE001 - presentation must never break a run
             logger.exception("report material unavailable")
             return None
+        from finai.report_view import build_report_view
+
         return build_report_view(material)
 
     async def _run_cancel(self, params: dict[str, Any]) -> dict[str, Any]:

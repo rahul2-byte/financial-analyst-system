@@ -3,9 +3,11 @@ from __future__ import annotations
 import re
 from typing import Any, Protocol
 
+from app.config import settings
 from app.core.guardrails import assess_input_safety
 from app.core.logging import get_logger
 from app.models.routing import ExecutionMode, ModelTier, NextAction, RoutePlan
+from app.services.report_intent import is_comparison, wants_report
 
 logger = get_logger(__name__)
 
@@ -37,16 +39,27 @@ _MARKET_STATUS_LOOKUP = re.compile(
     re.IGNORECASE,
 )
 _MARKET_HOLIDAY_DATE = re.compile(r"\b\d{4}-\d{2}-\d{2}\b")
+# Evidence a deterministic report route needs the runtime to be able to fetch.
+_REPORT_ROUTE_TOOLS = {"data:fetch_stock_data", "data:fetch_fundamentals"}
 
 
 class RoutingPolicy:
     """Deterministic preflight with an optional typed Jev decision provider."""
 
     def __init__(
-        self, jev: DecisionProvider | None, min_confidence: float = 0.60
+        self,
+        jev: DecisionProvider | None,
+        min_confidence: float = 0.60,
+        *,
+        deterministic_report_route: bool | None = None,
     ) -> None:
         self._jev = jev
         self._min_confidence = min_confidence
+        self._deterministic_report_route = (
+            settings.FINAI_REPORT_FAST_PATH
+            if deterministic_report_route is None
+            else deterministic_report_route
+        )
 
     async def decide(
         self,
@@ -80,6 +93,34 @@ class RoutingPolicy:
         )
         if deterministic is not None:
             return deterministic
+        if (
+            self._deterministic_report_route
+            and not safety.flags
+            and available_tools >= _REPORT_ROUTE_TOOLS
+            and conversation_context
+            and conversation_context.get("resolved_ticker")
+            and conversation_context.get("instrument_resolution_status") == "resolved"
+            and not conversation_context.get("comparison_intent")
+            and wants_report(normalized)
+            and not is_comparison(normalized)
+        ):
+            # Same route the Jev call would resolve to for a resolved-instrument
+            # report request (see the clarification override below); skipping the
+            # network round trip saves latency without changing the outcome.
+            return RoutePlan(
+                intent="research_report",
+                execution_mode=ExecutionMode.REPORT_SYNTHESIS,
+                allowed_tools=available_tools,
+                allowed_skills=available_skills,
+                model_tier=ModelTier.MAIN,
+                reason="Resolved single-instrument report request.",
+                reason_codes=["deterministic_report_route"],
+                confidence=1.0,
+                requires_main_model=True,
+                next_action=NextAction.GENERATE_TEXT,
+                prompt_injection_risk=safety.risk,
+                risk_flags=safety.flags,
+            )
         if self._jev is None:
             return self._baseline_route(
                 normalized, available_tools, available_skills, "router_unavailable"
